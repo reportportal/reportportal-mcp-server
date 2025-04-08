@@ -1,0 +1,13 @@
+version: '3'
+
+vars:
+  GOLANGCI_LINT_VERSION: 'v2.0.2'
+  GOLANG_CI: "docker run --rm -v $(pwd):/app -w /app golangci/golangci-lint:{{.GOLANGCI_LINT_VERSION}} golangci-lint"
+
+tasks:
+  fmt:
+    desc: "Runs formatter"
+    cmd: "{{.GOLANG_CI}} fmt ./..."
+  lint:
+    desc: "Runs GolangCI linter"
+    cmd: "{{.GOLANG_CI}} run ./..."

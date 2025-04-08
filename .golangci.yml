@@ -1,0 +1,27 @@
+version: "2"
+linters:
+  # Default set of linters.
+  # The value can be: `standard`, `all`, `none`, or `fast`.
+  # Default: standard
+  default: fast
+  disable:
+    - depguard
+
+formatters:
+  # Enable specific formatter.
+  # Default: [] (uses standard Go formatting)
+  enable:
+    - gci
+    - gofmt
+    - gofumpt
+    - goimports
+    - golines
+  settings:
+    gci:
+      sections:
+        - standard # Standard section: captures all standard packages.
+        - default # Default section: contains all imports that could not be matched to another section type.
+        - prefix(github.com/reportportal/reportportal-mcp-server)
+    goimports:
+      local-prefixes:
+        - github.com/reportportal/reportportal-mcp-server
