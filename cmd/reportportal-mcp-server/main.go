@@ -49,6 +49,7 @@ func main() {
 							),
 						),
 					)
+
 					return ctx, nil
 				},
 				Flags: []cli.Flag{
@@ -79,7 +80,7 @@ func main() {
 	}
 }
 
-// runStdioServer starts the ReportPortal MCP server in stdio mode
+// runStdioServer starts the ReportPortal MCP server in stdio mode.
 func runStdioServer(ctx context.Context, cmd *cli.Command) error {
 	// Retrieve required parameters from the command flags
 	token := cmd.String("token")     // API token
