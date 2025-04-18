@@ -2,24 +2,28 @@ package mcpreportportal
 
 import (
 	"fmt"
+	"net/url"
 
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/reportportal/goRP/v5/pkg/gorp"
 )
 
-func NewServer(client *gorp.Client, project string) *server.MCPServer {
+func NewServer(version string, hostUrl *url.URL, token, project string) *server.MCPServer {
+	// Create a new ReportPortal client
+	rpClient := gorp.NewClient(hostUrl, token)
+
 	s := server.NewMCPServer(
 		"reportportal-mcp-server",
-		"0.0.1",
+		version,
 		server.WithResourceCapabilities(true, true),
 		server.WithLogging())
-	launches := &LaunchResources{client: client, project: project}
+	launches := &LaunchResources{client: rpClient, project: project}
 	s.AddTool(launches.toolListLaunches())
 	s.AddTool(launches.toolGetLastLaunchByName())
 	s.AddPrompt(launches.promptAnalyzeLaunch())
 	s.AddResourceTemplate(launches.resourceReportPortalLaunches())
 
-	testItems := &TestItemResources{client: client, project: project}
+	testItems := &TestItemResources{client: rpClient, project: project}
 	s.AddTool(testItems.toolGetTestItemById())
 	s.AddTool(testItems.toolListLaunchTestItems())
 	return s

@@ -12,7 +12,6 @@ import (
 	"syscall"
 
 	"github.com/mark3labs/mcp-go/server"
-	"github.com/reportportal/goRP/v5/pkg/gorp"
 	"github.com/urfave/cli/v3"
 
 	mcpreportportal "github.com/reportportal/reportportal-mcp-server/pkg/reportportal"
@@ -93,11 +92,8 @@ func runStdioServer(ctx context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("invalid host URL: %w", err)
 	}
 
-	// Create a new ReportPortal client
-	rpClient := gorp.NewClient(hostUrl, token)
-
 	// Create a new stdio server using the ReportPortal client
-	stdioServer := server.NewStdioServer(mcpreportportal.NewServer(rpClient, project))
+	stdioServer := server.NewStdioServer(mcpreportportal.NewServer(version, hostUrl, token, project))
 
 	// Start listening for messages in a separate goroutine
 	errC := make(chan error, 1)
