@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"log/slog"
+	"net/url"
 	"os"
 	"os/signal"
 	"syscall"
@@ -87,11 +88,16 @@ func runStdioServer(ctx context.Context, cmd *cli.Command) error {
 	host := cmd.String("host")       // ReportPortal host URL
 	project := cmd.String("project") // ReportPortal project name
 
+	hostUrl, err := url.Parse(host)
+	if err != nil {
+		return fmt.Errorf("invalid host URL: %w", err)
+	}
+
 	// Create a new ReportPortal client
-	rpClient := gorp.NewClient(host, project, token)
+	rpClient := gorp.NewClient(hostUrl, token)
 
 	// Create a new stdio server using the ReportPortal client
-	stdioServer := server.NewStdioServer(mcpreportportal.NewServer(rpClient))
+	stdioServer := server.NewStdioServer(mcpreportportal.NewServer(rpClient, project))
 
 	// Start listening for messages in a separate goroutine
 	errC := make(chan error, 1)

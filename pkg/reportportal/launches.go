@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"text/template"
 
@@ -30,7 +31,8 @@ Focus on the following aspects:
 
 // LaunchResources is a struct that encapsulates the ReportPortal client.
 type LaunchResources struct {
-	client *gorp.Client // Client to interact with the ReportPortal API
+	client  *gorp.Client // Client to interact with the ReportPortal API
+	project string
 }
 
 // toolListLaunches creates a tool to retrieve a paginated list of launches from ReportPortal.
@@ -60,11 +62,11 @@ func (lr *LaunchResources) toolListLaunches() (tool mcp.Tool, handler server.Too
 			}
 
 			// Fetch the launches from ReportPortal using the provided page details
-			launches, err := lr.client.GetLaunchesPage(gorp.PageDetails{
-				PageNumber: int(page),
-				PageSize:   int(pageSize),
-				SortBy:     "startTime,number,DESC",
-			})
+			launches, _, err := lr.client.LaunchAPI.GetProjectLaunches(ctx, lr.project).
+				PagePage(int32(page)).
+				PageSize(int32(pageSize)).
+				PageSort("startTime,number,DESC").
+				Execute()
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
@@ -96,13 +98,12 @@ func (lr *LaunchResources) toolGetLastLaunchByName() (mcp.Tool, server.ToolHandl
 			}
 
 			// Fetch the launches matching the provided name
-			launches, err := lr.client.GetLaunchesByFilterPage(map[string]string{
-				"launch.name": launchName,
-			}, gorp.PageDetails{
-				PageNumber: 1,
-				PageSize:   1,
-				SortBy:     "startTime,number,DESC",
-			})
+			launches, _, err := lr.client.LaunchAPI.GetProjectLaunches(ctx, lr.project).
+				FilterEqName(launchName).
+				PagePage(1).
+				PageSize(1).
+				PageSort("startTime,number,DESC").
+				Execute()
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
@@ -163,20 +164,25 @@ func (lr *LaunchResources) resourceReportPortalLaunches() (mcp.ResourceTemplate,
 				return nil, fmt.Errorf("incorrect URI: %s", request.Params.URI)
 			}
 
-			launchId, found := paramValues["launchId"]
-			if !found || launchId.String() == "" {
+			launchIdStr, found := paramValues["launchId"]
+			if !found || launchIdStr.String() == "" {
 				return nil, fmt.Errorf("missing launchId in URI: %s", request.Params.URI)
 			}
 
-			launchPage, err := lr.client.GetLaunchesByFilter(map[string]string{
-				"filter.eq.id": launchId.String(),
-			})
+			launchId, err := strconv.Atoi(launchIdStr.String())
+			if err != nil {
+				return nil, fmt.Errorf("invalid launchId: %w", err)
+			}
+
+			launchPage, _, err := lr.client.LaunchAPI.GetProjectLaunches(ctx, lr.project).
+				FilterEqId(int32(launchId)).
+				Execute()
 			if err != nil {
 				return nil, fmt.Errorf("failed to get launch page: %w", err)
 			}
 
 			if len(launchPage.Content) < 1 {
-				return nil, fmt.Errorf("launch not found: %s", launchId.String())
+				return nil, fmt.Errorf("launch not found: %d", launchId)
 			}
 
 			launchPayload, err := json.Marshal(launchPage.Content[0])

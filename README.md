@@ -92,6 +92,22 @@ Parameters:
 - `mode` (optional): Filter by launch mode (DEFAULT or DEBUG)
 - `sort` (optional): Sort direction and field (default: "desc(startTime)")
 
+#### List Test Items by Launch
+
+Lists test items for a specific launch with pagination support.
+
+Parameters:
+- `launch-id`: ID of the launch to get test items for
+- `page` (optional): Page number (default: 1)
+- `page-size` (optional): Number of items per page (default: 20)
+
+#### Get Test Item by ID
+
+Retrieves details of a specific test item.
+
+Parameters:
+- `test_item_id`: ID of the test item to retrieve
+
 ## Development
 
 ### Running Tests
