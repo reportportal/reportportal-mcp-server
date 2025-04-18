@@ -7,7 +7,7 @@ import (
 	"github.com/reportportal/goRP/v5/pkg/gorp"
 )
 
-func NewServer(client *gorp.Client, project string) *server.MCPServer {
+func NewServer(client *gorp.Client, version, project string) *server.MCPServer {
 	s := server.NewMCPServer(
 		"reportportal-mcp-server",
 		"0.0.1",
