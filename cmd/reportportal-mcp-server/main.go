@@ -14,7 +14,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/urfave/cli/v3"
 
-	mcpreportportal "github.com/reportportal/reportportal-mcp-server/pkg/reportportal"
+	mcpreportportal "github.com/reportportal/reportportal-mcp-server/internal/reportportal"
 )
 
 var (
@@ -93,7 +93,9 @@ func runStdioServer(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	// Create a new stdio server using the ReportPortal client
-	stdioServer := server.NewStdioServer(mcpreportportal.NewServer(version, hostUrl, token, project))
+	stdioServer := server.NewStdioServer(
+		mcpreportportal.NewServer(version, hostUrl, token, project),
+	)
 
 	// Start listening for messages in a separate goroutine
 	errC := make(chan error, 1)
