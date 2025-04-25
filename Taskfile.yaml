@@ -1,8 +1,9 @@
 version: '3'
 
 vars:
-  GOLANGCI_LINT_VERSION: 'v2.1.2'
+  GOLANGCI_LINT_VERSION: 'v2.1.5'
   GOLANG_CI: "docker run --rm -v $(pwd):/app -w /app golangci/golangci-lint:{{.GOLANGCI_LINT_VERSION}} golangci-lint"
+  IMAGE_NAME: "reportportal-mcp-server"
 
 tasks:
   fmt:
@@ -14,4 +15,4 @@ tasks:
 
   docker:build:
     desc: "Builds docker image"
-    cmd: "docker build -t reportportal-mcp-server ."
+    cmd: "docker build -t {{.IMAGE_NAME}} ."
