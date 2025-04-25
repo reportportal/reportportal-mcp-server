@@ -1,8 +1,7 @@
 # ReportPortal MCP Server
 
-This repository contains a ReportPortal integration with GitHub Copilot chat through Microsoft
-Copilot for Pull Requests (MCP). It allows users to interact with ReportPortal directly from GitHub
-Copilot chat to query and analyze test execution results.
+This repository contains a ReportPortal MCP Server. 
+It allows users to interact with ReportPortal directly from GitHub Copilot / Claude / etc chat to query and analyze test execution results.
 
 ## Features
 
@@ -123,4 +122,4 @@ the `NewServer` function.
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE).
+This project is licensed under the [Apache 2.0 License](LICENSE).
