@@ -15,8 +15,9 @@ import (
 )
 
 const (
-	firstPage       = 1  // Default starting page for pagination
-	defaultPageSize = 20 // Default number of items per page
+	firstPage       = 1                       // Default starting page for pagination
+	defaultPageSize = 20                      // Default number of items per page
+	defaultSorting  = "startTime,number,DESC" // default sorting order for API requests
 )
 
 //nolint:lll
@@ -65,7 +66,7 @@ func (lr *LaunchResources) toolListLaunches() (tool mcp.Tool, handler server.Too
 			launches, _, err := lr.client.LaunchAPI.GetProjectLaunches(ctx, lr.project).
 				PagePage(int32(page)).
 				PageSize(int32(pageSize)).
-				PageSort("startTime,number,DESC").
+				PageSort(defaultSorting).
 				Execute()
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
@@ -102,7 +103,7 @@ func (lr *LaunchResources) toolGetLastLaunchByName() (mcp.Tool, server.ToolHandl
 				FilterEqName(launchName).
 				PagePage(1).
 				PageSize(1).
-				PageSort("startTime,number,DESC").
+				PageSort(defaultSorting).
 				Execute()
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil

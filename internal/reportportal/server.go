@@ -16,7 +16,8 @@ func NewServer(version string, hostUrl *url.URL, token, project string) *server.
 		"reportportal-mcp-server",
 		version,
 		server.WithResourceCapabilities(true, true),
-		server.WithLogging())
+		server.WithLogging(),
+	)
 	launches := &LaunchResources{client: rpClient, project: project}
 	s.AddTool(launches.toolListLaunches())
 	s.AddTool(launches.toolGetLastLaunchByName())
