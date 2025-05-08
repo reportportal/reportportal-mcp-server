@@ -9,15 +9,18 @@ import (
 )
 
 func NewServer(version string, hostUrl *url.URL, token, project string) *server.MCPServer {
-	// Create a new ReportPortal client
-	rpClient := gorp.NewClient(hostUrl, token)
-
 	s := server.NewMCPServer(
 		"reportportal-mcp-server",
 		version,
-		server.WithResourceCapabilities(true, true),
+		server.WithRecovery(),
 		server.WithLogging(),
+		server.WithResourceCapabilities(true, true),
+		server.WithToolCapabilities(true),
 	)
+
+	// Create a new ReportPortal client
+	rpClient := gorp.NewClient(hostUrl, token)
+
 	launches := &LaunchResources{client: rpClient, project: project}
 	s.AddTool(launches.toolListLaunches())
 	s.AddTool(launches.toolGetLastLaunchByName())

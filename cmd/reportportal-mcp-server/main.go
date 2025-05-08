@@ -34,6 +34,30 @@ func main() {
 		Name:           "server",                                         // Command name
 		Description:    `ReportPortal MCP Server`,                        // Command description
 		DefaultCommand: "stdio",                                          // Default subcommand
+		Flags: []cli.Flag{
+			// Define required flags for the subcommand
+			&cli.StringFlag{
+				Name:     "host",                 // ReportPortal host URL
+				Required: true,                   // Mark as required
+				Sources:  cli.EnvVars("RP_HOST"), // Allow setting via environment variable
+			},
+			&cli.StringFlag{
+				Name:     "token", // API token for authentication
+				Required: true,
+				Sources:  cli.EnvVars("RP_API_TOKEN"),
+			},
+			&cli.StringFlag{
+				Name:     "project", // ReportPortal project name
+				Required: true,
+				Sources:  cli.EnvVars("RP_PROJECT"),
+			},
+			&cli.StringFlag{
+				Name:     "log-level", // Logging level
+				Required: false,
+				Sources:  cli.EnvVars("LOG_LEVEL"),
+				Value:    slog.LevelInfo.String(),
+			},
+		},
 		Commands: []*cli.Command{
 			{
 				Name:        "stdio", // Subcommand to start the server in stdio mode
@@ -41,34 +65,20 @@ func main() {
 				Action:      runStdioServer, // Function to execute for this subcommand
 				Before: func(ctx context.Context, command *cli.Command) (context.Context, error) {
 					// Set up default logging configuration
+					var logLevel slog.Level
+					if err := logLevel.UnmarshalText([]byte(command.String("log-level"))); err != nil {
+						return nil, err
+					}
 					slog.SetDefault(
 						slog.New(
 							slog.NewTextHandler(
 								os.Stderr,
-								&slog.HandlerOptions{Level: slog.LevelInfo},
+								&slog.HandlerOptions{Level: logLevel},
 							),
 						),
 					)
 
 					return ctx, nil
-				},
-				Flags: []cli.Flag{
-					// Define required flags for the subcommand
-					&cli.StringFlag{
-						Name:     "host",                 // ReportPortal host URL
-						Required: true,                   // Mark as required
-						Sources:  cli.EnvVars("RP_HOST"), // Allow setting via environment variable
-					},
-					&cli.StringFlag{
-						Name:     "token", // API token for authentication
-						Required: true,
-						Sources:  cli.EnvVars("RP_API_TOKEN"),
-					},
-					&cli.StringFlag{
-						Name:     "project", // ReportPortal project name
-						Required: true,
-						Sources:  cli.EnvVars("RP_PROJECT"),
-					},
 				},
 			},
 		},
@@ -105,7 +115,7 @@ func runStdioServer(ctx context.Context, cmd *cli.Command) error {
 	}()
 
 	// Log that the server is running
-	slog.Info("ReportPortal MCP Server running on stdio\n")
+	slog.Info("ReportPortal MCP Server running on stdio")
 
 	// Wait for a shutdown signal or an error from the server
 	select {

@@ -55,7 +55,7 @@ func (lr *TestItemResources) toolListLaunchTestItems() (tool mcp.Tool, handler s
 				FilterEqLaunchId(int32(launchId)).
 				PagePage(int32(page)).
 				PageSize(int32(pageSize)).
-				PageSort("startTime,number,DESC").
+				PageSort(defaultSorting).
 				Execute()
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil

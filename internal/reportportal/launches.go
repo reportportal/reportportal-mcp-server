@@ -16,6 +16,7 @@ import (
 
 const (
 	firstPage       = 1                       // Default starting page for pagination
+	singleResult    = 1                       // Default number of results per page
 	defaultPageSize = 20                      // Default number of items per page
 	defaultSorting  = "startTime,number,DESC" // default sorting order for API requests
 )
@@ -101,8 +102,8 @@ func (lr *LaunchResources) toolGetLastLaunchByName() (mcp.Tool, server.ToolHandl
 			// Fetch the launches matching the provided name
 			launches, _, err := lr.client.LaunchAPI.GetProjectLaunches(ctx, lr.project).
 				FilterEqName(launchName).
-				PagePage(1).
-				PageSize(1).
+				PagePage(firstPage).
+				PageSize(singleResult).
 				PageSort(defaultSorting).
 				Execute()
 			if err != nil {
