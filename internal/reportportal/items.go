@@ -34,27 +34,18 @@ func (lr *TestItemResources) toolListLaunchTestItems() (tool mcp.Tool, handler s
 			),
 		), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			// Extract the "page" parameter from the request
-			page, err := requiredParam[float64](request.Params.Arguments, "page")
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
+			page, pageSize := extractPaging(request)
 
-			// Extract the "page-size" parameter from the request
-			pageSize, err := requiredParam[float64](request.Params.Arguments, "page-size")
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-
-			launchId, err := requiredParam[float64](request.Params.Arguments, "launch-id")
+			launchId, err := request.RequireInt("launch-id")
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
 
 			// Fetch test items from ReportPortal using the provided page details
 			items, _, err := lr.client.TestItemAPI.GetTestItemsV2(ctx, lr.project).
-				FilterEqLaunchId(int32(launchId)).
-				PagePage(int32(page)).
-				PageSize(int32(pageSize)).
+				FilterEqLaunchId(int32(launchId)). //nolint:gosec
+				PagePage(page).
+				PageSize(pageSize).
 				PageSort(defaultSorting).
 				Execute()
 			if err != nil {
@@ -82,7 +73,7 @@ func (lr *TestItemResources) toolGetTestItemById() (mcp.Tool, server.ToolHandler
 			),
 		), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			// Extract the "launch" parameter from the request
-			testItemID, err := requiredParam[string](request.Params.Arguments, "test_item_id")
+			testItemID, err := request.RequireString("test_item_id")
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
