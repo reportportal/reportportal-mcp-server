@@ -11,6 +11,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/reportportal/goRP/v5/pkg/gorp"
+	"github.com/reportportal/goRP/v5/pkg/openapi"
 	"github.com/yosida95/uritemplate/v3"
 )
 
@@ -139,6 +140,116 @@ func (lr *LaunchResources) toolDeleteLaunch() (mcp.Tool, server.ToolHandlerFunc)
 
 			// Return the serialized launch as a text result
 			return mcp.NewToolResultText(fmt.Sprintf("Launch '%d' has been deleted", launchID)), nil
+		}
+}
+
+func (lr *LaunchResources) toolRunAutoAnalysis() (mcp.Tool, server.ToolHandlerFunc) {
+	return mcp.NewTool("run_auto_analysis",
+			// Tool metadata
+			mcp.WithDescription("Run auto analysis on ReportPortal launch"),
+			mcp.WithString("launch_id", // Parameter for specifying the launch name
+				mcp.Description("Launch ID"),
+			),
+			mcp.WithString(
+				"analyzer_mode",
+				mcp.Description("Analyzer mode"),
+				mcp.Enum(
+					"all",
+					"launch_name",
+					"current_launch",
+					"previous_launch",
+					"current_and_the_same_name",
+				),
+				mcp.DefaultString("current_launch"),
+				mcp.Required(),
+			),
+			mcp.WithString("analyzer_type",
+				mcp.Description("Analyzer type"),
+				mcp.Enum("autoAnalyzer", "patternAnalyzer"),
+				mcp.DefaultString("autoAnalyzer"),
+				mcp.Required(),
+			),
+			mcp.WithArray("analyzer_item_modes",
+				mcp.Description("Analyzer item modes"),
+				mcp.Enum("to_investigate", "auto_analyzed", "manually_analyzed"),
+				mcp.DefaultArray([]string{"to_investigate"}),
+			),
+		), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			// Extract the "launch" parameter from the request
+			launchID, err := request.RequireInt("launch_id")
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			analyzerMode, err := request.RequireString("analyzer_mode")
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+
+			analyzerType, err := request.RequireString("analyzer_type")
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+
+			analyzerItemModes, err := request.RequireStringSlice("analyzer_item_modes")
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+
+			// Fetch the launches matching the provided name
+			rs, _, err := lr.client.LaunchAPI.
+				StartLaunchAnalyzer(ctx, lr.project).
+				AnalyzeLaunchRQ(openapi.AnalyzeLaunchRQ{
+					LaunchId:         int64(launchID),
+					AnalyzerMode:     strings.ToUpper(analyzerMode),
+					AnalyzerTypeName: strings.ToUpper(analyzerType),
+					AnalyzeItemsMode: analyzerItemModes,
+				}).
+				Execute()
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+
+			// Return the serialized launch as a text result
+			return mcp.NewToolResultText(rs.GetMessage()), nil
+		}
+}
+
+func (lr *LaunchResources) toolUniqueErrorAnalysis() (mcp.Tool, server.ToolHandlerFunc) {
+	return mcp.NewTool("run_unique_error_analysis",
+			// Tool metadata
+			mcp.WithDescription("Run unique error analysis on ReportPortal launch"),
+			mcp.WithString("launch_id", // Parameter for specifying the launch name
+				mcp.Description("Launch ID"),
+			),
+			mcp.WithBoolean(
+				"remove_numbers",
+				mcp.Description("Remove numbers from analyzed logs"),
+				mcp.DefaultBool(false),
+			),
+		), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			// Extract the "launch" parameter from the request
+			launchID, err := request.RequireInt("launch_id")
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			removeNumbers, err := request.RequireBool("remove_numbers")
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+
+			rs, _, err := lr.client.LaunchAPI.
+				CreateClusters(ctx, lr.project).
+				CreateClustersRQ(openapi.CreateClustersRQ{
+					LaunchId:      int64(launchID),
+					RemoveNumbers: openapi.PtrBool(removeNumbers),
+				}).
+				Execute()
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+
+			// Return the serialized launch as a text result
+			return mcp.NewToolResultText(rs.GetMessage()), nil
 		}
 }
 

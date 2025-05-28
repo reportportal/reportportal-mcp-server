@@ -19,5 +19,6 @@ tasks:
 
   inspector:
     desc: "Runs inspector"
+    deps: [docker:build]
     cmd: >
       npx @modelcontextprotocol/inspector -- docker run -i --rm -e "RP_API_TOKEN=$RP_API_TOKEN" -e "RP_PROJECT=$RP_PROJECT" -e "RP_HOST=$RP_HOST" reportportal-mcp-server

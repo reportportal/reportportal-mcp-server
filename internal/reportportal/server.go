@@ -27,6 +27,8 @@ func NewServer(version string, hostUrl *url.URL, token, project string) *server.
 	s.AddTool(launches.toolGetLastLaunchByName())
 	s.AddTool(launches.toolForceFinishLaunch())
 	s.AddTool(launches.toolDeleteLaunch())
+	s.AddTool(launches.toolRunAutoAnalysis())
+	s.AddTool(launches.toolUniqueErrorAnalysis())
 	s.AddPrompt(launches.promptAnalyzeLaunch())
 	s.AddResourceTemplate(launches.resourceLaunch())
 
