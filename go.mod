@@ -3,7 +3,7 @@ module github.com/reportportal/reportportal-mcp-server
 go 1.24.1
 
 require (
-	github.com/mark3labs/mcp-go v0.30.0
+	github.com/mark3labs/mcp-go v0.31.0
 	github.com/reportportal/goRP/v5 v5.1.1
 	github.com/stretchr/testify v1.10.0
 	github.com/urfave/cli/v3 v3.3.3

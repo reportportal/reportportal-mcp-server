@@ -103,9 +103,11 @@ func runStdioServer(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	// Create a new stdio server using the ReportPortal client
-	stdioServer := server.NewStdioServer(
-		mcpreportportal.NewServer(version, hostUrl, token, project),
-	)
+	mcpServer, err := mcpreportportal.NewServer(version, hostUrl, token, project)
+	if err != nil {
+		return fmt.Errorf("failed to create ReportPortal MCP server: %w", err)
+	}
+	stdioServer := server.NewStdioServer(mcpServer)
 
 	// Start listening for messages in a separate goroutine
 	errC := make(chan error, 1)

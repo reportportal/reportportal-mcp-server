@@ -1,0 +1,43 @@
+prompts:
+  - name: reportportal_analyze_launch
+    description: "Analyze ReportPortal launch"
+    arguments:
+      - name: launch_id
+        description: "ID of the ReportPortal launch to analyze"
+        required: true
+    messages:
+      - role: user
+        content:
+          type: text
+          text: |
+            You are tasked with providing a detailed and insightful analysis of test execution data reported to the ReportPortal platform for the specific launch with ID '{{.launch_id}}'. Your analysis should be structured, actionable, and provide value to the test engineers and stakeholders. Address the following key aspects thoroughly:
+            
+            1. **Test Execution Summary:**  
+               - Summarize the overall status of the test execution.  
+               - Provide a count and percentage breakdown of tests by their respective statuses (e.g., Passed, Failed, Skipped).  
+               - Highlight the overall success/failure rate and any notable observations.
+            
+            2. **Test Duration Analysis:**  
+               - Assess the test execution time, identifying both the total execution duration and individual test durations.  
+               - Highlight any tests or groups of tests with significantly longer durations compared to others, and suggest possible reasons for the discrepancies.  
+               - Identify potential candidates for optimization based on duration insights.  
+            
+            3. **Failure Analysis:**  
+               - Provide a detailed list of tests that failed, including their respective failure reasons, logs, or error messages (if available).  
+               - Group failures by common root causes or failure patterns to identify trends (e.g., environmental issues, flaky tests, application defects).  
+               - If applicable, suggest relevant next steps for resolving the failures or improving test reliability.
+            
+            4. **Comparison With Previous Test Executions:**  
+               - Compare the current launch's results with the results from recent test executions (if history is available).  
+               - Highlight trends, improvements, regressions, or anomalies in terms of test status, duration, and failures.  
+               - Include insights on whether the application or test stability is improving or degrading over time.  
+            
+            5. **Additional Observations and Recommendations:**  
+               - Note any anomalies, such as unexpectedly high numbers of skipped tests, or repeated failures in specific areas.  
+               - Provide actionable recommendations to improve test execution quality, stability, or efficiency (e.g., modifying test cases, improving CI/CD pipelines, debugging flakiness).  
+            
+            6. **Visualization Suggestions (Optional):**  
+               - Suggest visual formats (e.g., pie charts, bar graphs, time-series trends) for presenting the summarized test execution data to stakeholders.  
+               - Include specific metrics or comparisons that might benefit from graphical representation.  
+            
+            Ensure that the analysis is both technical and actionable, with clear takeaways that enable the team to prioritize and address key areas of focus. Present the information professionally and concisely, targeting an audience of QA engineers, developers, and project managers.

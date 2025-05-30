@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"text/template"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -20,16 +19,6 @@ const (
 	singleResult    = 1                       // Default number of results per page
 	defaultPageSize = 20                      // Default number of items per page
 	defaultSorting  = "startTime,number,DESC" // default sorting order for API requests
-)
-
-//nolint:lll
-var tmplAnalyzeLaunch = template.Must(template.New("reportportal_analyze_launch").Parse(
-	`Provide comprehensive analyzis of test execution reported to ReportPortal as launch named '{{.name}}'.
-Focus on the following aspects:
-1. Test Execution Status: Provide a summary of the test execution status, including the number of passed, failed, and skipped tests.
-2. Test Duration: Analyze the duration of the test execution and identify any tests that took significantly longer than others.
-3. Test Failures: Identify any tests that failed and provide details on the failure reasons.
-4. Comparative Analysis: If applicable, compare the current test execution with previous executions to identify trends or regressions.`),
 )
 
 // LaunchResources is a struct that encapsulates the ReportPortal client.
@@ -278,36 +267,6 @@ func (lr *LaunchResources) toolForceFinishLaunch() (mcp.Tool, server.ToolHandler
 			return mcp.NewToolResultText(
 				fmt.Sprintf("Launch '%d' has been forcefully finished", launchID),
 			), nil
-		}
-}
-
-func (lr *LaunchResources) promptAnalyzeLaunch() (mcp.Prompt, server.PromptHandlerFunc) {
-	return mcp.NewPrompt("reportportal_analyze_launch",
-			mcp.WithPromptDescription("A complex prompt"),
-			mcp.WithArgument("name",
-				mcp.ArgumentDescription("Name of the launch to analyze"),
-				mcp.RequiredArgument(),
-			),
-		), func(ctx context.Context, rq mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
-			arguments := rq.Params.Arguments
-
-			var promptStr strings.Builder
-			if err := tmplAnalyzeLaunch.Execute(&promptStr, arguments); err != nil {
-				return nil, err
-			}
-
-			return &mcp.GetPromptResult{
-				Description: "Analyze last ReportPortal launch by name",
-				Messages: []mcp.PromptMessage{
-					{
-						Role: mcp.RoleUser,
-						Content: mcp.TextContent{
-							Type: "text",
-							Text: promptStr.String(),
-						},
-					},
-				},
-			}, nil
 		}
 }
 
