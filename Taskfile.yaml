@@ -4,7 +4,7 @@ vars:
   GOLANGCI_LINT_VERSION: 'v2.1.6'
   GOLANG_CI: "docker run --rm -v $(pwd):/app -w /app golangci/golangci-lint:{{.GOLANGCI_LINT_VERSION}} golangci-lint"
   IMAGE_NAME: "reportportal-mcp-server"
-dotenv: ['.env']
+dotenv: [ '.env' ]
 tasks:
   fmt:
     desc: "Runs formatter"
@@ -13,12 +13,33 @@ tasks:
     desc: "Runs GolangCI linter"
     cmd: "{{.GOLANG_CI}} run ./..."
 
+  test:
+    desc: "Runs tests"
+    cmd: "go test ./..."
+
+  test:json-report:
+    desc: "Runs tests and outputs results in JSON format"
+    cmd: "go test -json ./..."
+
+  test:junit-report:
+    desc: "Runs tests and outputs results in JUnit format. Requires gotestsum to be installed."
+    vars:
+      JUNIT_REPORT_FILE: '{{.JUNIT_REPORT_FILE| default "junit-report.xml"}}'
+    cmd: "gotestsum --junitfile={{.JUNIT_REPORT_FILE}} ./..."
+
+  app:build:
+    desc: "Builds docker image"
+    env:
+      CGO_ENABLED: 0
+    cmd: |
+      go build -o bin/reportportal-mcp-server cmd/reportportal-mcp-server/main.go
+
   docker:build:
     desc: "Builds docker image"
     cmd: "docker build -t {{.IMAGE_NAME}} ."
 
   inspector:
     desc: "Runs inspector"
-    deps: [docker:build]
+    deps: [ docker:build ]
     cmd: >
       npx @modelcontextprotocol/inspector -- docker run -i --rm -e "RP_API_TOKEN=$RP_API_TOKEN" -e "RP_PROJECT=$RP_PROJECT" -e "RP_HOST=$RP_HOST" reportportal-mcp-server

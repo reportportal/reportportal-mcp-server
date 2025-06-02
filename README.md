@@ -1,16 +1,36 @@
+![Build Status](https://github.com/reportportal/reportportal-mcp-server/workflows/Build/badge.svg)
+[![Go Report Card](https://goreportcard.com/badge/github.com/reportportal/reportportal-mcp-server)](https://goreportcard.com/report/github.com/reportportal/goRP)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+
 # ReportPortal MCP Server
 
-This repository contains a ReportPortal MCP Server. 
+This repository contains a ReportPortal MCP Server.
 It allows users to interact with ReportPortal directly from GitHub Copilot / Claude / etc chat to query and analyze test execution results.
 
 ## Features
 
-The ReportPortal MCP server provides the following functionality:
+The ReportPortal MCP server provides a comprehensive set of capabilities for interacting with ReportPortal:
 
-- List launches with pagination
-- Get launch details by name
-- Filter launches using various criteria
-- View test execution reports
+### Launch Management
+- List and filter launches with pagination
+- Get launch details by name or ID
+- Force finish running launches
+- Delete launches
+- Run automated analysis on launches (auto analysis, unique error analysis)
+
+### Test Item Analysis
+- List test items within launches
+- Get detailed test item information
+- View test execution statistics and failures
+
+### Report Generation
+- Analyze launches to get detailed test execution insights
+- Generate structured reports with statistics and failure analysis
+
+### Extensibility
+- Add custom tools through code extensions
+- Define new prompts via YAML files in the `prompts` directory
+- Access structured resource data for launches and test items
 
 ## Installation
 
@@ -57,68 +77,17 @@ export RP_TOKEN="your-api-token"
 
 ### Available Tools
 
-#### List Launches
-
-Lists ReportPortal launches with pagination support.
-
-Parameters:
-
-- `page` (optional): Page number (default: 1)
-- `page-size` (optional): Number of items per page (default: 20)
-
-#### Get Last Launch by Name
-
-Retrieves the most recent launch with the specified name.
-
-Parameters:
-
-- `launch`: Launch name to search for
-
-#### Force Finish Launch
-
-Forces a launch to finish regardless of its current state.
-
-Parameters:
-- `launch_id`: ID of the launch to force finish
-
-#### Delete Launch
-
-Deletes a specific launch from ReportPortal.
-
-Parameters:
-- `launch_id`: ID of the launch to delete
-
-#### Get Last Launch by Filter
-
-Retrieves the most recent launch matching specified filters.
-
-Parameters:
-
-- `name` (optional): Filter by launch name
-- `description` (optional): Filter by launch description
-- `uuid` (optional): Filter by launch UUID
-- `status` (optional): Filter by launch status (IN_PROGRESS, PASSED, FAILED, STOPPED, SKIPPED, INTERRUPTED)
-- `start_time` (optional): Filter by start time (unix timestamp)
-- `end_time` (optional): Filter by end time (unix timestamp)
-- `attributes` (optional): Filter by attributes (comma-separated key:value pairs)
-- `mode` (optional): Filter by launch mode (DEFAULT or DEBUG)
-- `sort` (optional): Sort direction and field (default: "desc(startTime)")
-
-#### List Test Items by Launch
-
-Lists test items for a specific launch with pagination support.
-
-Parameters:
-- `launch-id`: ID of the launch to get test items for
-- `page` (optional): Page number (default: 1)
-- `page-size` (optional): Number of items per page (default: 20)
-
-#### Get Test Item by ID
-
-Retrieves details of a specific test item.
-
-Parameters:
-- `test_item_id`: ID of the test item to retrieve
+| Tool Name                  | Description                                      | Parameters                                                                                                    |
+|----------------------------|--------------------------------------------------|---------------------------------------------------------------------------------------------------------------|
+| List Launches              | Lists ReportPortal launches with pagination      | `page` (optional), `page-size` (optional)                                                                     |
+| Get Last Launch by Name    | Retrieves the most recent launch by name         | `launch`                                                                                                      |
+| Force Finish Launch        | Forces a launch to finish                        | `launch_id`                                                                                                   |
+| Delete Launch              | Deletes a specific launch                        | `launch_id`                                                                                                   |
+| Get Last Launch by Filter  | Retrieves the most recent launch by filters      | `name`, `description`, `uuid`, `status`, `start_time`, `end_time`, `attributes`, `mode`, `sort` (all optional)|
+| List Test Items by Launch  | Lists test items for a specific launch           | `launch-id`, `page` (optional), `page-size` (optional)                                                        |
+| Get Test Item by ID        | Retrieves details of a specific test item        | `test_item_id`                                                                                                |
+| Run Auto Analysis          | Runs auto analysis on a launch                   | `launch_id`, `analyzer_mode`, `analyzer_type`, `analyzer_item_modes`                                          |
+| Run Unique Error Analysis  | Runs unique error analysis on a launch           | `launch_id`, `remove_numbers`                                                                                 |
 
 ### Available Prompts
 
@@ -138,8 +107,6 @@ Provides structured access to launch data with the following properties:
 - Test execution statistics
 - Timing information
 - Status and execution mode
-
-Based on your request, I'll update the Development section of your README.md with details on how to run and debug the MCP server, especially using modelcontextprotocol/inspector:
 
 ## Development
 
@@ -162,9 +129,6 @@ task build
 ```bash
 # Run all tests
 task test
-
-# Run tests with coverage
-task test:coverage
 ```
 
 ### Running the MCP Server
@@ -221,6 +185,17 @@ func NewServer(...) *server.MCPServer {
     // ...
 }
 ```
+### Adding New Prompts
+
+To add a new prompt, simply create a YAML file describing your prompt and place it in the `prompts` folder at the root of the project. The server will automatically read and initialize all prompts from this directory on startup—no code changes are required.
+
+**Example:**
+
+1. Use an existing or create a new file, e.g., `my_custom_prompt.yaml`, in the `prompts` folder.
+2. Define your prompt logic and parameters in YAML format.
+3. Rebuild the server to load the new prompt.
+
+This approach allows you to extend the server's capabilities with custom prompts quickly and without modifying the codebase.
 
 ## License
 
