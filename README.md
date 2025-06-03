@@ -58,7 +58,7 @@ The server uses environment variables for configuration:
 |--------------|-------------------------------|---------|
 | `RP_HOST`    | ReportPortal host URL         |         |
 | `RP_PROJECT` | ReportPortal project name     |         |
-| `RP_TOKEN`   | ReportPortal API token        |         |
+| `RP_API_TOKEN`   | ReportPortal API token        |         |
 | `MCP_PORT`   | Port to run the MCP server on | `4389`  |
 
 ## Usage
