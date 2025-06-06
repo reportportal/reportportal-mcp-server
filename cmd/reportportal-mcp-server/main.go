@@ -48,7 +48,7 @@ func main() {
 			},
 			&cli.StringFlag{
 				Name:     "project", // ReportPortal project name
-				Required: true,
+				Required: false,
 				Sources:  cli.EnvVars("RP_PROJECT"),
 			},
 			&cli.StringFlag{
