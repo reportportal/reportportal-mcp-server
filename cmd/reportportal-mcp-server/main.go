@@ -174,7 +174,7 @@ func runSSEServer(ctx context.Context, cmd *cli.Command) error {
 	}()
 
 	// Log that the server is running
-	slog.Info("ReportPortal MCP Server running on SSE")
+	slog.Infof("ReportPortal MCP Server running on SSE at %s", addr)
 
 	// Wait for a shutdown signal or an error from the server
 	select {
