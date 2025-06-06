@@ -4,11 +4,9 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
-	"math"
 	"net/url"
 	"path/filepath"
 
-	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/reportportal/goRP/v5/pkg/gorp"
 
@@ -18,7 +16,11 @@ import (
 //go:embed prompts/*.yaml
 var promptFiles embed.FS
 
-func NewServer(version string, hostUrl *url.URL, token, project string) (*server.MCPServer, error) {
+func NewServer(
+	version string,
+	hostUrl *url.URL,
+	token, defaultProject string,
+) (*server.MCPServer, error) {
 	s := server.NewMCPServer(
 		"reportportal-mcp-server",
 		version,
@@ -31,7 +33,7 @@ func NewServer(version string, hostUrl *url.URL, token, project string) (*server
 	// Create a new ReportPortal client
 	rpClient := gorp.NewClient(hostUrl, token)
 
-	launches := &LaunchResources{client: rpClient, project: project}
+	launches := NewLaunchResources(rpClient, defaultProject)
 	s.AddTool(launches.toolListLaunches())
 	s.AddTool(launches.toolGetLastLaunchByName())
 	s.AddTool(launches.toolForceFinishLaunch())
@@ -40,7 +42,7 @@ func NewServer(version string, hostUrl *url.URL, token, project string) (*server
 	s.AddTool(launches.toolUniqueErrorAnalysis())
 	s.AddResourceTemplate(launches.resourceLaunch())
 
-	testItems := &TestItemResources{client: rpClient, project: project}
+	testItems := NewTestItemResources(rpClient, defaultProject)
 	s.AddTool(testItems.toolGetTestItemById())
 	s.AddTool(testItems.toolListLaunchTestItems())
 	s.AddResourceTemplate(testItems.resourceTestItem())
@@ -55,23 +57,6 @@ func NewServer(version string, hostUrl *url.URL, token, project string) (*server
 	}
 
 	return s, nil
-}
-
-func extractPaging(request mcp.CallToolRequest) (int32, int32) {
-	// Extract the "page" parameter from the request
-	page := request.GetInt("page", firstPage)
-	if page > math.MaxInt32 {
-		page = math.MaxInt32
-	}
-
-	// Extract the "page-size" parameter from the request
-	pageSize := request.GetInt("page-size", defaultPageSize)
-	if pageSize > math.MaxInt32 {
-		pageSize = math.MaxInt32
-	}
-
-	//nolint:gosec // the int32 is confirmed
-	return int32(page), int32(pageSize)
 }
 
 // readPrompts reads multiple YAML files containing prompt definitions

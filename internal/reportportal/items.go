@@ -13,8 +13,15 @@ import (
 
 // TestItemResources is a struct that encapsulates the ReportPortal client.
 type TestItemResources struct {
-	client  *gorp.Client // Client to interact with the ReportPortal API
-	project string
+	client           *gorp.Client // Client to interact with the ReportPortal API
+	projectParameter mcp.ToolOption
+}
+
+func NewTestItemResources(client *gorp.Client, defaultProject string) *TestItemResources {
+	return &TestItemResources{
+		client:           client,
+		projectParameter: newProjectParameter(defaultProject),
+	}
 }
 
 // toolListLaunchTestItems creates a tool to list test items for a specific launch.
@@ -22,6 +29,7 @@ func (lr *TestItemResources) toolListLaunchTestItems() (tool mcp.Tool, handler s
 	return mcp.NewTool("list_test_items_by_launch",
 			// Tool metadata
 			mcp.WithDescription("Get list of test items for a launch"),
+			lr.projectParameter,
 			mcp.WithNumber("launch-id", // ID of the launch
 				mcp.Description("Launch ID"),
 			),
@@ -34,6 +42,10 @@ func (lr *TestItemResources) toolListLaunchTestItems() (tool mcp.Tool, handler s
 				mcp.Description("Page size"),
 			),
 		), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			project, err := extractProject(request)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
 			// Extract the "page" parameter from the request
 			page, pageSize := extractPaging(request)
 
@@ -43,7 +55,7 @@ func (lr *TestItemResources) toolListLaunchTestItems() (tool mcp.Tool, handler s
 			}
 
 			// Fetch test items from ReportPortal using the provided page details
-			items, _, err := lr.client.TestItemAPI.GetTestItemsV2(ctx, lr.project).
+			items, _, err := lr.client.TestItemAPI.GetTestItemsV2(ctx, project).
 				FilterEqLaunchId(int32(launchId)). //nolint:gosec
 				PagePage(page).
 				PageSize(pageSize).
@@ -73,6 +85,10 @@ func (lr *TestItemResources) toolGetTestItemById() (mcp.Tool, server.ToolHandler
 				mcp.Description("Test Item ID"),
 			),
 		), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			project, err := extractProject(request)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
 			// Extract the "test_item_id" parameter from the request
 			testItemID, err := request.RequireString("test_item_id")
 			if err != nil {
@@ -80,7 +96,7 @@ func (lr *TestItemResources) toolGetTestItemById() (mcp.Tool, server.ToolHandler
 			}
 
 			// Fetch the testItem with given ID
-			testItem, _, err := lr.client.TestItemAPI.GetTestItem(ctx, testItemID, lr.project).
+			testItem, _, err := lr.client.TestItemAPI.GetTestItem(ctx, testItemID, project).
 				Execute()
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
@@ -98,7 +114,7 @@ func (lr *TestItemResources) toolGetTestItemById() (mcp.Tool, server.ToolHandler
 }
 
 func (lr *TestItemResources) resourceTestItem() (mcp.ResourceTemplate, server.ResourceTemplateHandlerFunc) {
-	tmpl := uritemplate.MustNew("reportportal://testitem/{testItemId}")
+	tmpl := uritemplate.MustNew("reportportal://{project}/testitem/{testItemId}")
 
 	return mcp.NewResourceTemplate(tmpl.Raw(), "reportportal-test-item-by-id"),
 		func(ctx context.Context, request mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
@@ -107,12 +123,16 @@ func (lr *TestItemResources) resourceTestItem() (mcp.ResourceTemplate, server.Re
 				return nil, fmt.Errorf("incorrect URI: %s", request.Params.URI)
 			}
 
+			project, found := paramValues["project"]
+			if !found || project.String() == "" {
+				return nil, fmt.Errorf("missing project in URI: %s", request.Params.URI)
+			}
 			testItemIdStr, found := paramValues["testItemId"]
 			if !found || testItemIdStr.String() == "" {
 				return nil, fmt.Errorf("missing testItemId in URI: %s", request.Params.URI)
 			}
 
-			testItem, _, err := lr.client.TestItemAPI.GetTestItem(ctx, testItemIdStr.String(), lr.project).
+			testItem, _, err := lr.client.TestItemAPI.GetTestItem(ctx, testItemIdStr.String(), project.String()).
 				Execute()
 			if err != nil {
 				return nil, fmt.Errorf("failed to get test item: %w", err)

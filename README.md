@@ -54,12 +54,12 @@ go build -o reportportal-mcp-server ./cmd/reportportal-mcp-server
 
 The server uses environment variables for configuration:
 
-| Variable     | Description                   | Default |
-|--------------|-------------------------------|---------|
-| `RP_HOST`    | ReportPortal host URL         |         |
-| `RP_PROJECT` | ReportPortal project name     |         |
-| `RP_API_TOKEN`   | ReportPortal API token        |         |
-| `MCP_PORT`   | Port to run the MCP server on | `4389`  |
+| Variable       | Description                              | Default |
+|----------------|------------------------------------------|---------|
+| `RP_HOST`      | ReportPortal host URL                    |         |
+| `RP_API_TOKEN` | ReportPortal API token                   |         |
+| `RP_PROJECT`   | (optional) ReportPortal project name     |         |
+| `MCP_PORT`     | (optional) Port to run the MCP server on | `4389`  |
 
 ## Usage
 
@@ -100,13 +100,12 @@ Parameters:
 
 ### Available Resources
 
-#### Launch Resource
+| Resource Type | Description                         | Properties |
+|---------------|-------------------------------------|------------|
+| Launch Resource | Structured access to launch data    | • Basic launch info (ID, name, description)<br>• Test execution statistics<br>• Timing information<br>• Status and execution mode |
+| Test Item Resource | Structured access to test item data | • Basic test item info (ID, name, description)<br>• Test execution status and type<br>• Parent information and hierarchy position<br>• Issue details (when applicable)<br>• Timing information (start time, end time, duration)<br>• Test attributes and parameters<br>• Path to the test in the test suite hierarchy |
 
-Provides structured access to launch data with the following properties:
-- Basic launch info (ID, name, description)
-- Test execution statistics
-- Timing information
-- Status and execution mode
+This table format makes the available resources more scannable while preserving all the key information about each resource type.
 
 ## Development
 
