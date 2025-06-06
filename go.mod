@@ -1,6 +1,6 @@
 module github.com/reportportal/reportportal-mcp-server
 
-go 1.24.1
+go 1.24.4
 
 require (
 	github.com/mark3labs/mcp-go v0.31.0
@@ -8,6 +8,7 @@ require (
 	github.com/stretchr/testify v1.10.0
 	github.com/urfave/cli/v3 v3.3.3
 	github.com/yosida95/uritemplate/v3 v3.0.2
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -16,6 +17,5 @@ require (
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/spf13/cast v1.8.0 // indirect
 	golang.org/x/net v0.40.0 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 	resty.dev/v3 v3.0.0-beta.3 // indirect
 )
