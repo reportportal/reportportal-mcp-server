@@ -115,7 +115,7 @@ func (lr *TestItemResources) resourceTestItem() (mcp.ResourceTemplate, server.Re
 			testItem, _, err := lr.client.TestItemAPI.GetTestItem(ctx, testItemIdStr.String(), lr.project).
 				Execute()
 			if err != nil {
-				return nil, fmt.Errorf("failed to get test items page: %w", err)
+				return nil, fmt.Errorf("failed to get test item: %w", err)
 			}
 
 			testItemPayload, err := json.Marshal(testItem)
