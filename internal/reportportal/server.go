@@ -43,6 +43,7 @@ func NewServer(version string, hostUrl *url.URL, token, project string) (*server
 	testItems := &TestItemResources{client: rpClient, project: project}
 	s.AddTool(testItems.toolGetTestItemById())
 	s.AddTool(testItems.toolListLaunchTestItems())
+	s.AddResourceTemplate(testItems.resourceTestItem())
 
 	prompts, err := readPrompts(promptFiles, "prompts")
 	if err != nil {

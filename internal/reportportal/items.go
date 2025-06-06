@@ -8,6 +8,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/reportportal/goRP/v5/pkg/gorp"
+	"github.com/yosida95/uritemplate/v3"
 )
 
 // TestItemResources is a struct that encapsulates the ReportPortal client.
@@ -72,7 +73,7 @@ func (lr *TestItemResources) toolGetTestItemById() (mcp.Tool, server.ToolHandler
 				mcp.Description("Test Item ID"),
 			),
 		), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			// Extract the "launch" parameter from the request
+			// Extract the "test_item_id" parameter from the request
 			testItemID, err := request.RequireString("test_item_id")
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
@@ -85,13 +86,49 @@ func (lr *TestItemResources) toolGetTestItemById() (mcp.Tool, server.ToolHandler
 				return mcp.NewToolResultError(err.Error()), nil
 			}
 
-			// Serialize the first launch in the result into JSON format
+			// Serialize the first testItem in the result into JSON format
 			r, err := json.Marshal(testItem)
 			if err != nil {
 				return nil, fmt.Errorf("failed to marshal response: %w", err)
 			}
 
-			// Return the serialized launch as a text result
+			// Return the serialized testItem as a text result
 			return mcp.NewToolResultText(string(r)), nil
+		}
+}
+
+func (lr *TestItemResources) resourceTestItem() (mcp.ResourceTemplate, server.ResourceTemplateHandlerFunc) {
+	tmpl := uritemplate.MustNew("reportportal://testitem/{testItemId}")
+
+	return mcp.NewResourceTemplate(tmpl.Raw(), "reportportal-test-item-by-id"),
+		func(ctx context.Context, request mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
+			paramValues := tmpl.Match(request.Params.URI)
+			if len(paramValues) == 0 {
+				return nil, fmt.Errorf("incorrect URI: %s", request.Params.URI)
+			}
+
+			testItemIdStr, found := paramValues["testItemId"]
+			if !found || testItemIdStr.String() == "" {
+				return nil, fmt.Errorf("missing testItemId in URI: %s", request.Params.URI)
+			}
+
+			testItem, _, err := lr.client.TestItemAPI.GetTestItem(ctx, testItemIdStr.String(), lr.project).
+				Execute()
+			if err != nil {
+				return nil, fmt.Errorf("failed to get test items page: %w", err)
+			}
+
+			testItemPayload, err := json.Marshal(testItem)
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal response: %w", err)
+			}
+
+			return []mcp.ResourceContents{
+				mcp.TextResourceContents{
+					URI:      request.Params.URI,
+					MIMEType: "application/json",
+					Text:     string(testItemPayload),
+				},
+			}, nil
 		}
 }
