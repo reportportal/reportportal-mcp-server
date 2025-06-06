@@ -182,7 +182,9 @@ func runSSEServer(ctx context.Context, cmd *cli.Command) error {
 		slog.Error("shutting down server...")
 		sCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_ = sseServer.Shutdown(sCtx)
+		if err := sseServer.Shutdown(sCtx); err != nil {
+			slog.Error("error during server shutdown", "error", err)
+		}
 	case err := <-errC: // Error occurred while running the server
 		if err != nil {
 			return fmt.Errorf("error running server: %w", err)
