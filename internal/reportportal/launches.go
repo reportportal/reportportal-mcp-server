@@ -96,7 +96,7 @@ func (lr *LaunchResources) toolRunQualityGate() (tool mcp.Tool, handler server.T
 
 			resPayload, _, err := lr.client.PluginAPI.ExecutePluginCommand(ctx, "startQualityGate", "quality gate", project).
 				RequestBody(map[string]interface{}{
-					"async":    false, // Run the quality gate asynchronously
+					"async":    false, // Run the quality gate synchronously
 					"launchId": launchID,
 				}).
 				Execute()
