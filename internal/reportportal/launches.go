@@ -76,6 +76,42 @@ func (lr *LaunchResources) toolListLaunches() (tool mcp.Tool, handler server.Too
 		}
 }
 
+func (lr *LaunchResources) toolRunQualityGate() (tool mcp.Tool, handler server.ToolHandlerFunc) {
+	return mcp.NewTool("run_quality_gate",
+			// Tool metadata
+			mcp.WithDescription("Run quality gate on ReportPortal launches"),
+			lr.projectParameter,
+			mcp.WithNumber("launch_id", // Parameter for specifying the launch ID
+				mcp.Description("Launch ID"),
+			),
+		), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			project, err := extractProject(request)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			launchID, err := request.RequireInt("launch_id")
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+
+			resPayload, _, err := lr.client.PluginAPI.ExecutePluginCommand(ctx, "startQualityGate", "quality gate", project).
+				RequestBody(map[string]interface{}{
+					"async":    false, // Run the quality gate synchronously
+					"launchId": launchID,
+				}).
+				Execute()
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+
+			resBytes, err := json.Marshal(resPayload)
+			if err != nil {
+				return nil, err
+			}
+			return mcp.NewToolResultText(string(resBytes)), nil
+		}
+}
+
 // toolGetLastLaunchByName creates a tool to retrieve the last launch by its name.
 func (lr *LaunchResources) toolGetLastLaunchByName() (mcp.Tool, server.ToolHandlerFunc) {
 	return mcp.NewTool("get_last_launch_by_name",
