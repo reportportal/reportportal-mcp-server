@@ -40,6 +40,7 @@ func NewServer(
 	s.AddTool(launches.toolDeleteLaunch())
 	s.AddTool(launches.toolRunAutoAnalysis())
 	s.AddTool(launches.toolUniqueErrorAnalysis())
+	s.AddTool(launches.toolRunQualityGate())
 	s.AddResourceTemplate(launches.resourceLaunch())
 
 	testItems := NewTestItemResources(rpClient, defaultProject)
