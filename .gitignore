@@ -2,3 +2,4 @@
 bin/
 .env
 junit-report.xml
+dist/

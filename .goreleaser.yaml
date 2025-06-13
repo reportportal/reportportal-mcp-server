@@ -1,0 +1,80 @@
+version: 2
+project_name: reportportal-mcp-server
+
+builds:
+  - id: reportportal-mcp-server
+    main: ./cmd/reportportal-mcp-server
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}}
+
+
+archives:
+  - id: reportportal-mcp-server
+    format_overrides:
+      - goos: windows
+        formats: [ 'zip' ]
+    files:
+      - LICENSE
+      - README.md
+
+dockers:
+  - image_templates:
+#      - "ghcr.io/reportportal/reportportal-mcp-server:{{ .Tag }}"
+      - "reportportal-mcp-server:{{ .Version }}"
+    dockerfile: release.dockerfile
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--label=io.artifacthub.package.readme-url=https://raw.githubusercontent.com/reportportal/reportportal-mcp-server/main/README.md"
+      - "--label=io.artifacthub.package.logo-url=https://avatars.githubusercontent.com/u/17636279"
+      - '--label=io.artifacthub.package.maintainers=[{"name":"Andrei Varabyeu","email":"andrei_varabyeu@epam.com"}]'
+      - "--label=org.opencontainers.image.description=ReportPortal MCP Server"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.name={{.ProjectName}}"
+      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+      - "--label=org.opencontainers.image.source={{.GitURL}}"
+    goos: linux
+    goarch: amd64
+
+
+homebrew_casks:
+  - description: "ReportPortal MCP Server"
+    homepage: "https://github.com/reportportal/reportportal-mcp-server"
+    # Repository to push the generated files to.
+    repository:
+      owner: reportportal
+      name: reportportal-mcp-server
+
+nfpms:
+  - id: reportportal-mcp-server
+    formats:
+      - deb
+      - rpm
+    maintainer: "ReportPortal Team <support@reportportal.io>"
+    description: "ReportPortal MCP Server"
+    vendor: "ReportPortal"
+    homepage: "https://github.com/reportportal/reportportal-mcp-server"
+    license: "Apache-2.0"
+#    binds:
+#      - /usr/bin
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+
+release:
+  github:
+    owner: reportportal
+    name: reportportal-mcp-server
