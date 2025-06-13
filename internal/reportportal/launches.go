@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 
@@ -94,7 +95,7 @@ func (lr *LaunchResources) toolRunQualityGate() (tool mcp.Tool, handler server.T
 				return mcp.NewToolResultError(err.Error()), nil
 			}
 
-			resPayload, _, err := lr.client.PluginAPI.ExecutePluginCommand(ctx, "startQualityGate", "quality gate", project).
+			_, rs, err := lr.client.PluginAPI.ExecutePluginCommand(ctx, "startQualityGate", "quality gate", project).
 				RequestBody(map[string]interface{}{
 					"async":    false, // Run the quality gate synchronously
 					"launchId": launchID,
@@ -104,9 +105,10 @@ func (lr *LaunchResources) toolRunQualityGate() (tool mcp.Tool, handler server.T
 				return mcp.NewToolResultError(err.Error()), nil
 			}
 
-			resBytes, err := json.Marshal(resPayload)
+			// we don't do any special handling of the response, just return it as text
+			resBytes, err := io.ReadAll(rs.Body)
 			if err != nil {
-				return nil, err
+				return mcp.NewToolResultError(err.Error()), nil
 			}
 			return mcp.NewToolResultText(string(resBytes)), nil
 		}
