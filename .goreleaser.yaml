@@ -28,7 +28,7 @@ archives:
 
 dockers:
   - image_templates:
-      - "reportportal-mcp-server:{{ .Version }}"
+      - "{{ .Env.REPOSITORY_NAME }}:{{ .Version }}"
     dockerfile: release.dockerfile
     build_flag_templates:
       - "--platform=linux/amd64"
