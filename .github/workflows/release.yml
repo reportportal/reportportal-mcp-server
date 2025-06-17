@@ -63,5 +63,3 @@ jobs:
         env:
           REPOSITORY_NAME: reportportal/mcp-server # Docker repository name
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # GitHub token for authentication
-#          DOCKER_USERNAME: ${{ secrets.REGESTRY_USERNAME }} # Docker registry username
-#          DOCKER_PASSWORD: ${{ secrets.REGESTRY_PASSWORD }} # Docker registry password
