@@ -6,7 +6,7 @@ require (
 	github.com/mark3labs/mcp-go v0.32.0
 	github.com/reportportal/goRP/v5 v5.1.2
 	github.com/stretchr/testify v1.10.0
-	github.com/urfave/cli/v3 v3.3.3
+	github.com/urfave/cli/v3 v3.3.8
 	github.com/yosida95/uritemplate/v3 v3.0.2
 	gopkg.in/yaml.v3 v3.0.1
 )
