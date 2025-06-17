@@ -66,11 +66,7 @@ dockers:
 #    license: "Apache-2.0"
 
 changelog:
-  sort: asc
-  filters:
-    exclude:
-      - '^docs:'
-      - '^test:'
+  use: github-native
 
 release:
   github:
