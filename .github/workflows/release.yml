@@ -1,29 +1,54 @@
 # .github/workflows/release.yml
+# GitHub Actions workflow for releasing the Go project
 name: Release
 
-on: {}
-#  push:
-#    # run only against tags
-#    tags:
-#      - "*"
+on:
+  # Trigger workflow manually with a version input
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version'
+        required: true
 
 permissions:
+  # Allow workflow to write to repository contents (for pushing tags)
   contents: write
-  # packages: write
-  # issues: write
 
 jobs:
   goreleaser:
     runs-on: ubuntu-latest
     steps:
+      # Step 1: Checkout the repository with full history
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      # Step 2: Create and push a Git tag for the release
+      - name: Create and push Git tag
+        run: |
+          TAG_NAME="${{ github.event.inputs.version }}"
+
+          # Check if the tag already exists
+          if git rev-parse "refs/tags/${TAG_NAME}" >/dev/null 2>&1; then
+            echo "Tag ${TAG_NAME} already exists. Exiting..."
+            exit 1
+          fi
+
+          # Create the tag
+          git tag "${TAG_NAME}"
+          echo "Created tag ${TAG_NAME}"
+
+          # Push the tag to the remote
+          git push origin "refs/tags/${TAG_NAME}"
+
+      # Step 3: Set up Go environment
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: stable
+
+      # Step 4: Run GoReleaser to build and publish release artifacts
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
@@ -31,4 +56,6 @@ jobs:
           version: latest
           args: release --clean
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # GitHub token for authentication
+          DOCKER_USERNAME: ${{ secrets.REGESTRY_USERNAME }} # Docker registry username
+          DOCKER_PASSWORD: ${{ secrets.REGESTRY_PASSWORD }} # Docker registry password
