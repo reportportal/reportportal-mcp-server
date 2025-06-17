@@ -47,6 +47,11 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: stable
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.REGESTRY_USERNAME }}
+          password: ${{ secrets.REGESTRY_PASSWORD }}
 
       # Step 4: Run GoReleaser to build and publish release artifacts
       - name: Run GoReleaser
@@ -58,5 +63,5 @@ jobs:
         env:
           REPOSITORY_NAME: reportportal/mcp-server # Docker repository name
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # GitHub token for authentication
-          DOCKER_USERNAME: ${{ secrets.REGESTRY_USERNAME }} # Docker registry username
-          DOCKER_PASSWORD: ${{ secrets.REGESTRY_PASSWORD }} # Docker registry password
+#          DOCKER_USERNAME: ${{ secrets.REGESTRY_USERNAME }} # Docker registry username
+#          DOCKER_PASSWORD: ${{ secrets.REGESTRY_PASSWORD }} # Docker registry password
