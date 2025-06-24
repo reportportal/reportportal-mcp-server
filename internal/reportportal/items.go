@@ -7,7 +7,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
-	"github.com/reportportal/goRP/v5/pkg/gorp"
+	"github.com/reportportal/goRP/pkg/gorp"
 )
 
 // TestItemResources is a struct that encapsulates the ReportPortal client.
@@ -32,6 +32,10 @@ func (lr *TestItemResources) toolListLaunchTestItems() (tool mcp.Tool, handler s
 				mcp.DefaultNumber(defaultPageSize),
 				mcp.Description("Page size"),
 			),
+			// mcp.WithObject("params",
+			// 	// mcp.Params("params", // Parameter for specifying the page size
+			// 	mcp.DefaultString(`"providerType": "launch","launchId": 8970087`),
+			// ),
 		), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			// Extract the "page" parameter from the request
 			page, pageSize := extractPaging(request)
@@ -47,6 +51,9 @@ func (lr *TestItemResources) toolListLaunchTestItems() (tool mcp.Tool, handler s
 				PagePage(page).
 				PageSize(pageSize).
 				PageSort(defaultSorting).
+				ProviderType("launch").
+				LaunchId(int32(launchId)).
+				//	Params(map[string]string{"providerType": "launch", "launchId": fmt.Sprintf("%d", launchId)}).
 				Execute()
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil

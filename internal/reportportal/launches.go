@@ -9,8 +9,10 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
-	"github.com/reportportal/goRP/v5/pkg/gorp"
-	"github.com/reportportal/goRP/v5/pkg/openapi"
+
+	"github.com/reportportal/goRP/pkg/gorp"
+	"github.com/reportportal/goRP/pkg/openapi"
+
 	"github.com/yosida95/uritemplate/v3"
 )
 

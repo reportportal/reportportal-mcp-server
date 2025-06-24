@@ -10,7 +10,8 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
-	"github.com/reportportal/goRP/v5/pkg/gorp"
+
+	"github.com/reportportal/goRP/pkg/gorp"
 
 	"github.com/reportportal/reportportal-mcp-server/internal/promptreader"
 )
@@ -30,6 +31,7 @@ func NewServer(version string, hostUrl *url.URL, token, project string) (*server
 
 	// Create a new ReportPortal client
 	rpClient := gorp.NewClient(hostUrl, token)
+	rpClient.APIClient.GetConfig().Debug = true
 
 	launches := &LaunchResources{client: rpClient, project: project}
 	s.AddTool(launches.toolListLaunches())
