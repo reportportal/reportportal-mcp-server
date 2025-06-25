@@ -1,7 +1,9 @@
 package mcpreportportal
 
 import (
+	"io"
 	"math"
+	"net/http"
 
 	"github.com/mark3labs/mcp-go/mcp"
 )
@@ -33,4 +35,12 @@ func extractPaging(request mcp.CallToolRequest) (int32, int32) {
 
 	//nolint:gosec // the int32 is confirmed
 	return int32(page), int32(pageSize)
+}
+
+func extractResponseError(err error, rs *http.Response) string {
+	errText := err.Error()
+	if errContent, rErr := io.ReadAll(rs.Body); rErr == nil {
+		errText = errText + ": " + string(errContent)
+	}
+	return errText
 }

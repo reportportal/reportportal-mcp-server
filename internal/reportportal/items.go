@@ -4,12 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/reportportal/goRP/v5/pkg/gorp"
 	"github.com/yosida95/uritemplate/v3"
 )
+
+const itemsDefaultSorting = "startTime,DESC" // default sorting order for test items
 
 // TestItemResources is a struct that encapsulates the ReportPortal client.
 type TestItemResources struct {
@@ -42,6 +45,7 @@ func (lr *TestItemResources) toolListLaunchTestItems() (tool mcp.Tool, handler s
 				mcp.Description("Page size"),
 			),
 		), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			slog.Debug("START PROCESSING")
 			project, err := extractProject(request)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
@@ -55,14 +59,14 @@ func (lr *TestItemResources) toolListLaunchTestItems() (tool mcp.Tool, handler s
 			}
 
 			// Fetch test items from ReportPortal using the provided page details
-			items, _, err := lr.client.TestItemAPI.GetTestItemsV2(ctx, project).
+			items, rs, err := lr.client.TestItemAPI.GetTestItems(ctx, project).
 				FilterEqLaunchId(int32(launchId)). //nolint:gosec
 				PagePage(page).
 				PageSize(pageSize).
-				PageSort(defaultSorting).
+				PageSort(itemsDefaultSorting).
 				Execute()
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return mcp.NewToolResultError(extractResponseError(err, rs)), nil
 			}
 
 			// Serialize the launches into JSON format
