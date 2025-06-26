@@ -16,10 +16,10 @@ import (
 )
 
 const (
-	firstPage       = 1                       // Default starting page for pagination
-	singleResult    = 1                       // Default number of results per page
-	defaultPageSize = 20                      // Default number of items per page
-	defaultSorting  = "startTime,number,DESC" // default sorting order for API requests
+	firstPage              = 1                       // Default starting page for pagination
+	singleResult           = 1                       // Default number of results per page
+	defaultPageSize        = 20                      // Default number of items per page
+	launchesDefaultSorting = "startTime,number,DESC" // default sorting order for launches
 )
 
 // LaunchResources is a struct that encapsulates the ReportPortal client.
@@ -60,7 +60,7 @@ func (lr *LaunchResources) toolListLaunches() (tool mcp.Tool, handler server.Too
 			launches, _, err := lr.client.LaunchAPI.GetProjectLaunches(ctx, project).
 				PagePage(page).
 				PageSize(pageSize).
-				PageSort(defaultSorting).
+				PageSort(launchesDefaultSorting).
 				Execute()
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
@@ -140,7 +140,7 @@ func (lr *LaunchResources) toolGetLastLaunchByName() (mcp.Tool, server.ToolHandl
 				FilterEqName(launchName).
 				PagePage(firstPage).
 				PageSize(singleResult).
-				PageSort(defaultSorting).
+				PageSort(launchesDefaultSorting).
 				Execute()
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil

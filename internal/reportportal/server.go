@@ -32,6 +32,7 @@ func NewServer(
 
 	// Create a new ReportPortal client
 	rpClient := gorp.NewClient(hostUrl, token)
+	rpClient.APIClient.GetConfig().Middleware = QueryParamsMiddleware
 
 	launches := NewLaunchResources(rpClient, defaultProject)
 	s.AddTool(launches.toolListLaunches())
