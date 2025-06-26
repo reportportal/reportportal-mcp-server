@@ -14,8 +14,8 @@ github.com/mark3labs/mcp-go v0.32.0 h1:fgwmbfL2gbd67obg57OfV2Dnrhs1HtSdlY/i5fn7M
 github.com/mark3labs/mcp-go v0.32.0/go.mod h1:rXqOudj/djTORU/ThxYx8fqEVj/5pvTuuebQ2RC7uk4=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
-github.com/reportportal/goRP/v5 v5.1.2 h1:scAj806S65P6HCDx/YMiOJtw2mPU0w2LUx0cxeBbEVg=
-github.com/reportportal/goRP/v5 v5.1.2/go.mod h1:Au44IuWeL3UBHyve7U64kNDQMtlrYBp8aeiHjgPDrGs=
+github.com/reportportal/goRP/v5 v5.1.3 h1:0uLbch6Qwkd2Zcy4RtAVR2HSLlBjtiIX4YgH7wk7ZE0=
+github.com/reportportal/goRP/v5 v5.1.3/go.mod h1:d2O3iaBElP/OA9p92xcmIuwmVaXX4HY9lT/YpmL5t6g=
 github.com/rogpeppe/go-internal v1.11.0 h1:cWPaGQEPrBb5/AsnsZesgZZ9yb1OQ+GOISoDNXVBh4M=
 github.com/rogpeppe/go-internal v1.11.0/go.mod h1:ddIwULY96R17DhadqLgMfk9H9tvdUzkipdSkR5nkCZA=
 github.com/spf13/cast v1.8.0 h1:gEN9K4b8Xws4EX0+a0reLmhq8moKn7ntRlQYgjPeCDk=
