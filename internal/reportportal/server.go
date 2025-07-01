@@ -69,7 +69,10 @@ func readPrompts(files embed.FS, dir string) ([]promptreader.PromptHandlerPair, 
 	}
 	handlers := make([]promptreader.PromptHandlerPair, len(entries))
 	for _, entry := range entries {
-		data, err := fs.ReadFile(files, filepath.Join(dir, entry.Name()))
+		// The path separator is a forward slash, even on Windows systems
+		// https://pkg.go.dev/embed
+		// https://github.com/reportportal/reportportal-mcp-server/issues/9
+		data, err := fs.ReadFile(files, filepath.Clean(dir)+"/"+entry.Name())
 		if err != nil {
 			return nil, err
 		}
