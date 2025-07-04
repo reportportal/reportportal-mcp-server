@@ -43,18 +43,16 @@ func extractPaging(request mcp.CallToolRequest) (int32, int32) {
 func extractResponseError(err error, rs *http.Response) string {
 	errText := err.Error()
 	if rs != nil && rs.Body != nil {
-		defer func() {
-			if closeErr := rs.Body.Close(); closeErr != nil {
-				// Log the close error or handle it appropriately
-				// You can add logging here if needed
-				errText = errText + " (body close error: " + closeErr.Error() + ")"
-			}
-		}()
-
 		if errContent, rErr := io.ReadAll(rs.Body); rErr == nil {
 			errText = errText + ": " + string(errContent)
 		} else {
 			errText = errText + " (read error: " + rErr.Error() + ")"
+		}
+
+		if closeErr := rs.Body.Close(); closeErr != nil {
+			// Log the close error or handle it appropriately
+			// You can add logging here if needed
+			errText = errText + " (body close error: " + closeErr.Error() + ")"
 		}
 	}
 	return errText
@@ -82,7 +80,6 @@ func parseTimestampToEpoch(timestampStr string) (int64, error) {
 	}
 	// Try parsing as other common formats
 	formats := []string{
-		"2006-01-02T15:04:05Z",
 		"2006-01-02T15:04:05",
 		"2006-01-02 15:04:05",
 		"2006-01-02",
