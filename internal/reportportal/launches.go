@@ -20,6 +20,10 @@ const (
 	singleResult           = 1                       // Default number of results per page
 	defaultPageSize        = 20                      // Default number of items per page
 	launchesDefaultSorting = "startTime,number,DESC" // default sorting order for launches
+	defaultProviderType    = "launch"                // default provider type
+	filterEqHasStats       = "true"
+	filterEqHasChildren    = "false"
+	filterInType           = "STEP"
 )
 
 // LaunchResources is a struct that encapsulates the ReportPortal client.
