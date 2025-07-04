@@ -40,8 +40,8 @@ func extractPaging(request mcp.CallToolRequest) (int32, int32) {
 	return int32(page), int32(pageSize)
 }
 
-func extractResponseError(err error, rs *http.Response) string {
-	errText := err.Error()
+func extractResponseError(err error, rs *http.Response) (errText string) {
+	errText = err.Error()
 	if rs != nil && rs.Body != nil {
 		defer func() {
 			if closeErr := rs.Body.Close(); closeErr != nil {
@@ -82,7 +82,6 @@ func parseTimestampToEpoch(timestampStr string) (int64, error) {
 	}
 	// Try parsing as other common formats
 	formats := []string{
-		"2006-01-02T15:04:05Z",
 		"2006-01-02T15:04:05",
 		"2006-01-02 15:04:05",
 		"2006-01-02",

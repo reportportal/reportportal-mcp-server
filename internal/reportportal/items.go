@@ -112,6 +112,7 @@ func (lr *TestItemResources) toolListTestItemsByFilter() (tool mcp.Tool, handler
 			filterStatus := request.GetString("filter.in.status", "")
 			filterHasRetries := request.GetBool("filter.eq.hasRetries", false)
 			filterParentId := request.GetString("filter.eq.parentId", "")
+			itemPageSorting := request.GetString("filter.page.sort", itemsDefaultSorting)
 
 			// Process start time interval filter
 			var filterStartTime string
@@ -180,7 +181,7 @@ func (lr *TestItemResources) toolListTestItemsByFilter() (tool mcp.Tool, handler
 			apiRequest := lr.client.TestItemAPI.GetTestItemsV2(ctxWithParams, project).
 				PagePage(page).
 				PageSize(pageSize).
-				PageSort(itemsDefaultSorting).
+				PageSort(itemPageSorting).
 				Params(requiredUrlParams)
 
 			if filterAttributes != "" {
@@ -189,9 +190,6 @@ func (lr *TestItemResources) toolListTestItemsByFilter() (tool mcp.Tool, handler
 			if filterHasRetries {
 				apiRequest = apiRequest.FilterEqHasRetries(filterHasRetries)
 			}
-			// if filterParentIdInt != 0 {
-			// 	apiRequest = apiRequest.FilterEqParentId(int32(filterParentIdInt))
-			// }
 
 			// Execute the request
 			items, rs, err := apiRequest.Execute()
