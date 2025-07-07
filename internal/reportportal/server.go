@@ -46,7 +46,7 @@ func NewServer(
 
 	testItems := NewTestItemResources(rpClient, defaultProject)
 	s.AddTool(testItems.toolGetTestItemById())
-	s.AddTool(testItems.toolListLaunchTestItems())
+	s.AddTool(testItems.toolListTestItemsByFilter())
 	s.AddResourceTemplate(testItems.resourceTestItem())
 
 	prompts, err := readPrompts(promptFiles, "prompts")
