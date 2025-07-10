@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -139,9 +140,15 @@ func (lr *LaunchResources) toolGetLastLaunchByName() (mcp.Tool, server.ToolHandl
 				return mcp.NewToolResultError(err.Error()), nil
 			}
 
+			// Prepare the query parameters for filtering launches by name
+			// We use url.Values to create the query parameters
+			urlValues := url.Values{
+				"filter.cnt.name": {launchName},
+			}
+			ctxWithParams := WithQueryParams(ctx, urlValues)
+
 			// Fetch the launches matching the provided name
-			launches, _, err := lr.client.LaunchAPI.GetProjectLaunches(ctx, project).
-				FilterEqName(launchName).
+			launches, _, err := lr.client.LaunchAPI.GetProjectLaunches(ctxWithParams, project).
 				PagePage(firstPage).
 				PageSize(singleResult).
 				PageSort(launchesDefaultSorting).
