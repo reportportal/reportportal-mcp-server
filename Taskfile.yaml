@@ -4,6 +4,9 @@ vars:
   GOLANGCI_LINT_VERSION: 'v2.1.6'
   GOLANG_CI: "docker run --rm -v $(pwd):/app -w /app golangci/golangci-lint:{{.GOLANGCI_LINT_VERSION}} golangci-lint"
   IMAGE_NAME: "reportportal-mcp-server"
+  IMAGE_NAME_DEBUG: "reportportal-mcp-server-debug"
+  INSPECTOR: "npx @modelcontextprotocol/inspector@0.15.0"
+  DLV_PORT: "52202"
 dotenv: [ '.env' ]
 tasks:
   fmt:
@@ -28,7 +31,7 @@ tasks:
     cmd: "gotestsum --junitfile={{.JUNIT_REPORT_FILE}} ./..."
 
   app:build:
-    desc: "Builds docker image"
+    desc: "Builds application"
     env:
       CGO_ENABLED: 0
     cmd: |
@@ -38,8 +41,18 @@ tasks:
     desc: "Builds docker image"
     cmd: "docker build -t {{.IMAGE_NAME}} ."
 
+  docker:build-debug:
+    desc: "Builds docker image with dlv for debugging"
+    cmd: "docker build -f debug.dockerfile -t {{.IMAGE_NAME_DEBUG}} ."
+
   inspector:
-    desc: "Runs inspector"
+    desc: "Runs inspector in production mode"
     deps: [ docker:build ]
     cmd: >
-      npx @modelcontextprotocol/inspector -- docker run -i --rm -e "RP_API_TOKEN=$RP_API_TOKEN" -e "RP_PROJECT=$RP_PROJECT" -e "RP_HOST=$RP_HOST" reportportal-mcp-server
+      npx @modelcontextprotocol/inspector -- docker run -i --rm -e "RP_API_TOKEN=$RP_API_TOKEN" -e "RP_PROJECT=$RP_PROJECT" -e "RP_HOST=$RP_HOST" {{.IMAGE_NAME}}
+
+  inspector-debug:
+    desc: "Runs inspector with the MCP server in debug mode"
+    deps: [ docker:build-debug ]
+    cmd: >
+      {{.INSPECTOR}} -- docker run -p {{.DLV_PORT}}:{{.DLV_PORT}} -i --rm -e "RP_API_TOKEN=$RP_API_TOKEN" -e "RP_PROJECT=$RP_PROJECT" -e "RP_HOST=$RP_HOST" {{.IMAGE_NAME_DEBUG}}
