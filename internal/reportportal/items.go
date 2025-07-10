@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/url"
 	"strconv"
+	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -282,5 +284,72 @@ func (lr *TestItemResources) resourceTestItem() (mcp.ResourceTemplate, server.Re
 					Text:     string(testItemPayload),
 				},
 			}, nil
+		}
+}
+
+func (lr *TestItemResources) resourceTestItemAttachment() (mcp.ResourceTemplate, server.ResourceTemplateHandlerFunc) {
+	tmpl := uritemplate.MustNew("reportportal://data/{project}/{dataId}")
+
+	return mcp.NewResourceTemplate(tmpl.Raw(), "reportportal-log-attachment-by-id",
+			mcp.WithTemplateDescription("Returns log attachment file by attachment ID")),
+		func(ctx context.Context, request mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
+			paramValues := tmpl.Match(request.Params.URI)
+			if len(paramValues) == 0 {
+				return nil, fmt.Errorf("incorrect URI: %s", request.Params.URI)
+			}
+			// Extract the "project" parameter from the request
+			project, found := paramValues["project"]
+			if !found || project.String() == "" {
+				return nil, fmt.Errorf("missing project in URI: %s", request.Params.URI)
+			}
+			// Extract the "dataId" parameter from the request
+			attachmentIdStr, found := paramValues["dataId"]
+			if !found || attachmentIdStr.String() == "" {
+				return nil, fmt.Errorf("missing dataId in URI: %s", request.Params.URI)
+			}
+			attachmentId, err := strconv.ParseInt(attachmentIdStr.String(), 10, 64)
+			if err != nil {
+				return nil, fmt.Errorf("invalid attachment ID value: %s", attachmentIdStr.String())
+			}
+			// Fetch the attachment with given ID
+			response, err := lr.client.FileStorageAPI.GetFile(ctx, attachmentId, project.String()).
+				Execute()
+			if err != nil {
+				return nil, fmt.Errorf("failed to get file: %w", err)
+			}
+			defer func() {
+				if closeErr := response.Body.Close(); closeErr != nil {
+					slog.Error("failed to close response body", "error", closeErr)
+				}
+			}()
+			rawBody, err := io.ReadAll(response.Body)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read response body: %w", err)
+			}
+			contentType := response.Header.Get("Content-Type")
+			if contentType == "" {
+				contentType = "application/octet-stream" // default binary type
+			}
+
+			// Check if content is text-based
+			if strings.HasPrefix(strings.ToLower(contentType), "text/") ||
+				strings.Contains(strings.ToLower(contentType), "json") ||
+				strings.Contains(strings.ToLower(contentType), "xml") {
+				return []mcp.ResourceContents{
+					mcp.TextResourceContents{
+						URI:      request.Params.URI,
+						MIMEType: contentType,
+						Text:     string(rawBody),
+					},
+				}, nil
+			} else {
+				return []mcp.ResourceContents{
+					mcp.BlobResourceContents{
+						URI:      request.Params.URI,
+						MIMEType: contentType,
+						Blob:     string(rawBody),
+					},
+				}, nil
+			}
 		}
 }
