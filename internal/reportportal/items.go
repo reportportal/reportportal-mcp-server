@@ -63,7 +63,13 @@ func (lr *TestItemResources) toolListTestItemsByFilter() (tool mcp.Tool, handler
 			mcp.WithString(
 				"filter.has.compositeAttribute", // Item attributes
 				mcp.Description(
-					"Items has this combination of attributes, format: attribute1,attribute2:attribute3,... etc. string without spaces",
+					"Items has this combination of the attributes values, format: attribute1,attribute2:attribute3,... etc. string without spaces",
+				),
+			),
+			mcp.WithString(
+				"filter.has.attributeKey", // Item attribute keys
+				mcp.Description(
+					"Items have these attribute keys (one or few)",
 				),
 			),
 			mcp.WithString("filter.cnt.description", // Item description
@@ -108,6 +114,7 @@ func (lr *TestItemResources) toolListTestItemsByFilter() (tool mcp.Tool, handler
 			// Extract optional filter parameters
 			filterName := request.GetString("filter.cnt.name", "")
 			filterAttributes := request.GetString("filter.has.compositeAttribute", "")
+			filterAttributeKeys := request.GetString("filter.has.attributeKey", "")
 			filterDescription := request.GetString("filter.cnt.description", "")
 			filterStartTimeFrom := request.GetString("filter.btw.startTime.from", "")
 			filterStartTimeTo := request.GetString("filter.btw.startTime.to", "")
@@ -115,30 +122,6 @@ func (lr *TestItemResources) toolListTestItemsByFilter() (tool mcp.Tool, handler
 			filterHasRetries := request.GetBool("filter.eq.hasRetries", false)
 			filterParentId := request.GetString("filter.eq.parentId", "")
 			itemPageSorting := request.GetString("filter.page.sort", itemsDefaultSorting)
-
-			// Process start time interval filter
-			var filterStartTime string
-			if filterStartTimeFrom != "" && filterStartTimeTo != "" {
-				fromEpoch, err := parseTimestampToEpoch(filterStartTimeFrom)
-				if err != nil {
-					return mcp.NewToolResultError(
-						fmt.Sprintf("invalid from timestamp: %v", err),
-					), nil
-				}
-				toEpoch, err := parseTimestampToEpoch(filterStartTimeTo)
-				if err != nil {
-					return mcp.NewToolResultError(fmt.Sprintf("invalid to timestamp: %v", err)), nil
-				}
-				if fromEpoch >= toEpoch {
-					return mcp.NewToolResultError(
-						"from timestamp must be earlier than to timestamp",
-					), nil
-				}
-				// Format as comma-separated values for ReportPortal API
-				filterStartTime = fmt.Sprintf("%d,%d", fromEpoch, toEpoch)
-			} else if filterStartTimeFrom != "" || filterStartTimeTo != "" {
-				return mcp.NewToolResultError("both from and to timestamps are required for time interval filter"), nil
-			}
 
 			urlValues := url.Values{
 				"providerType":          {defaultProviderType},
@@ -152,14 +135,8 @@ func (lr *TestItemResources) toolListTestItemsByFilter() (tool mcp.Tool, handler
 			if filterName != "" {
 				urlValues.Add("filter.cnt.name", filterName)
 			}
-			if filterAttributes != "" {
-				urlValues.Add("filter.has.compositeAttribute", filterAttributes)
-			}
 			if filterDescription != "" {
 				urlValues.Add("filter.cnt.description", filterDescription)
-			}
-			if filterStartTime != "" {
-				urlValues.Add("filter.btw.startTime", filterStartTime)
 			}
 			if filterStatus != "" {
 				urlValues.Add("filter.in.status", filterStatus)
@@ -174,6 +151,14 @@ func (lr *TestItemResources) toolListTestItemsByFilter() (tool mcp.Tool, handler
 				urlValues.Add("filter.eq.parentId", filterParentId)
 			}
 
+			filterStartTime, err := processStartTimeFilter(filterStartTimeFrom, filterStartTimeTo)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			if filterStartTime != "" {
+				urlValues.Add("filter.btw.startTime", filterStartTime)
+			}
+
 			ctxWithParams := WithQueryParams(ctx, urlValues)
 			// Prepare "requiredUrlParams" for the API request because the ReportPortal API v2 expects them in a specific format
 			requiredUrlParams := map[string]string{
@@ -186,6 +171,8 @@ func (lr *TestItemResources) toolListTestItemsByFilter() (tool mcp.Tool, handler
 				PageSort(itemPageSorting).
 				Params(requiredUrlParams)
 
+			// Process attribute keys and combine with composite attributes
+			filterAttributes = processAttributeKeys(filterAttributes, filterAttributeKeys)
 			if filterAttributes != "" {
 				apiRequest = apiRequest.FilterHasCompositeAttribute(filterAttributes)
 			}
