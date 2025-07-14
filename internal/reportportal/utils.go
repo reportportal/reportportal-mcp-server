@@ -6,6 +6,7 @@ import (
 	"math"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -92,4 +93,58 @@ func parseTimestampToEpoch(timestampStr string) (int64, error) {
 		}
 	}
 	return 0, fmt.Errorf("unable to parse timestamp: %s", timestampStr)
+}
+
+// processStartTimeFilter processes start time interval filter and returns the formatted filter string
+func processStartTimeFilter(filterStartTimeFrom, filterStartTimeTo string) (string, error) {
+	// Process start time interval filter
+	var filterStartTime string
+	if filterStartTimeFrom != "" && filterStartTimeTo != "" {
+		fromEpoch, err := parseTimestampToEpoch(filterStartTimeFrom)
+		if err != nil {
+			return "", fmt.Errorf("invalid from timestamp: %v", err)
+		}
+		toEpoch, err := parseTimestampToEpoch(filterStartTimeTo)
+		if err != nil {
+			return "", fmt.Errorf("invalid to timestamp: %v", err)
+		}
+		if fromEpoch >= toEpoch {
+			return "", fmt.Errorf("from timestamp must be earlier than to timestamp")
+		}
+		// Format as comma-separated values for ReportPortal API
+		filterStartTime = fmt.Sprintf("%d,%d", fromEpoch, toEpoch)
+	} else if filterStartTimeFrom != "" || filterStartTimeTo != "" {
+		return "", fmt.Errorf("both from and to timestamps are required for time interval filter")
+	}
+
+	return filterStartTime, nil
+}
+
+// processAttributeKeys processes attribute keys by adding ":" suffix where needed and combines with existing attributes
+func processAttributeKeys(filterAttributes, filterAttributeKeys string) string {
+	if filterAttributeKeys == "" {
+		return filterAttributes
+	}
+
+	var processed []string
+	for _, key := range strings.Split(filterAttributeKeys, ",") {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+
+		if colonIndex := strings.Index(key, ":"); colonIndex > 0 && colonIndex < len(key)-1 {
+			processed = append(processed, key[colonIndex+1:]) // Extract postfix
+		} else if !strings.HasSuffix(key, ":") {
+			processed = append(processed, key+":") // Add suffix
+		} else {
+			processed = append(processed, key) // Keep as is
+		}
+	}
+
+	result := strings.Join(processed, ",")
+	if filterAttributes != "" {
+		return filterAttributes + "," + result
+	}
+	return result
 }
