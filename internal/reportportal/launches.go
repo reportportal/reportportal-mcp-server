@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/url"
 	"strconv"
 	"strings"
@@ -14,17 +15,6 @@ import (
 	"github.com/reportportal/goRP/v5/pkg/gorp"
 	"github.com/reportportal/goRP/v5/pkg/openapi"
 	"github.com/yosida95/uritemplate/v3"
-)
-
-const (
-	firstPage              = 1                       // Default starting page for pagination
-	singleResult           = 1                       // Default number of results per page
-	defaultPageSize        = 20                      // Default number of items per page
-	launchesDefaultSorting = "startTime,number,DESC" // default sorting order for launches
-	defaultProviderType    = "launch"                // default provider type
-	filterEqHasStats       = "true"
-	filterEqHasChildren    = "false"
-	filterInType           = "STEP"
 )
 
 // LaunchResources is a struct that encapsulates the ReportPortal client.
@@ -54,31 +44,120 @@ func (lr *LaunchResources) toolListLaunches() (tool mcp.Tool, handler server.Too
 				mcp.DefaultNumber(defaultPageSize),
 				mcp.Description("Page size"),
 			),
+			mcp.WithString("page-sort", // Sorting fields and direction
+				mcp.DefaultString(defaultSorting),
+				mcp.Description("Sorting fields and direction"),
+			),
+
+			// Optional filters
+			mcp.WithString("filter.cnt.name", // Item name
+				mcp.Description("Launches name should contain this substring"),
+			),
+			mcp.WithString(
+				"filter.has.compositeAttribute", // Item attributes
+				mcp.Description(
+					"Launches has this combination of the attributes values, format: attribute1,attribute2:attribute3,... etc. string without spaces",
+				),
+			),
+			mcp.WithString(
+				"filter.has.attributeKey", // Item attribute keys
+				mcp.Description(
+					"Launches have these attribute keys (one or few)",
+				),
+			),
+			mcp.WithString("filter.cnt.description", // Item description
+				mcp.Description("Launches description should contain this substring"),
+			),
+			mcp.WithString(
+				"filter.btw.startTime.from", // Start time from timestamp
+				mcp.Description(
+					"Test launches with start time from timestamp (GMT timezone(UTC+00:00), RFC3339 format or Unix epoch)",
+				),
+			),
+			mcp.WithString(
+				"filter.btw.startTime.to", // Start time to timestamp
+				mcp.Description(
+					"Test launches with start time to timestamp (GMT timezone(UTC+00:00), RFC3339 format or Unix epoch)",
+				),
+			),
+
+			// Additional filters
+			mcp.WithNumber("filter.gte.number", // Has number
+				mcp.Description("Launch has number greater than"),
+			),
+			mcp.WithString("filter.in.user", // Owner name
+				mcp.Description("List of the owner names"),
+			),
 		), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			project, err := extractProject(request)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
-			page, pageSize := extractPaging(request)
+			page, pageSize, pageSorting := extractPaging(request)
 
-			// Fetch the launches from ReportPortal using the provided page details
-			launches, _, err := lr.client.LaunchAPI.GetProjectLaunches(ctx, project).
-				PagePage(page).
-				PageSize(pageSize).
-				PageSort(launchesDefaultSorting).
-				Execute()
+			// Extract optional filter parameters
+			filterLaunchName := request.GetString("filter.cnt.name", "")
+			filterAttributes := request.GetString("filter.has.compositeAttribute", "")
+			filterAttributeKeys := request.GetString("filter.has.attributeKey", "")
+			filterDescription := request.GetString("filter.cnt.description", "")
+			filterStartTimeFrom := request.GetString("filter.btw.startTime.from", "")
+			filterStartTimeTo := request.GetString("filter.btw.startTime.to", "")
+			filterGreaterThanNumber := request.GetInt("filter.gte.number", 0)
+			filterUserNames := request.GetString("filter.in.user", "")
+
+			urlValues := url.Values{}
+
+			// Add optional filters to urlValues if they have values
+			if filterLaunchName != "" {
+				urlValues.Add("filter.cnt.name", filterLaunchName)
+			}
+			if filterDescription != "" {
+				urlValues.Add("filter.cnt.description", filterDescription)
+			}
+			filterStartTime, err := processStartTimeFilter(filterStartTimeFrom, filterStartTimeTo)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
-
-			// Serialize the launches into JSON format
-			r, err := json.Marshal(launches)
-			if err != nil {
-				return nil, fmt.Errorf("failed to marshal response: %w", err)
+			if filterStartTime != "" {
+				urlValues.Add("filter.btw.startTime", filterStartTime)
+			}
+			if filterUserNames != "" {
+				urlValues.Add("filter.in.user", filterUserNames)
+			}
+			if filterGreaterThanNumber > 0 {
+				urlValues.Add("filter.gte.number", strconv.Itoa(filterGreaterThanNumber))
 			}
 
-			// Return the serialized launches as a text result
-			return mcp.NewToolResultText(string(r)), nil
+			ctxWithParams := WithQueryParams(ctx, urlValues)
+			// Fetch the launches from ReportPortal using the provided page details
+			apiRequest := lr.client.LaunchAPI.GetProjectLaunches(ctxWithParams, project).
+				PagePage(page).
+				PageSize(pageSize).
+				PageSort(pageSorting)
+
+			// Process attribute keys and combine with composite attributes
+			filterAttributes = processAttributeKeys(filterAttributes, filterAttributeKeys)
+			if filterAttributes != "" {
+				apiRequest = apiRequest.FilterHasCompositeAttribute(filterAttributes)
+			}
+
+			_, response, err := apiRequest.Execute()
+			if err != nil {
+				return mcp.NewToolResultError(extractResponseError(err, response)), nil
+			}
+
+			defer func() {
+				if closeErr := response.Body.Close(); closeErr != nil {
+					slog.Error("failed to close response body", "error", closeErr)
+				}
+			}()
+			rawBody, err := io.ReadAll(response.Body)
+			if err != nil {
+				return mcp.NewToolResultError(
+					fmt.Sprintf("failed to read response body: %v", err),
+				), nil
+			}
+			return mcp.NewToolResultText(string(rawBody)), nil
 		}
 }
 
@@ -151,7 +230,7 @@ func (lr *LaunchResources) toolGetLastLaunchByName() (mcp.Tool, server.ToolHandl
 			launches, _, err := lr.client.LaunchAPI.GetProjectLaunches(ctxWithParams, project).
 				PagePage(firstPage).
 				PageSize(singleResult).
-				PageSort(launchesDefaultSorting).
+				PageSort(defaultSorting).
 				Execute()
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil

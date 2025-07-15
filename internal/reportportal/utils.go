@@ -12,6 +12,17 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
+const (
+	firstPage                  = 1                       // Default starting page for pagination
+	singleResult               = 1                       // Default number of results per page
+	defaultPageSize            = 50                      // Default number of elements per page
+	defaultSorting             = "startTime,number,DESC" // default sorting order for elements
+	defaultProviderType        = "launch"                // default provider type
+	defaultFilterEqHasChildren = "false"                 // items which don't have children
+	defaultFilterEqHasStats    = "true"
+	defaultFilterInType        = "STEP"
+)
+
 func newProjectParameter(defaultProject string) mcp.ToolOption {
 	return mcp.WithString("project", // Parameter for specifying the project name)
 		mcp.Description("Project name"),
@@ -24,7 +35,7 @@ func extractProject(rq mcp.CallToolRequest) (string, error) {
 	return rq.RequireString("project")
 }
 
-func extractPaging(request mcp.CallToolRequest) (int32, int32) {
+func extractPaging(request mcp.CallToolRequest) (int32, int32, string) {
 	// Extract the "page" parameter from the request
 	page := request.GetInt("page", firstPage)
 	if page > math.MaxInt32 {
@@ -37,8 +48,11 @@ func extractPaging(request mcp.CallToolRequest) (int32, int32) {
 		pageSize = math.MaxInt32
 	}
 
+	// Extract the "page-sort" parameter from the request
+	pageSort := request.GetString("page-sort", defaultSorting)
+
 	//nolint:gosec // the int32 is confirmed
-	return int32(page), int32(pageSize)
+	return int32(page), int32(pageSize), pageSort
 }
 
 func extractResponseError(err error, rs *http.Response) (errText string) {

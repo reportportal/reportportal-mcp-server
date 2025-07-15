@@ -16,8 +16,6 @@ import (
 	"github.com/yosida95/uritemplate/v3"
 )
 
-const itemsDefaultSorting = "startTime,DESC" // default sorting order for test items
-
 // TestItemResources is a struct that encapsulates the ReportPortal client.
 type TestItemResources struct {
 	client           *gorp.Client // Client to interact with the ReportPortal API
@@ -51,8 +49,8 @@ func (lr *TestItemResources) toolListTestItemsByFilter() (tool mcp.Tool, handler
 				mcp.DefaultNumber(defaultPageSize),
 				mcp.Description("Page size"),
 			),
-			mcp.WithString("page.sort", // Sorting fields and direction
-				mcp.DefaultString(itemsDefaultSorting),
+			mcp.WithString("page-sort", // Sorting fields and direction
+				mcp.DefaultString(defaultSorting),
 				mcp.Description("Sorting fields and direction"),
 			),
 
@@ -104,7 +102,7 @@ func (lr *TestItemResources) toolListTestItemsByFilter() (tool mcp.Tool, handler
 			}
 			// Extract the "page" parameter from the request
 
-			page, pageSize := extractPaging(request)
+			page, pageSize, pageSorting := extractPaging(request)
 
 			launchId, err := request.RequireInt("launch-id")
 			if err != nil {
@@ -121,13 +119,12 @@ func (lr *TestItemResources) toolListTestItemsByFilter() (tool mcp.Tool, handler
 			filterStatus := request.GetString("filter.in.status", "")
 			filterHasRetries := request.GetBool("filter.eq.hasRetries", false)
 			filterParentId := request.GetString("filter.eq.parentId", "")
-			itemPageSorting := request.GetString("filter.page.sort", itemsDefaultSorting)
 
 			urlValues := url.Values{
 				"providerType":          {defaultProviderType},
-				"filter.eq.hasStats":    {filterEqHasStats},
-				"filter.eq.hasChildren": {filterEqHasChildren},
-				"filter.in.type":        {filterInType},
+				"filter.eq.hasStats":    {defaultFilterEqHasStats},
+				"filter.eq.hasChildren": {defaultFilterEqHasChildren},
+				"filter.in.type":        {defaultFilterInType},
 			}
 			urlValues.Add("launchId", strconv.Itoa(launchId))
 
@@ -168,7 +165,7 @@ func (lr *TestItemResources) toolListTestItemsByFilter() (tool mcp.Tool, handler
 			apiRequest := lr.client.TestItemAPI.GetTestItemsV2(ctxWithParams, project).
 				PagePage(page).
 				PageSize(pageSize).
-				PageSort(itemPageSorting).
+				PageSort(pageSorting).
 				Params(requiredUrlParams)
 
 			// Process attribute keys and combine with composite attributes
