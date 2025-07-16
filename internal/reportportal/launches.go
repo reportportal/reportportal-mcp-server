@@ -25,6 +25,7 @@ const (
 	filterEqHasStats       = "true"
 	filterEqHasChildren    = "false"
 	filterInType           = "STEP"
+	defaultItemLogLevel    = "TRACE" // Default log level for test item logs
 )
 
 // LaunchResources is a struct that encapsulates the ReportPortal client.

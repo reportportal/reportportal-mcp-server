@@ -353,3 +353,130 @@ func (lr *TestItemResources) resourceTestItemAttachment() (mcp.ResourceTemplate,
 			}
 		}
 }
+
+// toolGetTestItemLogsByFilter creates a tool to get test items logs for a specific launch.
+func (lr *TestItemResources) toolGetTestItemLogsByFilter() (tool mcp.Tool, handler server.ToolHandlerFunc) {
+	return mcp.NewTool(
+			"get_test_item_logs_by_filter",
+			mcp.WithDescription(
+				"Get list of logs for test item with specific item ID with optional filters",
+			),
+			lr.projectParameter,
+			mcp.WithString("parent-item-id", // ID of the parent item
+				mcp.Description("Items with specific Parent Item ID, this is a required parameter"),
+			),
+			mcp.WithNumber("page", // Parameter for specifying the page number
+				mcp.DefaultNumber(firstPage),
+				mcp.Description("Page number"),
+			),
+			mcp.WithNumber("page-size", // Parameter for specifying the page size
+				mcp.DefaultNumber(defaultPageSize),
+				mcp.Description("Page size"),
+			),
+			mcp.WithString("page.sort", // Sorting fields and direction
+				mcp.DefaultString(itemsDefaultSorting),
+				mcp.Description("Sorting fields and direction"),
+			),
+			// Optional filters
+			mcp.WithString("filter.gte.level", // Item's log level
+				mcp.DefaultString(defaultItemLogLevel),
+				mcp.Description("Get logs only with specific log level"),
+			),
+			mcp.WithString(
+				"filter.cnt.message", // Log with specific content
+				mcp.Description(
+					"Log should contains this substring",
+				),
+			),
+			mcp.WithBoolean("filter.ex.binaryContent", // Item description
+				mcp.DefaultBool(false),
+				mcp.Description("Logs with attachments only"),
+			),
+			mcp.WithString(
+				"filter.in.status", // Item status
+				mcp.Description(
+					"Items with status, can be a list of values: PASSED, FAILED, SKIPPED, INTERRUPTED, IN_PROGRESS, WARN, INFO",
+				),
+			),
+		), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			slog.Debug("START PROCESSING")
+			project, err := extractProject(request)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			// Extract the "page" parameter from the request
+			page, pageSize := extractPaging(request)
+
+			parentIdStr, err := request.RequireString("parent-item-id")
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+
+			// Extract optional filter parameters
+			itemPageSorting := request.GetString("page.sort", "")
+			filterLogLevel := request.GetString("filter.gte.level", "")
+			filterLogContains := request.GetString("filter.cnt.message", "")
+			filterLogHasAttachments := request.GetBool("filter.ex.binaryContent", false)
+			filterLogStatus := request.GetString("filter.in.status", "")
+
+			// Process optional log level filter
+			urlValues := url.Values{}
+			// Add optional filters to urlValues if they have values
+			if filterLogLevel != "" {
+				urlValues.Add("filter.gte.level", filterLogLevel)
+			}
+			if filterLogContains != "" {
+				urlValues.Add("filter.cnt.message", filterLogContains)
+			}
+			if filterLogHasAttachments {
+				urlValues.Add(
+					"filter.ex.binaryContent",
+					strconv.FormatBool(filterLogHasAttachments),
+				)
+			}
+			if filterLogStatus != "" {
+				urlValues.Add("filter.in.status", filterLogStatus)
+			}
+			// Validate parentIdStr and convert it to int64
+			var parentIdValue int64
+			if parentIdStr != "" {
+				var err error
+				parentIdValue, err = strconv.ParseInt(parentIdStr, 10, 64)
+				if err != nil || parentIdValue < 0 {
+					return mcp.NewToolResultError(
+						fmt.Sprintf("invalid parent filter ID value: %s", parentIdStr),
+					), nil
+				}
+				// urlValues.Add("filter.eq.parentId", parentIdStr)
+			}
+
+			ctxWithParams := WithQueryParams(ctx, urlValues)
+			// Prepare "requiredUrlParams" for the API request because the ReportPortal API expects them in a specific format
+			requiredUrlParams := map[string]string{
+				"parentId": parentIdStr,
+			}
+			// Build the API request with filters
+			apiRequest := lr.client.LogAPI.GetNestedItems(ctxWithParams, parentIdValue, project).
+				PagePage(page).
+				PageSize(pageSize).
+				PageSort(itemPageSorting).
+				Params(requiredUrlParams)
+
+			// Execute the request
+			_, response, err := apiRequest.Execute()
+			if err != nil {
+				return mcp.NewToolResultError(extractResponseError(err, response)), nil
+			}
+
+			defer func() {
+				if closeErr := response.Body.Close(); closeErr != nil {
+					slog.Error("failed to close response body", "error", closeErr)
+				}
+			}()
+			rawBody, err := io.ReadAll(response.Body)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read response body: %w", err)
+			}
+			return mcp.NewToolResultText(string(rawBody)), nil
+		}
+}
