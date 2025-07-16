@@ -12,6 +12,67 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
+const (
+	firstPage                  = 1                       // Default starting page for pagination
+	singleResult               = 1                       // Default number of results per page
+	defaultPageSize            = 50                      // Default number of elements per page
+	defaultSorting             = "startTime,number,DESC" // default sorting order for elements
+	defaultProviderType        = "launch"                // default provider type
+	defaultFilterEqHasChildren = "false"                 // items which don't have children
+	defaultFilterEqHasStats    = "true"
+	defaultFilterInType        = "STEP"
+	defaultItemLogLevel        = "TRACE" // Default log level for test item logs
+)
+
+// PaginatedRequest is a generic interface for API requests that support pagination
+type PaginatedRequest[T any] interface {
+	PagePage(int32) T
+	PageSize(int32) T
+	PageSort(string) T
+}
+
+// setPaginationOptions returns the standard pagination parameters for MCP tools
+func setPaginationOptions() []mcp.ToolOption {
+	return []mcp.ToolOption{
+		mcp.WithNumber("page", // Parameter for specifying the page number
+			mcp.DefaultNumber(firstPage),
+			mcp.Description("Page number"),
+		),
+		mcp.WithNumber("page.size", // Parameter for specifying the page size
+			mcp.DefaultNumber(defaultPageSize),
+			mcp.Description("Page size"),
+		),
+		mcp.WithString("page.sort", // Sorting fields and direction
+			mcp.DefaultString(defaultSorting),
+			mcp.Description("Sorting fields and direction"),
+		),
+	}
+}
+
+// applyPaginationOptions extracts pagination from request and applies it to API request
+func applyPaginationOptions[T PaginatedRequest[T]](apiRequest T, request mcp.CallToolRequest) T {
+	// Extract the "page" parameter from the request
+	pageInt := request.GetInt("page", firstPage)
+	if pageInt > math.MaxInt32 {
+		pageInt = math.MaxInt32
+	}
+
+	// Extract the "page.size" parameter from the request
+	pageSizeInt := request.GetInt("page.size", defaultPageSize)
+	if pageSizeInt > math.MaxInt32 {
+		pageSizeInt = math.MaxInt32
+	}
+
+	// Extract the "page.sort" parameter from the request
+	pageSort := request.GetString("page.sort", defaultSorting)
+
+	// Apply pagination directly
+	return apiRequest.
+		PagePage(int32(pageInt)).     //nolint:gosec
+		PageSize(int32(pageSizeInt)). //nolint:gosec
+		PageSort(pageSort)
+}
+
 func newProjectParameter(defaultProject string) mcp.ToolOption {
 	return mcp.WithString("project", // Parameter for specifying the project name)
 		mcp.Description("Project name"),
@@ -22,23 +83,6 @@ func newProjectParameter(defaultProject string) mcp.ToolOption {
 
 func extractProject(rq mcp.CallToolRequest) (string, error) {
 	return rq.RequireString("project")
-}
-
-func extractPaging(request mcp.CallToolRequest) (int32, int32) {
-	// Extract the "page" parameter from the request
-	page := request.GetInt("page", firstPage)
-	if page > math.MaxInt32 {
-		page = math.MaxInt32
-	}
-
-	// Extract the "page-size" parameter from the request
-	pageSize := request.GetInt("page-size", defaultPageSize)
-	if pageSize > math.MaxInt32 {
-		pageSize = math.MaxInt32
-	}
-
-	//nolint:gosec // the int32 is confirmed
-	return int32(page), int32(pageSize)
 }
 
 func extractResponseError(err error, rs *http.Response) (errText string) {
