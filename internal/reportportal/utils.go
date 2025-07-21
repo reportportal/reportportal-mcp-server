@@ -193,8 +193,10 @@ func processAttributeKeys(filterAttributes, filterAttributeKeys string) string {
 	}
 
 	result := strings.Join(processed, ",")
-	if filterAttributes != "" {
+	if filterAttributes != "" && result != "" {
 		return filterAttributes + "," + result
+	} else if filterAttributes != "" {
+		return filterAttributes
 	}
 	return result
 }
