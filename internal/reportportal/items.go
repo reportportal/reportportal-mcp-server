@@ -91,6 +91,22 @@ func (lr *TestItemResources) toolListTestItemsByFilter() (tool mcp.Tool, handler
 				"Test items with start time to timestamp (GMT timezone(UTC+00:00), RFC3339 format or Unix epoch)",
 			),
 		),
+		mcp.WithString("filter.cnt.issueComment",
+			mcp.Description("Items defect comment should contains this substring"),
+		),
+		mcp.WithBoolean("filter.in.ignoreAnalyzer",
+			mcp.Description("Items ignored in AA analysis"),
+		),
+		mcp.WithString("filter.has.ticketId",
+			mcp.Description("Items linked Bug tracking system ticket/issue id"),
+		),
+		mcp.WithString("filter.any.patternName",
+			mcp.Description("Items pattern name that test name matches in Pattern-Analysis"),
+		),
+		// from Open API spec
+		mcp.WithBoolean("filter.eq.autoAnalyzed",
+			mcp.Description("Items analysed by RP (AA)"),
+		),
 	}...)
 
 	return mcp.NewTool(
@@ -117,6 +133,11 @@ func (lr *TestItemResources) toolListTestItemsByFilter() (tool mcp.Tool, handler
 			filterStatus := request.GetString("filter.in.status", "")
 			filterHasRetries := request.GetString("filter.eq.hasRetries", "--")
 			filterParentId := request.GetString("filter.eq.parentId", "")
+			filterIssueComment := request.GetString("filter.cnt.issueComment", "")
+			filterAutoAnalyzed := request.GetBool("filter.eq.autoAnalyzed", false)
+			filterIgnoreAnalyzer := request.GetBool("filter.in.ignoreAnalyzer", false)
+			filterTicketId := request.GetString("filter.has.ticketId", "")
+			filterPatternName := request.GetString("filter.any.patternName", "")
 
 			urlValues := url.Values{
 				"providerType":          {defaultProviderType},
@@ -145,6 +166,15 @@ func (lr *TestItemResources) toolListTestItemsByFilter() (tool mcp.Tool, handler
 				}
 				urlValues.Add("filter.eq.parentId", filterParentId)
 			}
+			if filterIssueComment != "" {
+				urlValues.Add("filter.cnt.issueComment", filterIssueComment)
+			}
+			if filterTicketId != "" {
+				urlValues.Add("filter.has.ticketId", filterTicketId)
+			}
+			if filterPatternName != "" {
+				urlValues.Add("filter.any.patternName", filterPatternName)
+			}
 
 			filterStartTime, err := processStartTimeFilter(filterStartTimeFrom, filterStartTimeTo)
 			if err != nil {
@@ -152,6 +182,9 @@ func (lr *TestItemResources) toolListTestItemsByFilter() (tool mcp.Tool, handler
 			}
 			if filterStartTime != "" {
 				urlValues.Add("filter.btw.startTime", filterStartTime)
+			}
+			if filterIgnoreAnalyzer {
+				urlValues.Add("filter.in.ignoreAnalyzer", strconv.FormatBool(filterIgnoreAnalyzer))
 			}
 
 			ctxWithParams := WithQueryParams(ctx, urlValues)
@@ -174,6 +207,9 @@ func (lr *TestItemResources) toolListTestItemsByFilter() (tool mcp.Tool, handler
 			if filterHasRetries != "--" {
 				apiRequest = apiRequest.FilterEqHasRetries(filterHasRetries == "TRUE")
 			}
+			if filterAutoAnalyzed {
+				apiRequest = apiRequest.FilterEqAutoAnalyzed(filterAutoAnalyzed)
+			}
 
 			// Execute the request
 			items, rs, err := apiRequest.Execute()
@@ -184,7 +220,9 @@ func (lr *TestItemResources) toolListTestItemsByFilter() (tool mcp.Tool, handler
 			// Serialize the launches into JSON format
 			r, err := json.Marshal(items)
 			if err != nil {
-				return nil, fmt.Errorf("failed to marshal response: %w", err)
+				return mcp.NewToolResultError(
+					fmt.Sprintf("failed to marshal response: %v", err),
+				), nil
 			}
 
 			// Return the serialized launches as a text result
@@ -222,7 +260,9 @@ func (lr *TestItemResources) toolGetTestItemById() (mcp.Tool, server.ToolHandler
 			// Serialize the first testItem in the result into JSON format
 			r, err := json.Marshal(testItem)
 			if err != nil {
-				return nil, fmt.Errorf("failed to marshal response: %w", err)
+				return mcp.NewToolResultError(
+					fmt.Sprintf("failed to marshal response: %v", err),
+				), nil
 			}
 
 			// Return the serialized testItem as a text result
@@ -291,7 +331,9 @@ func (lr *TestItemResources) toolGetTestItemAttachment() (mcp.Tool, server.ToolH
 			}
 			attachmentId, err := strconv.ParseInt(attachmentIdStr, 10, 64)
 			if err != nil {
-				return nil, fmt.Errorf("invalid attachment ID value: %s", attachmentIdStr)
+				return mcp.NewToolResultError(
+					fmt.Sprintf("invalid attachment ID value: %s", attachmentIdStr),
+				), nil
 			}
 
 			// Fetch the attachment with given ID
