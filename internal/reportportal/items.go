@@ -16,8 +16,6 @@ import (
 	"github.com/yosida95/uritemplate/v3"
 )
 
-const itemsDefaultSorting = "startTime,DESC" // default sorting order for test items
-
 // TestItemResources is a struct that encapsulates the ReportPortal client.
 type TestItemResources struct {
 	client           *gorp.Client // Client to interact with the ReportPortal API
@@ -33,72 +31,72 @@ func NewTestItemResources(client *gorp.Client, defaultProject string) *TestItemR
 
 // toolListTestItemsByFilter creates a tool to list test items for a specific launch.
 func (lr *TestItemResources) toolListTestItemsByFilter() (tool mcp.Tool, handler server.ToolHandlerFunc) {
+	options := []mcp.ToolOption{
+		// Tool metadata
+		mcp.WithDescription(
+			"Get list of test items for a specific launch ID with optional filters",
+		),
+		lr.projectParameter,
+		mcp.WithNumber("launch-id", // ID of the launch
+			mcp.Description("Items with specific Launch ID, this is a required parameter"),
+		),
+	}
+
+	// Add pagination parameters
+	options = append(options, setPaginationOptions()...)
+
+	// Add other parameters
+	options = append(options, []mcp.ToolOption{
+		// Optional filters
+		mcp.WithString("filter.cnt.name", // Item name
+			mcp.Description("Items name should contain this substring"),
+		),
+		mcp.WithString(
+			"filter.has.compositeAttribute", // Item attributes
+			mcp.Description(
+				"Items has this combination of the attributes values, format: attribute1,attribute2:attribute3,... etc. string without spaces",
+			),
+		),
+		mcp.WithString(
+			"filter.has.attributeKey", // Item attribute keys
+			mcp.Description(
+				"Items have these attribute keys (one or few)",
+			),
+		),
+		mcp.WithString("filter.cnt.description", // Item description
+			mcp.Description("Items description should contains this substring"),
+		),
+		mcp.WithString("filter.in.status", // Item status
+			mcp.Description("Items with status"),
+		),
+		mcp.WithBoolean("filter.eq.hasRetries", // Has retries
+			mcp.Description("Items has retries"),
+		),
+		mcp.WithString("filter.eq.parentId", // Parent ID
+			mcp.Description("Items parent ID equals"),
+		),
+		mcp.WithString(
+			"filter.btw.startTime.from", // Start time from timestamp
+			mcp.Description(
+				"Test items with start time from timestamp (GMT timezone(UTC+00:00), RFC3339 format or Unix epoch)",
+			),
+		),
+		mcp.WithString(
+			"filter.btw.startTime.to", // Start time to timestamp
+			mcp.Description(
+				"Test items with start time to timestamp (GMT timezone(UTC+00:00), RFC3339 format or Unix epoch)",
+			),
+		),
+	}...)
+
 	return mcp.NewTool(
 			"list_test_items_by_filter",
-			// Tool metadata
-			mcp.WithDescription(
-				"Get list of test items for for a specific launch ID with optional filters",
-			),
-			lr.projectParameter,
-			mcp.WithNumber("launch-id", // ID of the launch
-				mcp.Description("Items with specific Launch ID, this is a required parameter"),
-			),
-			mcp.WithNumber("page", // Parameter for specifying the page number
-				mcp.DefaultNumber(firstPage),
-				mcp.Description("Page number"),
-			),
-			mcp.WithNumber("page-size", // Parameter for specifying the page size
-				mcp.DefaultNumber(defaultPageSize),
-				mcp.Description("Page size"),
-			),
-			mcp.WithString("page.sort", // Sorting fields and direction
-				mcp.DefaultString(itemsDefaultSorting),
-				mcp.Description("Sorting fields and direction"),
-			),
-
-			// Optional filters
-			mcp.WithString("filter.cnt.name", // Item name
-				mcp.Description("Items name should contains this substring"),
-			),
-			mcp.WithString(
-				"filter.has.compositeAttribute", // Item attributes
-				mcp.Description(
-					"Items has this combination of attributes, format: attribute1,attribute2:attribute3,... etc. string without spaces",
-				),
-			),
-			mcp.WithString("filter.cnt.description", // Item description
-				mcp.Description("Items description should contains this substring"),
-			),
-			mcp.WithString("filter.in.status", // Item status
-				mcp.Description("Items with status"),
-			),
-			mcp.WithBoolean("filter.eq.hasRetries", // Has retries
-				mcp.Description("Items has retries"),
-			),
-			mcp.WithString("filter.eq.parentId", // Parent ID
-				mcp.Description("Items parent ID equals"),
-			),
-			mcp.WithString(
-				"filter.btw.startTime.from", // Start time from timestamp
-				mcp.Description(
-					"Test items with start time from timestamp (GMT timezone(UTC+00:00), RFC3339 format or Unix epoch)",
-				),
-			),
-			mcp.WithString(
-				"filter.btw.startTime.to", // Start time to timestamp
-				mcp.Description(
-					"Test items with start time to timestamp (GMT timezone(UTC+00:00), RFC3339 format or Unix epoch)",
-				),
-			),
-		), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			options...), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			slog.Debug("START PROCESSING")
 			project, err := extractProject(request)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
-			// Extract the "page" parameter from the request
-
-			page, pageSize := extractPaging(request)
 
 			launchId, err := request.RequireInt("launch-id")
 			if err != nil {
@@ -108,43 +106,19 @@ func (lr *TestItemResources) toolListTestItemsByFilter() (tool mcp.Tool, handler
 			// Extract optional filter parameters
 			filterName := request.GetString("filter.cnt.name", "")
 			filterAttributes := request.GetString("filter.has.compositeAttribute", "")
+			filterAttributeKeys := request.GetString("filter.has.attributeKey", "")
 			filterDescription := request.GetString("filter.cnt.description", "")
 			filterStartTimeFrom := request.GetString("filter.btw.startTime.from", "")
 			filterStartTimeTo := request.GetString("filter.btw.startTime.to", "")
 			filterStatus := request.GetString("filter.in.status", "")
 			filterHasRetries := request.GetBool("filter.eq.hasRetries", false)
 			filterParentId := request.GetString("filter.eq.parentId", "")
-			itemPageSorting := request.GetString("filter.page.sort", itemsDefaultSorting)
-
-			// Process start time interval filter
-			var filterStartTime string
-			if filterStartTimeFrom != "" && filterStartTimeTo != "" {
-				fromEpoch, err := parseTimestampToEpoch(filterStartTimeFrom)
-				if err != nil {
-					return mcp.NewToolResultError(
-						fmt.Sprintf("invalid from timestamp: %v", err),
-					), nil
-				}
-				toEpoch, err := parseTimestampToEpoch(filterStartTimeTo)
-				if err != nil {
-					return mcp.NewToolResultError(fmt.Sprintf("invalid to timestamp: %v", err)), nil
-				}
-				if fromEpoch >= toEpoch {
-					return mcp.NewToolResultError(
-						"from timestamp must be earlier than to timestamp",
-					), nil
-				}
-				// Format as comma-separated values for ReportPortal API
-				filterStartTime = fmt.Sprintf("%d,%d", fromEpoch, toEpoch)
-			} else if filterStartTimeFrom != "" || filterStartTimeTo != "" {
-				return mcp.NewToolResultError("both from and to timestamps are required for time interval filter"), nil
-			}
 
 			urlValues := url.Values{
 				"providerType":          {defaultProviderType},
-				"filter.eq.hasStats":    {filterEqHasStats},
-				"filter.eq.hasChildren": {filterEqHasChildren},
-				"filter.in.type":        {filterInType},
+				"filter.eq.hasStats":    {defaultFilterEqHasStats},
+				"filter.eq.hasChildren": {defaultFilterEqHasChildren},
+				"filter.in.type":        {defaultFilterInType},
 			}
 			urlValues.Add("launchId", strconv.Itoa(launchId))
 
@@ -152,14 +126,8 @@ func (lr *TestItemResources) toolListTestItemsByFilter() (tool mcp.Tool, handler
 			if filterName != "" {
 				urlValues.Add("filter.cnt.name", filterName)
 			}
-			if filterAttributes != "" {
-				urlValues.Add("filter.has.compositeAttribute", filterAttributes)
-			}
 			if filterDescription != "" {
 				urlValues.Add("filter.cnt.description", filterDescription)
-			}
-			if filterStartTime != "" {
-				urlValues.Add("filter.btw.startTime", filterStartTime)
 			}
 			if filterStatus != "" {
 				urlValues.Add("filter.in.status", filterStatus)
@@ -174,6 +142,14 @@ func (lr *TestItemResources) toolListTestItemsByFilter() (tool mcp.Tool, handler
 				urlValues.Add("filter.eq.parentId", filterParentId)
 			}
 
+			filterStartTime, err := processStartTimeFilter(filterStartTimeFrom, filterStartTimeTo)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			if filterStartTime != "" {
+				urlValues.Add("filter.btw.startTime", filterStartTime)
+			}
+
 			ctxWithParams := WithQueryParams(ctx, urlValues)
 			// Prepare "requiredUrlParams" for the API request because the ReportPortal API v2 expects them in a specific format
 			requiredUrlParams := map[string]string{
@@ -181,11 +157,13 @@ func (lr *TestItemResources) toolListTestItemsByFilter() (tool mcp.Tool, handler
 			}
 			// Build the API request with filters
 			apiRequest := lr.client.TestItemAPI.GetTestItemsV2(ctxWithParams, project).
-				PagePage(page).
-				PageSize(pageSize).
-				PageSort(itemPageSorting).
 				Params(requiredUrlParams)
 
+			// Apply pagination parameters
+			apiRequest = applyPaginationOptions(apiRequest, request)
+
+			// Process attribute keys and combine with composite attributes
+			filterAttributes = processAttributeKeys(filterAttributes, filterAttributeKeys)
 			if filterAttributes != "" {
 				apiRequest = apiRequest.FilterHasCompositeAttribute(filterAttributes)
 			}
@@ -374,7 +352,7 @@ func (lr *TestItemResources) toolGetTestItemLogsByFilter() (tool mcp.Tool, handl
 				mcp.Description("Page size"),
 			),
 			mcp.WithString("page.sort", // Sorting fields and direction
-				mcp.DefaultString(itemsDefaultSorting),
+				mcp.DefaultString(defaultSorting),
 				mcp.Description("Sorting fields and direction"),
 			),
 			// Optional filters
@@ -404,8 +382,6 @@ func (lr *TestItemResources) toolGetTestItemLogsByFilter() (tool mcp.Tool, handl
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
-			// Extract the "page" parameter from the request
-			page, pageSize := extractPaging(request)
 
 			parentIdStr, err := request.RequireString("parent-item-id")
 			if err != nil {
@@ -413,7 +389,6 @@ func (lr *TestItemResources) toolGetTestItemLogsByFilter() (tool mcp.Tool, handl
 			}
 
 			// Extract optional filter parameters
-			itemPageSorting := request.GetString("page.sort", "")
 			filterLogLevel := request.GetString("filter.gte.level", "")
 			filterLogContains := request.GetString("filter.cnt.message", "")
 			filterLogHasAttachments := request.GetBool("filter.ex.binaryContent", false)
@@ -457,10 +432,10 @@ func (lr *TestItemResources) toolGetTestItemLogsByFilter() (tool mcp.Tool, handl
 			}
 			// Build the API request with filters
 			apiRequest := lr.client.LogAPI.GetNestedItems(ctxWithParams, parentIdValue, project).
-				PagePage(page).
-				PageSize(pageSize).
-				PageSort(itemPageSorting).
 				Params(requiredUrlParams)
+
+			// Apply pagination parameters
+			apiRequest = applyPaginationOptions(apiRequest, request)
 
 			// Execute the request
 			_, response, err := apiRequest.Execute()
