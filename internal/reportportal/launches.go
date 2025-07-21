@@ -50,7 +50,7 @@ func (lr *LaunchResources) toolListLaunches() (tool mcp.Tool, handler server.Too
 		mcp.WithString(
 			"filter.has.compositeAttribute", // Item attributes
 			mcp.Description(
-				"Launches has this combination of the attributes values, format: attribute1,attribute2:attribute3,... etc. string without spaces",
+				"Launches have this combination of the attributes values, format: attribute1,attribute2:attribute3,... etc. string without spaces",
 			),
 		),
 		mcp.WithString(
