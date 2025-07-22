@@ -16,7 +16,9 @@ const (
 	firstPage                  = 1                       // Default starting page for pagination
 	singleResult               = 1                       // Default number of results per page
 	defaultPageSize            = 50                      // Default number of elements per page
-	defaultSorting             = "startTime,number,DESC" // default sorting order for elements
+	defaultSortingForLaunches  = "startTime,number,DESC" // default sorting order for launches
+	defaultSortingForItems     = "startTime,DESC"        // default sorting order for items
+	defaultSortingForLogs      = "logTime,ASC"           // default sorting order for logs
 	defaultProviderType        = "launch"                // default provider type
 	defaultFilterEqHasChildren = "false"                 // items which don't have children
 	defaultFilterEqHasStats    = "true"
@@ -32,7 +34,7 @@ type PaginatedRequest[T any] interface {
 }
 
 // setPaginationOptions returns the standard pagination parameters for MCP tools
-func setPaginationOptions() []mcp.ToolOption {
+func setPaginationOptions(sortingParams string) []mcp.ToolOption {
 	return []mcp.ToolOption{
 		mcp.WithNumber("page", // Parameter for specifying the page number
 			mcp.DefaultNumber(firstPage),
@@ -43,14 +45,18 @@ func setPaginationOptions() []mcp.ToolOption {
 			mcp.Description("Page size"),
 		),
 		mcp.WithString("page.sort", // Sorting fields and direction
-			mcp.DefaultString(defaultSorting),
+			mcp.DefaultString(sortingParams),
 			mcp.Description("Sorting fields and direction"),
 		),
 	}
 }
 
 // applyPaginationOptions extracts pagination from request and applies it to API request
-func applyPaginationOptions[T PaginatedRequest[T]](apiRequest T, request mcp.CallToolRequest) T {
+func applyPaginationOptions[T PaginatedRequest[T]](
+	apiRequest T,
+	request mcp.CallToolRequest,
+	sortingParams string,
+) T {
 	// Extract the "page" parameter from the request
 	pageInt := request.GetInt("page", firstPage)
 	if pageInt > math.MaxInt32 {
@@ -64,7 +70,7 @@ func applyPaginationOptions[T PaginatedRequest[T]](apiRequest T, request mcp.Cal
 	}
 
 	// Extract the "page.sort" parameter from the request
-	pageSort := request.GetString("page.sort", defaultSorting)
+	pageSort := request.GetString("page.sort", sortingParams)
 
 	// Apply pagination directly
 	return apiRequest.
