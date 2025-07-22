@@ -43,7 +43,7 @@ func (lr *TestItemResources) toolListTestItemsByFilter() (tool mcp.Tool, handler
 	}
 
 	// Add pagination parameters
-	options = append(options, setPaginationOptions()...)
+	options = append(options, setPaginationOptions(defaultSortingForItems)...)
 
 	// Add other parameters
 	options = append(options, []mcp.ToolOption{
@@ -54,7 +54,7 @@ func (lr *TestItemResources) toolListTestItemsByFilter() (tool mcp.Tool, handler
 		mcp.WithString(
 			"filter.has.compositeAttribute", // Item attributes
 			mcp.Description(
-				"Items has this combination of the attributes values, format: attribute1,attribute2:attribute3,... etc. string without spaces",
+				"Items have this combination of the attribute values, format: attribute1,attribute2:attribute3,... etc. string without spaces",
 			),
 		),
 		mcp.WithString(
@@ -70,7 +70,7 @@ func (lr *TestItemResources) toolListTestItemsByFilter() (tool mcp.Tool, handler
 			mcp.Description("Items with status"),
 		),
 		mcp.WithBoolean("filter.eq.hasRetries", // Has retries
-			mcp.Description("Items has retries"),
+			mcp.Description("Items have retries"),
 		),
 		mcp.WithString("filter.eq.parentId", // Parent ID
 			mcp.Description("Items parent ID equals"),
@@ -160,7 +160,7 @@ func (lr *TestItemResources) toolListTestItemsByFilter() (tool mcp.Tool, handler
 				Params(requiredUrlParams)
 
 			// Apply pagination parameters
-			apiRequest = applyPaginationOptions(apiRequest, request)
+			apiRequest = applyPaginationOptions(apiRequest, request, defaultSortingForItems)
 
 			// Process attribute keys and combine with composite attributes
 			filterAttributes = processAttributeKeys(filterAttributes, filterAttributeKeys)
@@ -352,7 +352,7 @@ func (lr *TestItemResources) toolGetTestItemLogsByFilter() (tool mcp.Tool, handl
 				mcp.Description("Page size"),
 			),
 			mcp.WithString("page.sort", // Sorting fields and direction
-				mcp.DefaultString(defaultSorting),
+				mcp.DefaultString(defaultSortingForLogs),
 				mcp.Description("Sorting fields and direction"),
 			),
 			// Optional filters
@@ -422,7 +422,6 @@ func (lr *TestItemResources) toolGetTestItemLogsByFilter() (tool mcp.Tool, handl
 						fmt.Sprintf("invalid parent filter ID value: %s", parentIdStr),
 					), nil
 				}
-				// urlValues.Add("filter.eq.parentId", parentIdStr)
 			}
 
 			ctxWithParams := WithQueryParams(ctx, urlValues)
@@ -435,7 +434,7 @@ func (lr *TestItemResources) toolGetTestItemLogsByFilter() (tool mcp.Tool, handl
 				Params(requiredUrlParams)
 
 			// Apply pagination parameters
-			apiRequest = applyPaginationOptions(apiRequest, request)
+			apiRequest = applyPaginationOptions(apiRequest, request, defaultSortingForLogs)
 
 			// Execute the request
 			_, response, err := apiRequest.Execute()
