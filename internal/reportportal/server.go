@@ -48,8 +48,8 @@ func NewServer(
 	s.AddTool(testItems.toolGetTestItemById())
 	s.AddTool(testItems.toolListTestItemsByFilter())
 	s.AddTool(testItems.toolGetTestItemLogsByFilter())
+	s.AddTool(testItems.toolGetTestItemAttachment())
 	s.AddResourceTemplate(testItems.resourceTestItem())
-	s.AddResourceTemplate(testItems.resourceTestItemAttachment())
 
 	prompts, err := readPrompts(promptFiles, "prompts")
 	if err != nil {

@@ -198,3 +198,25 @@ func processAttributeKeys(filterAttributes, filterAttributeKeys string) string {
 	}
 	return result
 }
+
+func isTextContent(mediaType string) bool {
+	lowerType := strings.ToLower(mediaType)
+
+	// Text types (most common)
+	if strings.HasPrefix(lowerType, "text/") {
+		return true
+	}
+
+	// Popular application types that are text-based
+	switch lowerType {
+	case "application/json":
+	case "application/xml":
+	case "application/javascript":
+	case "application/xhtml+xml":
+	case "application/yaml":
+	case "application/csv":
+		return true
+	}
+
+	return false
+}
