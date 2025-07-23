@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"net/url"
 	"strconv"
-	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -193,6 +192,7 @@ func (lr *TestItemResources) toolGetTestItemById() (mcp.Tool, server.ToolHandler
 	return mcp.NewTool("get_test_item_by_id",
 			// Tool metadata
 			mcp.WithDescription("Get test item by ID"),
+			lr.projectParameter,
 			mcp.WithString("test_item_id", // Parameter for specifying the test item ID
 				mcp.Description("Test Item ID"),
 			),
@@ -265,36 +265,37 @@ func (lr *TestItemResources) resourceTestItem() (mcp.ResourceTemplate, server.Re
 		}
 }
 
-func (lr *TestItemResources) resourceTestItemAttachment() (mcp.ResourceTemplate, server.ResourceTemplateHandlerFunc) {
-	tmpl := uritemplate.MustNew("reportportal://data/{project}/{dataId}")
-
-	return mcp.NewResourceTemplate(tmpl.Raw(), "reportportal-log-attachment-by-id",
-			mcp.WithTemplateDescription("Returns log attachment file by attachment ID")),
-		func(ctx context.Context, request mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
-			paramValues := tmpl.Match(request.Params.URI)
-			if len(paramValues) == 0 {
-				return nil, fmt.Errorf("incorrect URI: %s", request.Params.URI)
-			}
-			// Extract the "project" parameter from the request
-			project, found := paramValues["project"]
-			if !found || project.String() == "" {
-				return nil, fmt.Errorf("missing project in URI: %s", request.Params.URI)
-			}
-			// Extract the "dataId" parameter from the request
-			attachmentIdStr, found := paramValues["dataId"]
-			if !found || attachmentIdStr.String() == "" {
-				return nil, fmt.Errorf("missing dataId in URI: %s", request.Params.URI)
-			}
-			attachmentId, err := strconv.ParseInt(attachmentIdStr.String(), 10, 64)
+func (lr *TestItemResources) toolGetTestItemAttachment() (mcp.Tool, server.ToolHandlerFunc) {
+	return mcp.NewTool("get_test_item_attachment_by_id",
+			// Tool metadata
+			mcp.WithDescription("Get test item attachment by ID"),
+			lr.projectParameter,
+			mcp.WithString("attachment-content-id", // Parameter for specifying the test item ID
+				mcp.Description("Attachment binary content ID"),
+			),
+		), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			project, err := extractProject(request)
 			if err != nil {
-				return nil, fmt.Errorf("invalid attachment ID value: %s", attachmentIdStr.String())
+				return mcp.NewToolResultError(err.Error()), nil
 			}
+
+			// Extract the "attachment-content-id" parameter from the request
+			attachmentIdStr, err := request.RequireString("attachment-content-id")
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			attachmentId, err := strconv.ParseInt(attachmentIdStr, 10, 64)
+			if err != nil {
+				return nil, fmt.Errorf("invalid attachment ID value: %s", attachmentIdStr)
+			}
+
 			// Fetch the attachment with given ID
-			response, err := lr.client.FileStorageAPI.GetFile(ctx, attachmentId, project.String()).
+			response, err := lr.client.FileStorageAPI.GetFile(ctx, attachmentId, project).
 				Execute()
 			if err != nil {
-				return nil, fmt.Errorf("failed to get file: %w", err)
+				return mcp.NewToolResultError(extractResponseError(err, response)), nil
 			}
+
 			defer func() {
 				if closeErr := response.Body.Close(); closeErr != nil {
 					slog.Error("failed to close response body", "error", closeErr)
@@ -304,30 +305,28 @@ func (lr *TestItemResources) resourceTestItemAttachment() (mcp.ResourceTemplate,
 			if err != nil {
 				return nil, fmt.Errorf("failed to read response body: %w", err)
 			}
-			contentType := response.Header.Get("Content-Type")
-			if contentType == "" {
-				contentType = "application/octet-stream" // default binary type
-			}
 
-			// Check if content is text-based
-			if strings.HasPrefix(strings.ToLower(contentType), "text/") ||
-				strings.Contains(strings.ToLower(contentType), "json") ||
-				strings.Contains(strings.ToLower(contentType), "xml") {
-				return []mcp.ResourceContents{
+			contentType := response.Header.Get("Content-Type")
+
+			// Return appropriate MCP result type based on content type
+			if isTextContent(contentType) {
+				return mcp.NewToolResultResource(
+					fmt.Sprintf("Text content (%s, %d bytes)", contentType, len(rawBody)),
 					mcp.TextResourceContents{
-						URI:      request.Params.URI,
+						URI:      response.Request.URL.String(),
 						MIMEType: contentType,
 						Text:     string(rawBody),
 					},
-				}, nil
+				), nil
 			} else {
-				return []mcp.ResourceContents{
+				return mcp.NewToolResultResource(
+					fmt.Sprintf("Binary content (%s, %d bytes)", contentType, len(rawBody)),
 					mcp.BlobResourceContents{
-						URI:      request.Params.URI,
+						URI:      response.Request.URL.String(),
 						MIMEType: contentType,
 						Blob:     string(rawBody),
 					},
-				}, nil
+				), nil
 			}
 		}
 }
@@ -368,7 +367,7 @@ func (lr *TestItemResources) toolGetTestItemLogsByFilter() (tool mcp.Tool, handl
 			),
 			mcp.WithBoolean("filter.ex.binaryContent", // Item description
 				mcp.DefaultBool(false),
-				mcp.Description("Logs with attachments only"),
+				mcp.Description("Logs with attachment only"),
 			),
 			mcp.WithString(
 				"filter.in.status", // Item status
@@ -391,7 +390,7 @@ func (lr *TestItemResources) toolGetTestItemLogsByFilter() (tool mcp.Tool, handl
 			// Extract optional filter parameters
 			filterLogLevel := request.GetString("filter.gte.level", "")
 			filterLogContains := request.GetString("filter.cnt.message", "")
-			filterLogHasAttachments := request.GetBool("filter.ex.binaryContent", false)
+			filterLogHasAttachment := request.GetBool("filter.ex.binaryContent", false)
 			filterLogStatus := request.GetString("filter.in.status", "")
 
 			// Process optional log level filter
@@ -403,10 +402,10 @@ func (lr *TestItemResources) toolGetTestItemLogsByFilter() (tool mcp.Tool, handl
 			if filterLogContains != "" {
 				urlValues.Add("filter.cnt.message", filterLogContains)
 			}
-			if filterLogHasAttachments {
+			if filterLogHasAttachment {
 				urlValues.Add(
 					"filter.ex.binaryContent",
-					strconv.FormatBool(filterLogHasAttachments),
+					strconv.FormatBool(filterLogHasAttachment),
 				)
 			}
 			if filterLogStatus != "" {
