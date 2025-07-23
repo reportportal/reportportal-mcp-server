@@ -68,8 +68,13 @@ func (lr *TestItemResources) toolListTestItemsByFilter() (tool mcp.Tool, handler
 		mcp.WithString("filter.in.status", // Item status
 			mcp.Description("Items with status"),
 		),
-		mcp.WithBoolean("filter.eq.hasRetries", // Has retries
-			mcp.Description("Items have retries"),
+		mcp.WithString(
+			"filter.eq.hasRetries", // Has retries
+			mcp.Description(
+				"Items have retries or not, can be a list of values: TRUE, FALSE, -- (default, filter is not applied)",
+			),
+			mcp.Enum("TRUE", "FALSE", "--"),
+			mcp.DefaultString("--"),
 		),
 		mcp.WithString("filter.eq.parentId", // Parent ID
 			mcp.Description("Items parent ID equals"),
@@ -110,7 +115,7 @@ func (lr *TestItemResources) toolListTestItemsByFilter() (tool mcp.Tool, handler
 			filterStartTimeFrom := request.GetString("filter.btw.startTime.from", "")
 			filterStartTimeTo := request.GetString("filter.btw.startTime.to", "")
 			filterStatus := request.GetString("filter.in.status", "")
-			filterHasRetries := request.GetBool("filter.eq.hasRetries", false)
+			filterHasRetries := request.GetString("filter.eq.hasRetries", "--")
 			filterParentId := request.GetString("filter.eq.parentId", "")
 
 			urlValues := url.Values{
@@ -166,8 +171,8 @@ func (lr *TestItemResources) toolListTestItemsByFilter() (tool mcp.Tool, handler
 			if filterAttributes != "" {
 				apiRequest = apiRequest.FilterHasCompositeAttribute(filterAttributes)
 			}
-			if filterHasRetries {
-				apiRequest = apiRequest.FilterEqHasRetries(filterHasRetries)
+			if filterHasRetries != "--" {
+				apiRequest = apiRequest.FilterEqHasRetries(filterHasRetries == "TRUE")
 			}
 
 			// Execute the request
@@ -303,7 +308,9 @@ func (lr *TestItemResources) toolGetTestItemAttachment() (mcp.Tool, server.ToolH
 			}()
 			rawBody, err := io.ReadAll(response.Body)
 			if err != nil {
-				return nil, fmt.Errorf("failed to read response body: %w", err)
+				return mcp.NewToolResultError(
+					fmt.Sprintf("failed to read response body: %v", err),
+				), nil
 			}
 
 			contentType := response.Header.Get("Content-Type")
@@ -365,9 +372,13 @@ func (lr *TestItemResources) toolGetTestItemLogsByFilter() (tool mcp.Tool, handl
 					"Log should contains this substring",
 				),
 			),
-			mcp.WithBoolean("filter.ex.binaryContent", // Item description
-				mcp.DefaultBool(false),
-				mcp.Description("Logs with attachment only"),
+			mcp.WithString(
+				"filter.ex.binaryContent", // Log has attachment
+				mcp.Description(
+					"Logs with attachment or without, can be a list of values: TRUE, FALSE, -- (default, filter is not applied)",
+				),
+				mcp.Enum("TRUE", "FALSE", "--"),
+				mcp.DefaultString("--"),
 			),
 			mcp.WithString(
 				"filter.in.status", // Item status
@@ -390,7 +401,7 @@ func (lr *TestItemResources) toolGetTestItemLogsByFilter() (tool mcp.Tool, handl
 			// Extract optional filter parameters
 			filterLogLevel := request.GetString("filter.gte.level", "")
 			filterLogContains := request.GetString("filter.cnt.message", "")
-			filterLogHasAttachment := request.GetBool("filter.ex.binaryContent", false)
+			filterLogHasAttachment := request.GetString("filter.ex.binaryContent", "--")
 			filterLogStatus := request.GetString("filter.in.status", "")
 
 			// Process optional log level filter
@@ -402,10 +413,10 @@ func (lr *TestItemResources) toolGetTestItemLogsByFilter() (tool mcp.Tool, handl
 			if filterLogContains != "" {
 				urlValues.Add("filter.cnt.message", filterLogContains)
 			}
-			if filterLogHasAttachment {
+			if filterLogHasAttachment != "--" {
 				urlValues.Add(
 					"filter.ex.binaryContent",
-					strconv.FormatBool(filterLogHasAttachment),
+					strconv.FormatBool(filterLogHasAttachment == "TRUE"),
 				)
 			}
 			if filterLogStatus != "" {
@@ -448,7 +459,9 @@ func (lr *TestItemResources) toolGetTestItemLogsByFilter() (tool mcp.Tool, handl
 			}()
 			rawBody, err := io.ReadAll(response.Body)
 			if err != nil {
-				return nil, fmt.Errorf("failed to read response body: %w", err)
+				return mcp.NewToolResultError(
+					fmt.Sprintf("failed to read response body: %v", err),
+				), nil
 			}
 			return mcp.NewToolResultText(string(rawBody)), nil
 		}
