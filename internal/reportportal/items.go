@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"net/url"
 	"strconv"
-	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -43,7 +42,7 @@ func (lr *TestItemResources) toolListTestItemsByFilter() (tool mcp.Tool, handler
 	}
 
 	// Add pagination parameters
-	options = append(options, setPaginationOptions()...)
+	options = append(options, setPaginationOptions(defaultSortingForItems)...)
 
 	// Add other parameters
 	options = append(options, []mcp.ToolOption{
@@ -54,7 +53,7 @@ func (lr *TestItemResources) toolListTestItemsByFilter() (tool mcp.Tool, handler
 		mcp.WithString(
 			"filter.has.compositeAttribute", // Item attributes
 			mcp.Description(
-				"Items has this combination of the attributes values, format: attribute1,attribute2:attribute3,... etc. string without spaces",
+				"Items have this combination of the attribute values, format: attribute1,attribute2:attribute3,... etc. string without spaces",
 			),
 		),
 		mcp.WithString(
@@ -69,8 +68,13 @@ func (lr *TestItemResources) toolListTestItemsByFilter() (tool mcp.Tool, handler
 		mcp.WithString("filter.in.status", // Item status
 			mcp.Description("Items with status"),
 		),
-		mcp.WithBoolean("filter.eq.hasRetries", // Has retries
-			mcp.Description("Items has retries"),
+		mcp.WithString(
+			"filter.eq.hasRetries", // Has retries
+			mcp.Description(
+				"Items have retries or not, can be a list of values: TRUE, FALSE, -- (default, filter is not applied)",
+			),
+			mcp.Enum("TRUE", "FALSE", "--"),
+			mcp.DefaultString("--"),
 		),
 		mcp.WithString("filter.eq.parentId", // Parent ID
 			mcp.Description("Items parent ID equals"),
@@ -86,6 +90,22 @@ func (lr *TestItemResources) toolListTestItemsByFilter() (tool mcp.Tool, handler
 			mcp.Description(
 				"Test items with start time to timestamp (GMT timezone(UTC+00:00), RFC3339 format or Unix epoch)",
 			),
+		),
+		mcp.WithString("filter.cnt.issueComment",
+			mcp.Description("Items defect comment should contains this substring"),
+		),
+		mcp.WithBoolean("filter.in.ignoreAnalyzer",
+			mcp.Description("Items ignored in AA analysis"),
+		),
+		mcp.WithString("filter.has.ticketId",
+			mcp.Description("Items linked Bug tracking system ticket/issue id"),
+		),
+		mcp.WithString("filter.any.patternName",
+			mcp.Description("Items pattern name that test name matches in Pattern-Analysis"),
+		),
+		// from Open API spec
+		mcp.WithBoolean("filter.eq.autoAnalyzed",
+			mcp.Description("Items analysed by RP (AA)"),
 		),
 	}...)
 
@@ -111,8 +131,13 @@ func (lr *TestItemResources) toolListTestItemsByFilter() (tool mcp.Tool, handler
 			filterStartTimeFrom := request.GetString("filter.btw.startTime.from", "")
 			filterStartTimeTo := request.GetString("filter.btw.startTime.to", "")
 			filterStatus := request.GetString("filter.in.status", "")
-			filterHasRetries := request.GetBool("filter.eq.hasRetries", false)
+			filterHasRetries := request.GetString("filter.eq.hasRetries", "--")
 			filterParentId := request.GetString("filter.eq.parentId", "")
+			filterIssueComment := request.GetString("filter.cnt.issueComment", "")
+			filterAutoAnalyzed := request.GetBool("filter.eq.autoAnalyzed", false)
+			filterIgnoreAnalyzer := request.GetBool("filter.in.ignoreAnalyzer", false)
+			filterTicketId := request.GetString("filter.has.ticketId", "")
+			filterPatternName := request.GetString("filter.any.patternName", "")
 
 			urlValues := url.Values{
 				"providerType":          {defaultProviderType},
@@ -141,6 +166,15 @@ func (lr *TestItemResources) toolListTestItemsByFilter() (tool mcp.Tool, handler
 				}
 				urlValues.Add("filter.eq.parentId", filterParentId)
 			}
+			if filterIssueComment != "" {
+				urlValues.Add("filter.cnt.issueComment", filterIssueComment)
+			}
+			if filterTicketId != "" {
+				urlValues.Add("filter.has.ticketId", filterTicketId)
+			}
+			if filterPatternName != "" {
+				urlValues.Add("filter.any.patternName", filterPatternName)
+			}
 
 			filterStartTime, err := processStartTimeFilter(filterStartTimeFrom, filterStartTimeTo)
 			if err != nil {
@@ -148,6 +182,9 @@ func (lr *TestItemResources) toolListTestItemsByFilter() (tool mcp.Tool, handler
 			}
 			if filterStartTime != "" {
 				urlValues.Add("filter.btw.startTime", filterStartTime)
+			}
+			if filterIgnoreAnalyzer {
+				urlValues.Add("filter.in.ignoreAnalyzer", strconv.FormatBool(filterIgnoreAnalyzer))
 			}
 
 			ctxWithParams := WithQueryParams(ctx, urlValues)
@@ -160,15 +197,18 @@ func (lr *TestItemResources) toolListTestItemsByFilter() (tool mcp.Tool, handler
 				Params(requiredUrlParams)
 
 			// Apply pagination parameters
-			apiRequest = applyPaginationOptions(apiRequest, request)
+			apiRequest = applyPaginationOptions(apiRequest, request, defaultSortingForItems)
 
 			// Process attribute keys and combine with composite attributes
 			filterAttributes = processAttributeKeys(filterAttributes, filterAttributeKeys)
 			if filterAttributes != "" {
 				apiRequest = apiRequest.FilterHasCompositeAttribute(filterAttributes)
 			}
-			if filterHasRetries {
-				apiRequest = apiRequest.FilterEqHasRetries(filterHasRetries)
+			if filterHasRetries != "--" {
+				apiRequest = apiRequest.FilterEqHasRetries(filterHasRetries == "TRUE")
+			}
+			if filterAutoAnalyzed {
+				apiRequest = apiRequest.FilterEqAutoAnalyzed(filterAutoAnalyzed)
 			}
 
 			// Execute the request
@@ -180,7 +220,9 @@ func (lr *TestItemResources) toolListTestItemsByFilter() (tool mcp.Tool, handler
 			// Serialize the launches into JSON format
 			r, err := json.Marshal(items)
 			if err != nil {
-				return nil, fmt.Errorf("failed to marshal response: %w", err)
+				return mcp.NewToolResultError(
+					fmt.Sprintf("failed to marshal response: %v", err),
+				), nil
 			}
 
 			// Return the serialized launches as a text result
@@ -193,6 +235,7 @@ func (lr *TestItemResources) toolGetTestItemById() (mcp.Tool, server.ToolHandler
 	return mcp.NewTool("get_test_item_by_id",
 			// Tool metadata
 			mcp.WithDescription("Get test item by ID"),
+			lr.projectParameter,
 			mcp.WithString("test_item_id", // Parameter for specifying the test item ID
 				mcp.Description("Test Item ID"),
 			),
@@ -217,7 +260,9 @@ func (lr *TestItemResources) toolGetTestItemById() (mcp.Tool, server.ToolHandler
 			// Serialize the first testItem in the result into JSON format
 			r, err := json.Marshal(testItem)
 			if err != nil {
-				return nil, fmt.Errorf("failed to marshal response: %w", err)
+				return mcp.NewToolResultError(
+					fmt.Sprintf("failed to marshal response: %v", err),
+				), nil
 			}
 
 			// Return the serialized testItem as a text result
@@ -265,36 +310,39 @@ func (lr *TestItemResources) resourceTestItem() (mcp.ResourceTemplate, server.Re
 		}
 }
 
-func (lr *TestItemResources) resourceTestItemAttachment() (mcp.ResourceTemplate, server.ResourceTemplateHandlerFunc) {
-	tmpl := uritemplate.MustNew("reportportal://data/{project}/{dataId}")
-
-	return mcp.NewResourceTemplate(tmpl.Raw(), "reportportal-log-attachment-by-id",
-			mcp.WithTemplateDescription("Returns log attachment file by attachment ID")),
-		func(ctx context.Context, request mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
-			paramValues := tmpl.Match(request.Params.URI)
-			if len(paramValues) == 0 {
-				return nil, fmt.Errorf("incorrect URI: %s", request.Params.URI)
-			}
-			// Extract the "project" parameter from the request
-			project, found := paramValues["project"]
-			if !found || project.String() == "" {
-				return nil, fmt.Errorf("missing project in URI: %s", request.Params.URI)
-			}
-			// Extract the "dataId" parameter from the request
-			attachmentIdStr, found := paramValues["dataId"]
-			if !found || attachmentIdStr.String() == "" {
-				return nil, fmt.Errorf("missing dataId in URI: %s", request.Params.URI)
-			}
-			attachmentId, err := strconv.ParseInt(attachmentIdStr.String(), 10, 64)
+func (lr *TestItemResources) toolGetTestItemAttachment() (mcp.Tool, server.ToolHandlerFunc) {
+	return mcp.NewTool("get_test_item_attachment_by_id",
+			// Tool metadata
+			mcp.WithDescription("Get test item attachment by ID"),
+			lr.projectParameter,
+			mcp.WithString("attachment-content-id", // Parameter for specifying the test item ID
+				mcp.Description("Attachment binary content ID"),
+			),
+		), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			project, err := extractProject(request)
 			if err != nil {
-				return nil, fmt.Errorf("invalid attachment ID value: %s", attachmentIdStr.String())
+				return mcp.NewToolResultError(err.Error()), nil
 			}
+
+			// Extract the "attachment-content-id" parameter from the request
+			attachmentIdStr, err := request.RequireString("attachment-content-id")
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			attachmentId, err := strconv.ParseInt(attachmentIdStr, 10, 64)
+			if err != nil {
+				return mcp.NewToolResultError(
+					fmt.Sprintf("invalid attachment ID value: %s", attachmentIdStr),
+				), nil
+			}
+
 			// Fetch the attachment with given ID
-			response, err := lr.client.FileStorageAPI.GetFile(ctx, attachmentId, project.String()).
+			response, err := lr.client.FileStorageAPI.GetFile(ctx, attachmentId, project).
 				Execute()
 			if err != nil {
-				return nil, fmt.Errorf("failed to get file: %w", err)
+				return mcp.NewToolResultError(extractResponseError(err, response)), nil
 			}
+
 			defer func() {
 				if closeErr := response.Body.Close(); closeErr != nil {
 					slog.Error("failed to close response body", "error", closeErr)
@@ -302,32 +350,32 @@ func (lr *TestItemResources) resourceTestItemAttachment() (mcp.ResourceTemplate,
 			}()
 			rawBody, err := io.ReadAll(response.Body)
 			if err != nil {
-				return nil, fmt.Errorf("failed to read response body: %w", err)
-			}
-			contentType := response.Header.Get("Content-Type")
-			if contentType == "" {
-				contentType = "application/octet-stream" // default binary type
+				return mcp.NewToolResultError(
+					fmt.Sprintf("failed to read response body: %v", err),
+				), nil
 			}
 
-			// Check if content is text-based
-			if strings.HasPrefix(strings.ToLower(contentType), "text/") ||
-				strings.Contains(strings.ToLower(contentType), "json") ||
-				strings.Contains(strings.ToLower(contentType), "xml") {
-				return []mcp.ResourceContents{
+			contentType := response.Header.Get("Content-Type")
+
+			// Return appropriate MCP result type based on content type
+			if isTextContent(contentType) {
+				return mcp.NewToolResultResource(
+					fmt.Sprintf("Text content (%s, %d bytes)", contentType, len(rawBody)),
 					mcp.TextResourceContents{
-						URI:      request.Params.URI,
+						URI:      response.Request.URL.String(),
 						MIMEType: contentType,
 						Text:     string(rawBody),
 					},
-				}, nil
+				), nil
 			} else {
-				return []mcp.ResourceContents{
+				return mcp.NewToolResultResource(
+					fmt.Sprintf("Binary content (%s, %d bytes)", contentType, len(rawBody)),
 					mcp.BlobResourceContents{
-						URI:      request.Params.URI,
+						URI:      response.Request.URL.String(),
 						MIMEType: contentType,
 						Blob:     string(rawBody),
 					},
-				}, nil
+				), nil
 			}
 		}
 }
@@ -352,7 +400,7 @@ func (lr *TestItemResources) toolGetTestItemLogsByFilter() (tool mcp.Tool, handl
 				mcp.Description("Page size"),
 			),
 			mcp.WithString("page.sort", // Sorting fields and direction
-				mcp.DefaultString(defaultSorting),
+				mcp.DefaultString(defaultSortingForLogs),
 				mcp.Description("Sorting fields and direction"),
 			),
 			// Optional filters
@@ -366,9 +414,13 @@ func (lr *TestItemResources) toolGetTestItemLogsByFilter() (tool mcp.Tool, handl
 					"Log should contains this substring",
 				),
 			),
-			mcp.WithBoolean("filter.ex.binaryContent", // Item description
-				mcp.DefaultBool(false),
-				mcp.Description("Logs with attachments only"),
+			mcp.WithString(
+				"filter.ex.binaryContent", // Log has attachment
+				mcp.Description(
+					"Logs with attachment or without, can be a list of values: TRUE, FALSE, -- (default, filter is not applied)",
+				),
+				mcp.Enum("TRUE", "FALSE", "--"),
+				mcp.DefaultString("--"),
 			),
 			mcp.WithString(
 				"filter.in.status", // Item status
@@ -391,7 +443,7 @@ func (lr *TestItemResources) toolGetTestItemLogsByFilter() (tool mcp.Tool, handl
 			// Extract optional filter parameters
 			filterLogLevel := request.GetString("filter.gte.level", "")
 			filterLogContains := request.GetString("filter.cnt.message", "")
-			filterLogHasAttachments := request.GetBool("filter.ex.binaryContent", false)
+			filterLogHasAttachment := request.GetString("filter.ex.binaryContent", "--")
 			filterLogStatus := request.GetString("filter.in.status", "")
 
 			// Process optional log level filter
@@ -403,10 +455,10 @@ func (lr *TestItemResources) toolGetTestItemLogsByFilter() (tool mcp.Tool, handl
 			if filterLogContains != "" {
 				urlValues.Add("filter.cnt.message", filterLogContains)
 			}
-			if filterLogHasAttachments {
+			if filterLogHasAttachment != "--" {
 				urlValues.Add(
 					"filter.ex.binaryContent",
-					strconv.FormatBool(filterLogHasAttachments),
+					strconv.FormatBool(filterLogHasAttachment == "TRUE"),
 				)
 			}
 			if filterLogStatus != "" {
@@ -422,7 +474,6 @@ func (lr *TestItemResources) toolGetTestItemLogsByFilter() (tool mcp.Tool, handl
 						fmt.Sprintf("invalid parent filter ID value: %s", parentIdStr),
 					), nil
 				}
-				// urlValues.Add("filter.eq.parentId", parentIdStr)
 			}
 
 			ctxWithParams := WithQueryParams(ctx, urlValues)
@@ -435,7 +486,7 @@ func (lr *TestItemResources) toolGetTestItemLogsByFilter() (tool mcp.Tool, handl
 				Params(requiredUrlParams)
 
 			// Apply pagination parameters
-			apiRequest = applyPaginationOptions(apiRequest, request)
+			apiRequest = applyPaginationOptions(apiRequest, request, defaultSortingForLogs)
 
 			// Execute the request
 			_, response, err := apiRequest.Execute()
@@ -450,7 +501,9 @@ func (lr *TestItemResources) toolGetTestItemLogsByFilter() (tool mcp.Tool, handl
 			}()
 			rawBody, err := io.ReadAll(response.Body)
 			if err != nil {
-				return nil, fmt.Errorf("failed to read response body: %w", err)
+				return mcp.NewToolResultError(
+					fmt.Sprintf("failed to read response body: %v", err),
+				), nil
 			}
 			return mcp.NewToolResultText(string(rawBody)), nil
 		}

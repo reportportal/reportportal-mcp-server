@@ -39,7 +39,7 @@ func (lr *LaunchResources) toolListLaunches() (tool mcp.Tool, handler server.Too
 	}
 
 	// Add pagination parameters
-	options = append(options, setPaginationOptions()...)
+	options = append(options, setPaginationOptions(defaultSortingForLaunches)...)
 
 	// Add other parameters
 	options = append(options, []mcp.ToolOption{
@@ -50,7 +50,7 @@ func (lr *LaunchResources) toolListLaunches() (tool mcp.Tool, handler server.Too
 		mcp.WithString(
 			"filter.has.compositeAttribute", // Item attributes
 			mcp.Description(
-				"Launches has this combination of the attributes values, format: attribute1,attribute2:attribute3,... etc. string without spaces",
+				"Launches have this combination of the attributes values, format: attribute1,attribute2:attribute3,... etc. string without spaces",
 			),
 		),
 		mcp.WithString(
@@ -130,7 +130,7 @@ func (lr *LaunchResources) toolListLaunches() (tool mcp.Tool, handler server.Too
 			apiRequest := lr.client.LaunchAPI.GetProjectLaunches(ctxWithParams, project)
 
 			// Apply pagination parameters
-			apiRequest = applyPaginationOptions(apiRequest, request)
+			apiRequest = applyPaginationOptions(apiRequest, request, defaultSortingForLaunches)
 
 			// Process attribute keys and combine with composite attributes
 			filterAttributes = processAttributeKeys(filterAttributes, filterAttributeKeys)
@@ -224,11 +224,12 @@ func (lr *LaunchResources) toolGetLastLaunchByName() (mcp.Tool, server.ToolHandl
 			ctxWithParams := WithQueryParams(ctx, urlValues)
 
 			// Fetch the launches matching the provided name
-			launches, _, err := lr.client.LaunchAPI.GetProjectLaunches(ctxWithParams, project).
-				PagePage(firstPage).
-				PageSize(singleResult).
-				PageSort(defaultSorting).
-				Execute()
+			apiRequest := lr.client.LaunchAPI.GetProjectLaunches(ctxWithParams, project)
+
+			// Apply pagination parameters
+			apiRequest = applyPaginationOptions(apiRequest, request, defaultSortingForLaunches)
+
+			launches, _, err := apiRequest.Execute()
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
