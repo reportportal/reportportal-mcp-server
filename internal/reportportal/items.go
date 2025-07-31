@@ -19,12 +19,18 @@ import (
 type TestItemResources struct {
 	client           *gorp.Client // Client to interact with the ReportPortal API
 	projectParameter mcp.ToolOption
+	analytics        *Analytics
 }
 
-func NewTestItemResources(client *gorp.Client, defaultProject string) *TestItemResources {
+func NewTestItemResources(
+	client *gorp.Client,
+	defaultProject string,
+	analytics *Analytics,
+) *TestItemResources {
 	return &TestItemResources{
 		client:           client,
 		projectParameter: newProjectParameter(defaultProject),
+		analytics:        analytics,
 	}
 }
 
@@ -111,7 +117,7 @@ func (lr *TestItemResources) toolListTestItemsByFilter() (tool mcp.Tool, handler
 
 	return mcp.NewTool(
 			"list_test_items_by_filter",
-			options...), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			options...), lr.analytics.WithAnalytics("list_test_items_by_filter", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			slog.Debug("START PROCESSING")
 			project, err := extractProject(request)
 			if err != nil {
@@ -227,7 +233,7 @@ func (lr *TestItemResources) toolListTestItemsByFilter() (tool mcp.Tool, handler
 
 			// Return the serialized launches as a text result
 			return mcp.NewToolResultText(string(r)), nil
-		}
+		})
 }
 
 // toolGetTestItemById creates a tool to retrieve a test item by its ID.
@@ -239,7 +245,7 @@ func (lr *TestItemResources) toolGetTestItemById() (mcp.Tool, server.ToolHandler
 			mcp.WithString("test_item_id", // Parameter for specifying the test item ID
 				mcp.Description("Test Item ID"),
 			),
-		), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		), lr.analytics.WithAnalytics("get_test_item_by_id", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			project, err := extractProject(request)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
@@ -267,7 +273,7 @@ func (lr *TestItemResources) toolGetTestItemById() (mcp.Tool, server.ToolHandler
 
 			// Return the serialized testItem as a text result
 			return mcp.NewToolResultText(string(r)), nil
-		}
+		})
 }
 
 func (lr *TestItemResources) resourceTestItem() (mcp.ResourceTemplate, server.ResourceTemplateHandlerFunc) {
@@ -318,7 +324,7 @@ func (lr *TestItemResources) toolGetTestItemAttachment() (mcp.Tool, server.ToolH
 			mcp.WithString("attachment-content-id", // Parameter for specifying the test item ID
 				mcp.Description("Attachment binary content ID"),
 			),
-		), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		), lr.analytics.WithAnalytics("get_test_item_attachment_by_id", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			project, err := extractProject(request)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
@@ -377,7 +383,7 @@ func (lr *TestItemResources) toolGetTestItemAttachment() (mcp.Tool, server.ToolH
 					},
 				), nil
 			}
-		}
+		})
 }
 
 // toolGetTestItemLogsByFilter creates a tool to get test items logs for a specific launch.
@@ -428,7 +434,7 @@ func (lr *TestItemResources) toolGetTestItemLogsByFilter() (tool mcp.Tool, handl
 					"Items with status, can be a list of values: PASSED, FAILED, SKIPPED, INTERRUPTED, IN_PROGRESS, WARN, INFO",
 				),
 			),
-		), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		), lr.analytics.WithAnalytics("get_test_item_logs_by_filter", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			slog.Debug("START PROCESSING")
 			project, err := extractProject(request)
 			if err != nil {
@@ -506,5 +512,5 @@ func (lr *TestItemResources) toolGetTestItemLogsByFilter() (tool mcp.Tool, handl
 				), nil
 			}
 			return mcp.NewToolResultText(string(rawBody)), nil
-		}
+		})
 }

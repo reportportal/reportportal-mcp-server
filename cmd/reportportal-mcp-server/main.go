@@ -57,6 +57,16 @@ func main() {
 				Sources:  cli.EnvVars("LOG_LEVEL"),
 				Value:    slog.LevelInfo.String(),
 			},
+			&cli.StringFlag{
+				Name:     "user-id", // Unified user ID for analytics (both client_id and user_id)
+				Required: false,
+				Sources:  cli.EnvVars("RP_USER_ID"),
+				Value:    "", // Empty means auto-generate persistent ID
+			},
+			&cli.BoolFlag{
+				Name:  "analytics-off", // Disable analytics completely
+				Usage: "Disable Google Analytics tracking",
+			},
 		},
 		Commands: []*cli.Command{
 			{
@@ -110,9 +120,12 @@ func initLogger() func(ctx context.Context, command *cli.Command) (context.Conte
 
 func newMCPServer(cmd *cli.Command) (*server.MCPServer, error) {
 	// Retrieve required parameters from the command flags
-	token := cmd.String("token")     // API token
-	host := cmd.String("host")       // ReportPortal host URL
-	project := cmd.String("project") // ReportPortal project name
+	token := cmd.String("token")                           // API token
+	host := cmd.String("host")                             // ReportPortal host URL
+	project := cmd.String("project")                       // ReportPortal project name
+	userID := cmd.String("user-id")                        // Unified user ID for analytics
+	analyticsAPISecret := mcpreportportal.GetAnalyticArg() // Analytics API secret
+	analyticsOff := cmd.Bool("analytics-off")              // Disable analytics flag
 
 	hostUrl, err := url.Parse(host)
 	if err != nil {
@@ -120,7 +133,15 @@ func newMCPServer(cmd *cli.Command) (*server.MCPServer, error) {
 	}
 
 	// Create a new stdio server using the ReportPortal client
-	mcpServer, err := mcpreportportal.NewServer(version, hostUrl, token, project)
+	mcpServer, err := mcpreportportal.NewServer(
+		version,
+		hostUrl,
+		token,
+		project,
+		userID,
+		analyticsAPISecret,
+		analyticsOff,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create ReportPortal MCP server: %w", err)
 	}
