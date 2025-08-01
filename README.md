@@ -68,7 +68,7 @@ The OS pre-built binaries can be downloaded from the official releases on [GitHu
 }
 ```
 
-Choose your favouire AI Tool to connect.
+Choose your favourite AI Tool to connect.
 
 ### Claude Desktop
 
@@ -156,14 +156,14 @@ Once connected, your AI assistant will list ReportPortal-related "tools" it can 
 The ReportPortal MCP server provides a comprehensive set of capabilities for interacting with ReportPortal:
 
 ### Launch Management
-- List and filter launches (test runs) with pagination
+- Get and filter launches (test runs) with pagination
 - Get launch details by name or ID
 - Force-finish running launches
 - Delete launches
-- Run automated analyses (auto analysis, unique error analysis) on launches
+- Run automated analysis (auto analysis, unique error analysis) on launches
 
 ### Test Item Analysis
-- List test items within launches
+- Get test items within by filter
 - Get detailed information on each test item
 - View test execution statistics and failures
 - Retrieve test logs and attachments
@@ -216,7 +216,7 @@ These features let you query and manage your test reports in many ways through s
 
 ### Prerequisites
 - Go 1.24.1 or later
-- A running ReportPortal instance
+- A ReportPortal instance
 
 ### Building from Source
 
