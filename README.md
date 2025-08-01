@@ -20,11 +20,13 @@ For example, instead of logging into the ReportPortal UI, you could ask your AI 
 ## Installation
 
 There are two ways to run the latest version of the ReportPortal MCP Server.
+Each of this way is suitable for any LLM provider.
 
 ### Via Docker (recommended).
 
 The MCP server is available on the official ReportPortal's [DockerHub](https://hub.docker.com/r/reportportal/mcp-server).
 
+Configuration:
 ```json
 {
   "reportportal": {
@@ -54,6 +56,7 @@ The MCP server is available on the official ReportPortal's [DockerHub](https://h
 
 The OS pre-built binaries can be downloaded from the official releases on [GitHub](https://github.com/reportportal/reportportal-mcp-server/releases).
 
+Configuration:
 ```json
 {
   "reportportal": {
