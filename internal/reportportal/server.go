@@ -47,7 +47,7 @@ func NewServer(
 	}
 
 	launches := NewLaunchResources(rpClient, defaultProject, analytics)
-	s.AddTool(launches.toolListLaunches())
+	s.AddTool(launches.toolGetLaunches())
 	s.AddTool(launches.toolGetLastLaunchByName())
 	s.AddTool(launches.toolForceFinishLaunch())
 	s.AddTool(launches.toolDeleteLaunch())
@@ -58,7 +58,7 @@ func NewServer(
 
 	testItems := NewTestItemResources(rpClient, defaultProject, analytics)
 	s.AddTool(testItems.toolGetTestItemById())
-	s.AddTool(testItems.toolListTestItemsByFilter())
+	s.AddTool(testItems.toolGetTestItemsByFilter())
 	s.AddTool(testItems.toolGetTestItemLogsByFilter())
 	s.AddTool(testItems.toolGetTestItemAttachment())
 	s.AddTool(testItems.toolGetTestSuitesByFilter())

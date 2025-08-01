@@ -44,7 +44,7 @@ func TestListLaunchesTool(t *testing.T) {
 
 	serverURL, _ := url.Parse(mockServer.URL)
 	launchTools := NewLaunchResources(gorp.NewClient(serverURL, ""), testProject, nil)
-	srv.AddTool(launchTools.toolListLaunches())
+	srv.AddTool(launchTools.toolGetLaunches())
 
 	err := srv.Start(ctx)
 	require.NoError(t, err)
@@ -53,7 +53,7 @@ func TestListLaunchesTool(t *testing.T) {
 	client := srv.Client()
 
 	var req mcp.CallToolRequest
-	req.Params.Name = "list_launches"
+	req.Params.Name = "get_launches"
 	req.Params.Arguments = map[string]any{
 		"project": testProject,
 	}

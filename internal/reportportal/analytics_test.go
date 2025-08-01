@@ -216,9 +216,9 @@ func TestMetricsBatchingSystem(t *testing.T) {
 	// Increment metrics for different tools
 	analytics.incrementMetric("get_test_item_by_id")
 	analytics.incrementMetric("get_test_item_by_id") // 2 times
-	analytics.incrementMetric("list_launches")
+	analytics.incrementMetric("get_launches")
 	analytics.incrementMetric("get_test_item_by_id") // 3rd time
-	analytics.incrementMetric("list_test_items_by_filter")
+	analytics.incrementMetric("get_test_items_by_filter")
 
 	// Verify metrics were incremented
 	analytics.metricsLock.RLock()
@@ -231,14 +231,14 @@ func TestMetricsBatchingSystem(t *testing.T) {
 	assert.Equal(
 		t,
 		int64(1),
-		atomic.LoadInt64(analytics.metrics["list_launches"]),
-		"list_launches should have 1 event",
+		atomic.LoadInt64(analytics.metrics["get_launches"]),
+		"get_launches should have 1 event",
 	)
 	assert.Equal(
 		t,
 		int64(1),
-		atomic.LoadInt64(analytics.metrics["list_test_items_by_filter"]),
-		"list_test_items_by_filter should have 1 event",
+		atomic.LoadInt64(analytics.metrics["get_test_items_by_filter"]),
+		"get_test_items_by_filter should have 1 event",
 	)
 	analytics.metricsLock.RUnlock()
 
@@ -256,13 +256,13 @@ func TestMetricsBatchingSystem(t *testing.T) {
 	assert.Equal(
 		t,
 		int64(0),
-		atomic.LoadInt64(analytics.metrics["list_launches"]),
+		atomic.LoadInt64(analytics.metrics["get_launches"]),
 		"Metrics should be reset after processing",
 	)
 	assert.Equal(
 		t,
 		int64(0),
-		atomic.LoadInt64(analytics.metrics["list_test_items_by_filter"]),
+		atomic.LoadInt64(analytics.metrics["get_test_items_by_filter"]),
 		"Metrics should be reset after processing",
 	)
 	analytics.metricsLock.RUnlock()
@@ -345,7 +345,7 @@ func TestMetricsBackgroundProcessor(t *testing.T) {
 
 	// Simulate some tool calls
 	analytics.incrementMetric("get_test_item_by_id")
-	analytics.incrementMetric("list_launches")
+	analytics.incrementMetric("get_launches")
 
 	// Wait for at least one processing cycle
 	time.Sleep(150 * time.Millisecond)
