@@ -27,26 +27,24 @@ The MCP server is available on the official ReportPortal's [DockerHub](https://h
 
 ```json
 {
-  "mcpServers": {
-    "reportportal": {
-      "command": "docker",
-      "args": [
-        "run",
-        "-i",
-        "--rm",
-        "-e",
-        "RP_API_TOKEN",
-        "-e",
-        "RP_HOST",
-        "-e",
-        "RP_PROJECT",
-        "reportportal/mcp-server"
-      ],
-      "env": {
-        "RP_API_TOKEN": "your-api-token",
-        "RP_HOST": "https://your-reportportal-instance.com",
-        "RP_PROJECT": "YourProjectInReportPortal"
-      }
+  "reportportal": {
+    "command": "docker",
+    "args": [
+      "run",
+      "-i",
+      "--rm",
+      "-e",
+      "RP_API_TOKEN",
+      "-e",
+      "RP_HOST",
+      "-e",
+      "RP_PROJECT",
+      "reportportal/mcp-server"
+    ],
+    "env": {
+      "RP_API_TOKEN": "your-api-token",
+      "RP_HOST": "https://your-reportportal-instance.com",
+      "RP_PROJECT": "YourProjectInReportPortal"
     }
   }
 }
@@ -58,15 +56,13 @@ The OS pre-built binaries can be downloaded from the official releases on [GitHu
 
 ```json
 {
-  "mcpServers": {
-    "reportportal": {
-      "command": "/path/to/reportportal-mcp-server-binary",
-      "args": ["stdio"],
-      "env": {
-        "RP_API_TOKEN": "your-api-token",
-        "RP_HOST": "https://your-reportportal-instance.com",
-        "RP_PROJECT": "YourProjectInReportPortal"
-      }
+  "reportportal": {
+    "command": "/path/to/reportportal-mcp-server-binary",
+    "args": ["stdio"],
+    "env": {
+      "RP_API_TOKEN": "your-api-token",
+      "RP_HOST": "https://your-reportportal-instance.com",
+      "RP_PROJECT": "YourProjectInReportPortal"
     }
   }
 }
@@ -75,7 +71,7 @@ The OS pre-built binaries can be downloaded from the official releases on [GitHu
 ### Connecting to AI Chat Tools (Claude, Cursor, etc.)
 
 ### Claude Desktop
-1. Open Claude, go to `Settings → Developer → Edit Config`.
+1. Open Claude Desktop, go to **Settings → Developer → Edit Config**.
 2. Add a new MCP server entry that runs the ReportPortal MCP Server.
 ```json
 {
@@ -86,10 +82,24 @@ The OS pre-built binaries can be downloaded from the official releases on [GitHu
   }
 }
 ```
-3. Save and restart Claude.
+3. Save and restart Claude Desktop.
+
+### Claude Code CLI
+1. Open your terminal.
+2. Run the following comman.
+```bash
+claude mcp add-json reportportal '{"command": "docker", "args": ["run", "-i", "--rm", "-e", "RP_API_TOKEN", "-e", "RP_HOST", "-e", "RP_PROJECT", "reportportal/mcp-server"], "env": {"RP_API_TOKEN": "your-api-token", "RP_HOST": "https://your-reportportal-instance.com", "RP_PROJECT": "YourProjectInReportPortal"}}'
+```
+
+#### Configuration Options
+- Use `-s user` to add the server to your user configuration (available across all projects).
+- Use `-s project` to add the server to project-specific configuration (shared via `.mcp.json`).
+- Default scope is `local` (available only to you in the current project).
+
+Documentation: [Claude Code guide](https://docs.anthropic.com/en/docs/claude-code/mcp).
 
 ### Cursor (AI Code Editor)
-1. In Cursor, go to `Settings → Extensions → MCP` and click to add a new global MCP server.
+1. In Cursor, go to **Settings → Extensions → MCP** and click to add a new global MCP server.
 2. Add a new MCP server entry that runs the ReportPortal MCP Server.
 ```json
 {
@@ -109,7 +119,21 @@ The OS pre-built binaries can be downloaded from the official releases on [GitHu
 
 #### JetBrains IDEs
 
-// TODO
+1. Install/update the GitHub Copilot plugin.
+2. Click **GitHub Copilot icon in the status bar → Edit Settings → Model Context Protocol → Configure**.
+3. Add configuration:
+```json
+{
+  "servers": {
+    "reportportal": {
+      // choose the Docker or binary installation from the section above
+    }
+  }
+}
+```
+4. Press `Ctrl + S` or `Command + S` to save, or close the `mcp.json` file. The configuration should take effect immediately and restart all the MCP servers defined. You can restart the IDE if needed.
+
+Documentation: [JetBrains Copilot Guide](https://plugins.jetbrains.com/plugin/17718-github-copilot).
 
 Once connected, your AI assistant will list ReportPortal-related "tools" it can invoke. You can then ask your questions in chat, and the assistant will call those tools on your behalf.
 
