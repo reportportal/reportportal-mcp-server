@@ -68,7 +68,7 @@ The OS pre-built binaries can be downloaded from the official releases on [GitHu
 }
 ```
 
-### Connecting to AI Chat Tools (Claude, Cursor, etc.)
+### Connecting to AI Chat Tools (Claude, Cursor, GitHub Copilot, etc.)
 
 ### Claude Desktop
 1. Open Claude Desktop, go to **Settings → Developer → Edit Config**.
@@ -163,7 +163,7 @@ The ReportPortal MCP server provides a comprehensive set of capabilities for int
 | Tool Name                  | Description                                      | Parameters                                                                                                    |
 |----------------------------|--------------------------------------------------|---------------------------------------------------------------------------------------------------------------|
 | Get Launches by filter            | Lists ReportPortal launches with pagination by filter      |  `name`, `description`, `owner`, `number`, `start_time`, `end_time`, `attributes`, `sort`, `page`, `page-size` (all optional)                                                                     |
-| Get Last Launch by Name    | Retrieves the most recent launch by name         | `launch`                                                                                                      |
+| Get Last Launch by Name    | Retrieves the most recent launch by name         | `name`                                                                                                      |
 | Run Auto Analysis          | Runs auto analysis on a launch                   | `launch_id`, `analyzer_mode`, `analyzer_type`, `analyzer_item_modes`                                          |
 | Run Unique Error Analysis  | Runs unique error analysis on a launch           | `launch_id`, `remove_numbers`                                                                                 |
 | Force Finish Launch        | Forces a launch to finish                        | `launch_id`                                                                                                   |
