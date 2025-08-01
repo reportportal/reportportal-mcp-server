@@ -21,17 +21,23 @@ import (
 type LaunchResources struct {
 	client           *gorp.Client // Client to interact with the ReportPortal API
 	projectParameter mcp.ToolOption
+	analytics        *Analytics
 }
 
-func NewLaunchResources(client *gorp.Client, defaultProject string) *LaunchResources {
+func NewLaunchResources(
+	client *gorp.Client,
+	defaultProject string,
+	analytics *Analytics,
+) *LaunchResources {
 	return &LaunchResources{
 		client:           client,
 		projectParameter: newProjectParameter(defaultProject),
+		analytics:        analytics,
 	}
 }
 
-// toolListLaunches creates a tool to retrieve a paginated list of launches from ReportPortal.
-func (lr *LaunchResources) toolListLaunches() (tool mcp.Tool, handler server.ToolHandlerFunc) {
+// toolGetLaunches creates a tool to retrieve a paginated list of launches from ReportPortal.
+func (lr *LaunchResources) toolGetLaunches() (tool mcp.Tool, handler server.ToolHandlerFunc) {
 	options := []mcp.ToolOption{
 		// Tool metadata
 		mcp.WithDescription("Get list of last ReportPortal launches"),
@@ -44,63 +50,63 @@ func (lr *LaunchResources) toolListLaunches() (tool mcp.Tool, handler server.Too
 	// Add other parameters
 	options = append(options, []mcp.ToolOption{
 		// Optional filters
-		mcp.WithString("filter.cnt.name", // Item name
+		mcp.WithString("filter-cnt-name", // Item name
 			mcp.Description("Launches name should contain this substring"),
 		),
 		mcp.WithString(
-			"filter.has.compositeAttribute", // Item attributes
+			"filter-has-compositeAttribute", // Item attributes
 			mcp.Description(
 				"Launches have this combination of the attributes values, format: attribute1,attribute2:attribute3,... etc. string without spaces",
 			),
 		),
 		mcp.WithString(
-			"filter.has.attributeKey", // Item attribute keys
+			"filter-has-attributeKey", // Item attribute keys
 			mcp.Description(
 				"Launches have these attribute keys (one or few)",
 			),
 		),
-		mcp.WithString("filter.cnt.description", // Item description
+		mcp.WithString("filter-cnt-description", // Item description
 			mcp.Description("Launches description should contain this substring"),
 		),
 		mcp.WithString(
-			"filter.btw.startTime.from", // Start time from timestamp
+			"filter-btw-startTime-from", // Start time from timestamp
 			mcp.Description(
 				"Test launches with start time from timestamp (GMT timezone(UTC+00:00), RFC3339 format or Unix epoch)",
 			),
 		),
 		mcp.WithString(
-			"filter.btw.startTime.to", // Start time to timestamp
+			"filter-btw-startTime-to", // Start time to timestamp
 			mcp.Description(
 				"Test launches with start time to timestamp (GMT timezone(UTC+00:00), RFC3339 format or Unix epoch)",
 			),
 		),
 
 		// Additional filters
-		mcp.WithNumber("filter.gte.number", // Has number
+		mcp.WithNumber("filter-gte-number", // Has number
 			mcp.Description("Launch has number greater than"),
 		),
-		mcp.WithString("filter.in.user", // Owner name
+		mcp.WithString("filter-in-user", // Owner name
 			mcp.Description("List of the owner names"),
 		),
 	}...)
 
 	return mcp.NewTool(
-			"list_launches",
-			options...), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			"get_launches",
+			options...), lr.analytics.WithAnalytics("get_launches", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			project, err := extractProject(request)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
 
 			// Extract optional filter parameters
-			filterLaunchName := request.GetString("filter.cnt.name", "")
-			filterAttributes := request.GetString("filter.has.compositeAttribute", "")
-			filterAttributeKeys := request.GetString("filter.has.attributeKey", "")
-			filterDescription := request.GetString("filter.cnt.description", "")
-			filterStartTimeFrom := request.GetString("filter.btw.startTime.from", "")
-			filterStartTimeTo := request.GetString("filter.btw.startTime.to", "")
-			filterGreaterThanNumber := request.GetInt("filter.gte.number", 0)
-			filterUserNames := request.GetString("filter.in.user", "")
+			filterLaunchName := request.GetString("filter-cnt-name", "")
+			filterAttributes := request.GetString("filter-has-compositeAttribute", "")
+			filterAttributeKeys := request.GetString("filter-has-attributeKey", "")
+			filterDescription := request.GetString("filter-cnt-description", "")
+			filterStartTimeFrom := request.GetString("filter-btw-startTime-from", "")
+			filterStartTimeTo := request.GetString("filter-btw-startTime-to", "")
+			filterGreaterThanNumber := request.GetInt("filter-gte-number", 0)
+			filterUserNames := request.GetString("filter-in-user", "")
 
 			urlValues := url.Values{}
 
@@ -155,7 +161,7 @@ func (lr *LaunchResources) toolListLaunches() (tool mcp.Tool, handler server.Too
 				), nil
 			}
 			return mcp.NewToolResultText(string(rawBody)), nil
-		}
+		})
 }
 
 func (lr *LaunchResources) toolRunQualityGate() (tool mcp.Tool, handler server.ToolHandlerFunc) {
@@ -166,7 +172,7 @@ func (lr *LaunchResources) toolRunQualityGate() (tool mcp.Tool, handler server.T
 			mcp.WithNumber("launch_id", // Parameter for specifying the launch ID
 				mcp.Description("Launch ID"),
 			),
-		), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		), lr.analytics.WithAnalytics("run_quality_gate", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			project, err := extractProject(request)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
@@ -192,7 +198,7 @@ func (lr *LaunchResources) toolRunQualityGate() (tool mcp.Tool, handler server.T
 				return mcp.NewToolResultError(err.Error()), nil
 			}
 			return mcp.NewToolResultText(string(resBytes)), nil
-		}
+		})
 }
 
 // toolGetLastLaunchByName creates a tool to retrieve the last launch by its name.
@@ -204,7 +210,7 @@ func (lr *LaunchResources) toolGetLastLaunchByName() (mcp.Tool, server.ToolHandl
 			mcp.WithString("launch", // Parameter for specifying the launch name
 				mcp.Description("Launch name"),
 			),
-		), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		), lr.analytics.WithAnalytics("get_last_launch_by_name", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			project, err := extractProject(request)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
@@ -247,7 +253,7 @@ func (lr *LaunchResources) toolGetLastLaunchByName() (mcp.Tool, server.ToolHandl
 
 			// Return the serialized launch as a text result
 			return mcp.NewToolResultText(string(r)), nil
-		}
+		})
 }
 
 func (lr *LaunchResources) toolDeleteLaunch() (mcp.Tool, server.ToolHandlerFunc) {
@@ -258,7 +264,7 @@ func (lr *LaunchResources) toolDeleteLaunch() (mcp.Tool, server.ToolHandlerFunc)
 			mcp.WithString("launch_id", // Parameter for specifying the launch name
 				mcp.Description("Launch ID"),
 			),
-		), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		), lr.analytics.WithAnalytics("launch_delete", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			project, err := extractProject(request)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
@@ -278,7 +284,7 @@ func (lr *LaunchResources) toolDeleteLaunch() (mcp.Tool, server.ToolHandlerFunc)
 
 			// Return the serialized launch as a text result
 			return mcp.NewToolResultText(fmt.Sprintf("Launch '%d' has been deleted", launchID)), nil
-		}
+		})
 }
 
 func (lr *LaunchResources) toolRunAutoAnalysis() (mcp.Tool, server.ToolHandlerFunc) {
@@ -313,7 +319,7 @@ func (lr *LaunchResources) toolRunAutoAnalysis() (mcp.Tool, server.ToolHandlerFu
 				mcp.Enum("to_investigate", "auto_analyzed", "manually_analyzed"),
 				mcp.DefaultArray([]string{"to_investigate"}),
 			),
-		), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		), lr.analytics.WithAnalytics("run_auto_analysis", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			project, err := extractProject(request)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
@@ -355,7 +361,7 @@ func (lr *LaunchResources) toolRunAutoAnalysis() (mcp.Tool, server.ToolHandlerFu
 
 			// Return the serialized launch as a text result
 			return mcp.NewToolResultText(rs.GetMessage()), nil
-		}
+		})
 }
 
 func (lr *LaunchResources) toolUniqueErrorAnalysis() (mcp.Tool, server.ToolHandlerFunc) {
@@ -371,7 +377,7 @@ func (lr *LaunchResources) toolUniqueErrorAnalysis() (mcp.Tool, server.ToolHandl
 				mcp.Description("Remove numbers from analyzed logs"),
 				mcp.DefaultBool(false),
 			),
-		), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		), lr.analytics.WithAnalytics("run_unique_error_analysis", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			project, err := extractProject(request)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
@@ -399,7 +405,7 @@ func (lr *LaunchResources) toolUniqueErrorAnalysis() (mcp.Tool, server.ToolHandl
 
 			// Return the serialized launch as a text result
 			return mcp.NewToolResultText(rs.GetMessage()), nil
-		}
+		})
 }
 
 func (lr *LaunchResources) toolForceFinishLaunch() (mcp.Tool, server.ToolHandlerFunc) {
@@ -410,7 +416,7 @@ func (lr *LaunchResources) toolForceFinishLaunch() (mcp.Tool, server.ToolHandler
 			mcp.WithString("launch_id", // Parameter for specifying the launch name
 				mcp.Description("Launch ID"),
 			),
-		), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		), lr.analytics.WithAnalytics("launch_force_finish", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			project, err := extractProject(request)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
@@ -432,7 +438,7 @@ func (lr *LaunchResources) toolForceFinishLaunch() (mcp.Tool, server.ToolHandler
 			return mcp.NewToolResultText(
 				fmt.Sprintf("Launch '%d' has been forcefully finished", launchID),
 			), nil
-		}
+		})
 }
 
 func (lr *LaunchResources) resourceLaunch() (mcp.ResourceTemplate, server.ResourceTemplateHandlerFunc) {

@@ -20,6 +20,8 @@ func NewServer(
 	version string,
 	hostUrl *url.URL,
 	token, defaultProject string,
+	userID, analyticsAPISecret string,
+	analyticsOff bool,
 ) (*server.MCPServer, error) {
 	s := server.NewMCPServer(
 		"reportportal-mcp-server",
@@ -34,8 +36,18 @@ func NewServer(
 	rpClient := gorp.NewClient(hostUrl, token)
 	rpClient.APIClient.GetConfig().Middleware = QueryParamsMiddleware
 
-	launches := NewLaunchResources(rpClient, defaultProject)
-	s.AddTool(launches.toolListLaunches())
+	// Initialize analytics (disabled if analyticsOff is true)
+	var analytics *Analytics
+	if !analyticsOff {
+		var err error
+		analytics, err = NewAnalytics(userID, analyticsAPISecret)
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize analytics: %w", err)
+		}
+	}
+
+	launches := NewLaunchResources(rpClient, defaultProject, analytics)
+	s.AddTool(launches.toolGetLaunches())
 	s.AddTool(launches.toolGetLastLaunchByName())
 	s.AddTool(launches.toolForceFinishLaunch())
 	s.AddTool(launches.toolDeleteLaunch())
@@ -44,11 +56,12 @@ func NewServer(
 	s.AddTool(launches.toolRunQualityGate())
 	s.AddResourceTemplate(launches.resourceLaunch())
 
-	testItems := NewTestItemResources(rpClient, defaultProject)
+	testItems := NewTestItemResources(rpClient, defaultProject, analytics)
 	s.AddTool(testItems.toolGetTestItemById())
-	s.AddTool(testItems.toolListTestItemsByFilter())
+	s.AddTool(testItems.toolGetTestItemsByFilter())
 	s.AddTool(testItems.toolGetTestItemLogsByFilter())
 	s.AddTool(testItems.toolGetTestItemAttachment())
+	s.AddTool(testItems.toolGetTestSuitesByFilter())
 	s.AddResourceTemplate(testItems.resourceTestItem())
 
 	prompts, err := readPrompts(promptFiles, "prompts")
