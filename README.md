@@ -116,7 +116,7 @@ Documentation: [Claude Code guide](https://docs.anthropic.com/en/docs/claude-cod
   }
 }
 ```
-Documentation: [Cursor MCP]([https://docs.anthropic.com/en/docs/claude-code/mcp](https://docs.cursor.com/en/tools/developers#example)).
+Documentation: [Cursor MCP](https://docs.cursor.com/en/tools/developers#example).
 
 ### GitHub Copilot (In VS Code and JetBrains IDEs)
 
