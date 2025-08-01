@@ -29,6 +29,7 @@ archives:
 dockers:
   - image_templates:
       - "{{ .Env.REPOSITORY_NAME }}:{{ .Version }}"
+      - "{{ .Env.REPOSITORY_NAME }}:latest"
     dockerfile: release.dockerfile
     build_flag_templates:
       - "--platform=linux/amd64"
