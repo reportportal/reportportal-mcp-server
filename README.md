@@ -116,6 +116,7 @@ Documentation: [Claude Code guide](https://docs.anthropic.com/en/docs/claude-cod
   }
 }
 ```
+Documentation: [Cursor MCP]([https://docs.anthropic.com/en/docs/claude-code/mcp](https://docs.cursor.com/en/tools/developers#example)).
 
 ### GitHub Copilot (In VS Code and JetBrains IDEs)
 
@@ -133,6 +134,8 @@ Documentation: [Claude Code guide](https://docs.anthropic.com/en/docs/claude-cod
   }
 }
 ```
+
+Documentation: [VS Code Copilot Guide](https://code.visualstudio.com/docs/copilot/chat/mcp-servers).
 
 #### JetBrains IDEs
 
