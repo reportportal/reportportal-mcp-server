@@ -18,11 +18,13 @@ const (
 	defaultPageSize            = 50                      // Default number of elements per page
 	defaultSortingForLaunches  = "startTime,number,DESC" // default sorting order for launches
 	defaultSortingForItems     = "startTime,DESC"        // default sorting order for items
+	defaultSortingForSuites    = "startTime,ASC"         // default sorting order for suites
 	defaultSortingForLogs      = "logTime,ASC"           // default sorting order for logs
 	defaultProviderType        = "launch"                // default provider type
 	defaultFilterEqHasChildren = "false"                 // items which don't have children
 	defaultFilterEqHasStats    = "true"
 	defaultFilterInType        = "STEP"
+	defaultFilterInTypeSuites  = "SUITE,TEST"
 	defaultItemLogLevel        = "TRACE" // Default log level for test item logs
 )
 
