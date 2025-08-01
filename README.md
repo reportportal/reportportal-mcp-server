@@ -68,9 +68,10 @@ The OS pre-built binaries can be downloaded from the official releases on [GitHu
 }
 ```
 
-### Connecting to AI Chat Tools (Claude, Cursor, GitHub Copilot, etc.)
+Choose your favouire AI Tool to connect.
 
 ### Claude Desktop
+
 1. Open Claude Desktop, go to **Settings → Developer → Edit Config**.
 2. Add a new MCP server entry that runs the ReportPortal MCP Server.
 ```json
@@ -85,13 +86,14 @@ The OS pre-built binaries can be downloaded from the official releases on [GitHu
 3. Save and restart Claude Desktop.
 
 ### Claude Code CLI
+
 1. Open your terminal.
 2. Run the following comman.
 ```bash
 claude mcp add-json reportportal '{"command": "docker", "args": ["run", "-i", "--rm", "-e", "RP_API_TOKEN", "-e", "RP_HOST", "-e", "RP_PROJECT", "reportportal/mcp-server"], "env": {"RP_API_TOKEN": "your-api-token", "RP_HOST": "https://your-reportportal-instance.com", "RP_PROJECT": "YourProjectInReportPortal"}}'
 ```
 
-#### Configuration Options
+**Configuration Options:**
 - Use `-s user` to add the server to your user configuration (available across all projects).
 - Use `-s project` to add the server to project-specific configuration (shared via `.mcp.json`).
 - Default scope is `local` (available only to you in the current project).
@@ -99,6 +101,7 @@ claude mcp add-json reportportal '{"command": "docker", "args": ["run", "-i", "-
 Documentation: [Claude Code guide](https://docs.anthropic.com/en/docs/claude-code/mcp).
 
 ### Cursor (AI Code Editor)
+
 1. In Cursor, go to **Settings → Extensions → MCP** and click to add a new global MCP server.
 2. Add a new MCP server entry that runs the ReportPortal MCP Server.
 ```json
@@ -115,7 +118,18 @@ Documentation: [Claude Code guide](https://docs.anthropic.com/en/docs/claude-cod
 
 #### VS Code
 
-// TODO
+1. Install/update the GitHub Copilot plugin.
+2. Type **>mcp** in the search bar and select **MCP: Open User Configuration**.
+3. Add configuration:
+```json
+{
+  "servers": {
+    "reportportal": {
+      // choose the Docker or binary installation from the section above
+    }
+  }
+}
+```
 
 #### JetBrains IDEs
 
