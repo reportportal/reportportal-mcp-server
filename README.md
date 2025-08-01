@@ -72,7 +72,7 @@ The OS pre-built binaries can be downloaded from the official releases on [GitHu
 }
 ```
 
-### Connecting to AI Chat Tools (Claude, Cursor, etc.)
+### Connecting to AI Chat Tools (Claude, Cursor, GitHub Copilot, etc.)
 
 ### Claude Desktop
 1. Open Claude, go to `Settings → Developer → Edit Config`.
