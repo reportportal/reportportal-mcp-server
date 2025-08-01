@@ -36,8 +36,8 @@ func NewLaunchResources(
 	}
 }
 
-// toolListLaunches creates a tool to retrieve a paginated list of launches from ReportPortal.
-func (lr *LaunchResources) toolListLaunches() (tool mcp.Tool, handler server.ToolHandlerFunc) {
+// toolGetLaunches creates a tool to retrieve a paginated list of launches from ReportPortal.
+func (lr *LaunchResources) toolGetLaunches() (tool mcp.Tool, handler server.ToolHandlerFunc) {
 	options := []mcp.ToolOption{
 		// Tool metadata
 		mcp.WithDescription("Get list of last ReportPortal launches"),
@@ -50,63 +50,63 @@ func (lr *LaunchResources) toolListLaunches() (tool mcp.Tool, handler server.Too
 	// Add other parameters
 	options = append(options, []mcp.ToolOption{
 		// Optional filters
-		mcp.WithString("filter.cnt.name", // Item name
+		mcp.WithString("filter-cnt-name", // Item name
 			mcp.Description("Launches name should contain this substring"),
 		),
 		mcp.WithString(
-			"filter.has.compositeAttribute", // Item attributes
+			"filter-has-compositeAttribute", // Item attributes
 			mcp.Description(
 				"Launches have this combination of the attributes values, format: attribute1,attribute2:attribute3,... etc. string without spaces",
 			),
 		),
 		mcp.WithString(
-			"filter.has.attributeKey", // Item attribute keys
+			"filter-has-attributeKey", // Item attribute keys
 			mcp.Description(
 				"Launches have these attribute keys (one or few)",
 			),
 		),
-		mcp.WithString("filter.cnt.description", // Item description
+		mcp.WithString("filter-cnt-description", // Item description
 			mcp.Description("Launches description should contain this substring"),
 		),
 		mcp.WithString(
-			"filter.btw.startTime.from", // Start time from timestamp
+			"filter-btw-startTime-from", // Start time from timestamp
 			mcp.Description(
 				"Test launches with start time from timestamp (GMT timezone(UTC+00:00), RFC3339 format or Unix epoch)",
 			),
 		),
 		mcp.WithString(
-			"filter.btw.startTime.to", // Start time to timestamp
+			"filter-btw-startTime-to", // Start time to timestamp
 			mcp.Description(
 				"Test launches with start time to timestamp (GMT timezone(UTC+00:00), RFC3339 format or Unix epoch)",
 			),
 		),
 
 		// Additional filters
-		mcp.WithNumber("filter.gte.number", // Has number
+		mcp.WithNumber("filter-gte-number", // Has number
 			mcp.Description("Launch has number greater than"),
 		),
-		mcp.WithString("filter.in.user", // Owner name
+		mcp.WithString("filter-in-user", // Owner name
 			mcp.Description("List of the owner names"),
 		),
 	}...)
 
 	return mcp.NewTool(
-			"list_launches",
-			options...), lr.analytics.WithAnalytics("list_launches", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			"get_launches",
+			options...), lr.analytics.WithAnalytics("get_launches", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			project, err := extractProject(request)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
 
 			// Extract optional filter parameters
-			filterLaunchName := request.GetString("filter.cnt.name", "")
-			filterAttributes := request.GetString("filter.has.compositeAttribute", "")
-			filterAttributeKeys := request.GetString("filter.has.attributeKey", "")
-			filterDescription := request.GetString("filter.cnt.description", "")
-			filterStartTimeFrom := request.GetString("filter.btw.startTime.from", "")
-			filterStartTimeTo := request.GetString("filter.btw.startTime.to", "")
-			filterGreaterThanNumber := request.GetInt("filter.gte.number", 0)
-			filterUserNames := request.GetString("filter.in.user", "")
+			filterLaunchName := request.GetString("filter-cnt-name", "")
+			filterAttributes := request.GetString("filter-has-compositeAttribute", "")
+			filterAttributeKeys := request.GetString("filter-has-attributeKey", "")
+			filterDescription := request.GetString("filter-cnt-description", "")
+			filterStartTimeFrom := request.GetString("filter-btw-startTime-from", "")
+			filterStartTimeTo := request.GetString("filter-btw-startTime-to", "")
+			filterGreaterThanNumber := request.GetInt("filter-gte-number", 0)
+			filterUserNames := request.GetString("filter-in-user", "")
 
 			urlValues := url.Values{}
 

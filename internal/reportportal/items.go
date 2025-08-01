@@ -34,8 +34,8 @@ func NewTestItemResources(
 	}
 }
 
-// toolListTestItemsByFilter creates a tool to list test items for a specific launch.
-func (lr *TestItemResources) toolListTestItemsByFilter() (tool mcp.Tool, handler server.ToolHandlerFunc) {
+// toolGetTestItemsByFilter creates a tool to list test items for a specific launch.
+func (lr *TestItemResources) toolGetTestItemsByFilter() (tool mcp.Tool, handler server.ToolHandlerFunc) {
 	options := []mcp.ToolOption{
 		// Tool metadata
 		mcp.WithDescription(
@@ -53,71 +53,71 @@ func (lr *TestItemResources) toolListTestItemsByFilter() (tool mcp.Tool, handler
 	// Add other parameters
 	options = append(options, []mcp.ToolOption{
 		// Optional filters
-		mcp.WithString("filter.cnt.name", // Item name
+		mcp.WithString("filter-cnt-name", // Item name
 			mcp.Description("Items name should contain this substring"),
 		),
 		mcp.WithString(
-			"filter.has.compositeAttribute", // Item attributes
+			"filter-has-compositeAttribute", // Item attributes
 			mcp.Description(
 				"Items have this combination of the attribute values, format: attribute1,attribute2:attribute3,... etc. string without spaces",
 			),
 		),
 		mcp.WithString(
-			"filter.has.attributeKey", // Item attribute keys
+			"filter-has-attributeKey", // Item attribute keys
 			mcp.Description(
 				"Items have these attribute keys (one or few)",
 			),
 		),
-		mcp.WithString("filter.cnt.description", // Item description
+		mcp.WithString("filter-cnt-description", // Item description
 			mcp.Description("Items description should contains this substring"),
 		),
-		mcp.WithString("filter.in.status", // Item status
+		mcp.WithString("filter-in-status", // Item status
 			mcp.Description("Items with status"),
 		),
 		mcp.WithString(
-			"filter.eq.hasRetries", // Has retries
+			"filter-eq-hasRetries", // Has retries
 			mcp.Description(
 				"Items have retries or not, can be a list of values: TRUE, FALSE, -- (default, filter is not applied)",
 			),
 			mcp.Enum("TRUE", "FALSE", "--"),
 			mcp.DefaultString("--"),
 		),
-		mcp.WithString("filter.eq.parentId", // Parent ID
+		mcp.WithString("filter-eq-parentId", // Parent ID
 			mcp.Description("Items parent ID equals"),
 		),
 		mcp.WithString(
-			"filter.btw.startTime.from", // Start time from timestamp
+			"filter-btw-startTime-from", // Start time from timestamp
 			mcp.Description(
 				"Test items with start time from timestamp (GMT timezone(UTC+00:00), RFC3339 format or Unix epoch)",
 			),
 		),
 		mcp.WithString(
-			"filter.btw.startTime.to", // Start time to timestamp
+			"filter-btw-startTime-to", // Start time to timestamp
 			mcp.Description(
 				"Test items with start time to timestamp (GMT timezone(UTC+00:00), RFC3339 format or Unix epoch)",
 			),
 		),
-		mcp.WithString("filter.cnt.issueComment",
+		mcp.WithString("filter-cnt-issueComment",
 			mcp.Description("Items defect comment should contains this substring"),
 		),
-		mcp.WithBoolean("filter.in.ignoreAnalyzer",
+		mcp.WithBoolean("filter-in-ignoreAnalyzer",
 			mcp.Description("Items ignored in AA analysis"),
 		),
-		mcp.WithString("filter.has.ticketId",
+		mcp.WithString("filter-has-ticketId",
 			mcp.Description("Items linked Bug tracking system ticket/issue id"),
 		),
-		mcp.WithString("filter.any.patternName",
+		mcp.WithString("filter-any-patternName",
 			mcp.Description("Items pattern name that test name matches in Pattern-Analysis"),
 		),
 		// from Open API spec
-		mcp.WithBoolean("filter.eq.autoAnalyzed",
+		mcp.WithBoolean("filter-eq-autoAnalyzed",
 			mcp.Description("Items analysed by RP (AA)"),
 		),
 	}...)
 
 	return mcp.NewTool(
-			"list_test_items_by_filter",
-			options...), lr.analytics.WithAnalytics("list_test_items_by_filter", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			"get_test_items_by_filter",
+			options...), lr.analytics.WithAnalytics("get_test_items_by_filter", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			slog.Debug("START PROCESSING")
 			project, err := extractProject(request)
 			if err != nil {
@@ -130,20 +130,20 @@ func (lr *TestItemResources) toolListTestItemsByFilter() (tool mcp.Tool, handler
 			}
 
 			// Extract optional filter parameters
-			filterName := request.GetString("filter.cnt.name", "")
-			filterAttributes := request.GetString("filter.has.compositeAttribute", "")
-			filterAttributeKeys := request.GetString("filter.has.attributeKey", "")
-			filterDescription := request.GetString("filter.cnt.description", "")
-			filterStartTimeFrom := request.GetString("filter.btw.startTime.from", "")
-			filterStartTimeTo := request.GetString("filter.btw.startTime.to", "")
-			filterStatus := request.GetString("filter.in.status", "")
-			filterHasRetries := request.GetString("filter.eq.hasRetries", "--")
-			filterParentId := request.GetString("filter.eq.parentId", "")
-			filterIssueComment := request.GetString("filter.cnt.issueComment", "")
-			filterAutoAnalyzed := request.GetBool("filter.eq.autoAnalyzed", false)
-			filterIgnoreAnalyzer := request.GetBool("filter.in.ignoreAnalyzer", false)
-			filterTicketId := request.GetString("filter.has.ticketId", "")
-			filterPatternName := request.GetString("filter.any.patternName", "")
+			filterName := request.GetString("filter-cnt-name", "")
+			filterAttributes := request.GetString("filter-has-compositeAttribute", "")
+			filterAttributeKeys := request.GetString("filter-has-attributeKey", "")
+			filterDescription := request.GetString("filter-cnt-description", "")
+			filterStartTimeFrom := request.GetString("filter-btw-startTime-from", "")
+			filterStartTimeTo := request.GetString("filter-btw-startTime-to", "")
+			filterStatus := request.GetString("filter-in-status", "")
+			filterHasRetries := request.GetString("filter-eq-hasRetries", "--")
+			filterParentId := request.GetString("filter-eq-parentId", "")
+			filterIssueComment := request.GetString("filter-cnt-issueComment", "")
+			filterAutoAnalyzed := request.GetBool("filter-eq-autoAnalyzed", false)
+			filterIgnoreAnalyzer := request.GetBool("filter-in-ignoreAnalyzer", false)
+			filterTicketId := request.GetString("filter-has-ticketId", "")
+			filterPatternName := request.GetString("filter-any-patternName", "")
 
 			urlValues := url.Values{
 				"providerType":          {defaultProviderType},
@@ -405,23 +405,23 @@ func (lr *TestItemResources) toolGetTestItemLogsByFilter() (tool mcp.Tool, handl
 				mcp.DefaultNumber(defaultPageSize),
 				mcp.Description("Page size"),
 			),
-			mcp.WithString("page.sort", // Sorting fields and direction
+			mcp.WithString("page-sort", // Sorting fields and direction
 				mcp.DefaultString(defaultSortingForLogs),
 				mcp.Description("Sorting fields and direction"),
 			),
 			// Optional filters
-			mcp.WithString("filter.gte.level", // Item's log level
+			mcp.WithString("filter-gte-level", // Item's log level
 				mcp.DefaultString(defaultItemLogLevel),
 				mcp.Description("Get logs only with specific log level"),
 			),
 			mcp.WithString(
-				"filter.cnt.message", // Log with specific content
+				"filter-cnt-message", // Log with specific content
 				mcp.Description(
 					"Log should contains this substring",
 				),
 			),
 			mcp.WithString(
-				"filter.ex.binaryContent", // Log has attachment
+				"filter-ex-binaryContent", // Log has attachment
 				mcp.Description(
 					"Logs with attachment or without, can be a list of values: TRUE, FALSE, -- (default, filter is not applied)",
 				),
@@ -429,7 +429,7 @@ func (lr *TestItemResources) toolGetTestItemLogsByFilter() (tool mcp.Tool, handl
 				mcp.DefaultString("--"),
 			),
 			mcp.WithString(
-				"filter.in.status", // Item status
+				"filter-in-status", // Item status
 				mcp.Description(
 					"Items with status, can be a list of values: PASSED, FAILED, SKIPPED, INTERRUPTED, IN_PROGRESS, WARN, INFO",
 				),
@@ -447,10 +447,10 @@ func (lr *TestItemResources) toolGetTestItemLogsByFilter() (tool mcp.Tool, handl
 			}
 
 			// Extract optional filter parameters
-			filterLogLevel := request.GetString("filter.gte.level", "")
-			filterLogContains := request.GetString("filter.cnt.message", "")
-			filterLogHasAttachment := request.GetString("filter.ex.binaryContent", "--")
-			filterLogStatus := request.GetString("filter.in.status", "")
+			filterLogLevel := request.GetString("filter-gte-level", "")
+			filterLogContains := request.GetString("filter-cnt-message", "")
+			filterLogHasAttachment := request.GetString("filter-ex-binaryContent", "--")
+			filterLogStatus := request.GetString("filter-in-status", "")
 
 			// Process optional log level filter
 			urlValues := url.Values{}
@@ -534,35 +534,35 @@ func (lr *TestItemResources) toolGetTestSuitesByFilter() (tool mcp.Tool, handler
 	// Add other parameters
 	options = append(options, []mcp.ToolOption{
 		// Optional filters
-		mcp.WithString("filter.cnt.name", // Suite name
+		mcp.WithString("filter-cnt-name", // Suite name
 			mcp.Description("Suites name should contain this substring"),
 		),
 		mcp.WithString(
-			"filter.has.compositeAttribute", // Suite attributes
+			"filter-has-compositeAttribute", // Suite attributes
 			mcp.Description(
 				"Suites have this combination of the attribute values, format: attribute1,attribute2:attribute3,... etc. string without spaces",
 			),
 		),
 		mcp.WithString(
-			"filter.has.attributeKey", // Suite attribute keys
+			"filter-has-attributeKey", // Suite attribute keys
 			mcp.Description(
 				"Suites have these attribute keys (one or few)",
 			),
 		),
-		mcp.WithString("filter.cnt.description", // Suite description
+		mcp.WithString("filter-cnt-description", // Suite description
 			mcp.Description("Suites description should contains this substring"),
 		),
-		mcp.WithString("filter.eq.parentId", // Parent ID
+		mcp.WithString("filter-eq-parentId", // Parent ID
 			mcp.Description("Suites parent ID equals"),
 		),
 		mcp.WithString(
-			"filter.btw.startTime.from", // Start time from timestamp
+			"filter-btw-startTime-from", // Start time from timestamp
 			mcp.Description(
 				"Suites with start time from timestamp (GMT timezone(UTC+00:00), RFC3339 format or Unix epoch)",
 			),
 		),
 		mcp.WithString(
-			"filter.btw.startTime.to", // Start time to timestamp
+			"filter-btw-startTime-to", // Start time to timestamp
 			mcp.Description(
 				"Suites with start time to timestamp (GMT timezone(UTC+00:00), RFC3339 format or Unix epoch)",
 			),

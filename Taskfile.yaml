@@ -55,4 +55,4 @@ tasks:
     desc: "Runs inspector with the MCP server in debug mode"
     deps: [ docker:build-debug ]
     cmd: >
-      npx @modelcontextprotocol/inspector -- docker run -p {{.DLV_PORT}}:{{.DLV_PORT}} -p 8080:8080 -i --rm -e "RP_API_TOKEN=$RP_API_TOKEN" -e "RP_PROJECT=$RP_PROJECT" -e "RP_HOST=$RP_HOST" {{.IMAGE_NAME_DEBUG}}
+      {{.INSPECTOR}} -- docker run -p {{.DLV_PORT}}:{{.DLV_PORT}} -i --rm -e "RP_API_TOKEN=$RP_API_TOKEN" -e "RP_PROJECT=$RP_PROJECT" -e "RP_HOST=$RP_HOST" {{.IMAGE_NAME_DEBUG}}

@@ -42,11 +42,11 @@ func setPaginationOptions(sortingParams string) []mcp.ToolOption {
 			mcp.DefaultNumber(firstPage),
 			mcp.Description("Page number"),
 		),
-		mcp.WithNumber("page.size", // Parameter for specifying the page size
+		mcp.WithNumber("page-size", // Parameter for specifying the page size
 			mcp.DefaultNumber(defaultPageSize),
 			mcp.Description("Page size"),
 		),
-		mcp.WithString("page.sort", // Sorting fields and direction
+		mcp.WithString("page-sort", // Sorting fields and direction
 			mcp.DefaultString(sortingParams),
 			mcp.Description("Sorting fields and direction"),
 		),
@@ -65,14 +65,14 @@ func applyPaginationOptions[T PaginatedRequest[T]](
 		pageInt = math.MaxInt32
 	}
 
-	// Extract the "page.size" parameter from the request
-	pageSizeInt := request.GetInt("page.size", defaultPageSize)
+	// Extract the "page-size" parameter from the request
+	pageSizeInt := request.GetInt("page-size", defaultPageSize)
 	if pageSizeInt > math.MaxInt32 {
 		pageSizeInt = math.MaxInt32
 	}
 
-	// Extract the "page.sort" parameter from the request
-	pageSort := request.GetString("page.sort", sortingParams)
+	// Extract the "page-sort" parameter from the request
+	pageSort := request.GetString("page-sort", sortingParams)
 
 	// Apply pagination directly
 	return apiRequest.
