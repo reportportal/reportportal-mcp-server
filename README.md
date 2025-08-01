@@ -197,6 +197,8 @@ Analyzes a ReportPortal launch and provides detailed information about test resu
 Parameters:
 - `launch_id`: ID of the launch to analyze
 
+You can follow the [prompt text and structure](https://github.com/reportportal/reportportal-mcp-server/blob/main/internal/reportportal/prompts/launch.yaml) as a reference while working on your own prompts.
+
 ### Example Queries (Natural Language)
 
 Here are some real-world examples of what you might ask your AI after setup (the assistant's response will be drawn from ReportPortal data):
