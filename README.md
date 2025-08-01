@@ -4,40 +4,177 @@
 
 # ReportPortal MCP Server
 
-This repository contains a ReportPortal MCP Server.
-It allows users to interact with ReportPortal directly from GitHub Copilot / Claude / etc chat to query and analyze test execution results.
+## What is the ReportPortal MCP Server?
+
+The ReportPortal MCP Server is a bridge between your ReportPortal instance and AI chat assistants (such as Claude Desktop, GitHub Copilot, Cursor). In simple terms, it lets you ask questions in plain English about your test runs and get answers directly from ReportPortal. 
+
+For example, instead of logging into the ReportPortal UI, you could ask your AI assistant "What tests failed in the last run?" or "List the 5 most recent test runs," and it will fetch that information from ReportPortal for you. This makes it easy for QA testers and managers to query test results using natural language, speeding up analysis and reporting.
+
+## Why Use It?
+
+- **Quick Test Insights**: Instantly retrieve summaries of test runs, failure counts, or error details without writing code or navigating the UI.
+- **Chat-Based Queries**: Use your favourite AI assistant (Claude, Cursor, etc.) to converse with ReportPortal data. It's like having a smart test-reporting helper in your chat window.
+- **Integration Flexibility**: Works with any MCP-compatible AI tool. You simply point the tool at this server and it can run ReportPortal queries under the hood.
+- **No Custom Scripts Needed**: Common queries (listing runs, getting failures, analysis) are built-in as simple "commands" you invoke via chat.
+
+## Installation
+
+There are two ways to run the latest version of the ReportPortal MCP Server.
+
+### Via Docker (recommended).
+
+```json
+{
+  "mcpServers": {
+    "reportportal": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "RP_API_TOKEN",
+        "-e",
+        "RP_HOST",
+        "-e",
+        "RP_PROJECT",
+        "reportportal/mcp-server"
+      ],
+      "env": {
+        "RP_API_TOKEN": "your-api-token",
+        "RP_HOST": "https://your-reportportal-instance.com",
+        "RP_PROJECT": "YourProjectInReportPortal"
+      }
+    }
+  }
+}
+```
+
+### Using pre-built binaries.
+
+```json
+{
+  "mcpServers": {
+    "reportportal": {
+      "command": "/path/to/reportportal-mcp-server-binary",
+      "args": ["stdio"],
+      "env": {
+        "RP_API_TOKEN": "your-api-token",
+        "RP_HOST": "https://your-reportportal-instance.com",
+        "RP_PROJECT": "YourProjectInReportPortal"
+      }
+    }
+  }
+}
+```
+
+### Connecting to AI Chat Tools (Claude, Cursor, etc.)
+
+### Claude Desktop
+1. Open Claude, go to `Settings → Developer → Edit Config`.
+2. Add a new MCP server entry that runs the ReportPortal MCP Server.
+```json
+{
+  "mcpServers": {
+    "reportportal": {
+      // choose the Docker or binary installation from the section above
+    }
+  }
+}
+```
+3. Save and restart Claude.
+
+### Cursor (AI Code Editor)
+1. In Cursor, go to `Settings → Extensions → MCP` and click to add a new global MCP server.
+2. Add a new MCP server entry that runs the ReportPortal MCP Server.
+```json
+{
+  "mcpServers": {
+    "reportportal": {
+      // choose the Docker or binary installation from the section above
+    }
+  }
+}
+```
+
+### GitHub Copilot (In VS Code and JetBrains IDEs)
+
+#### VS Code
+
+// TODO
+
+#### JetBrains IDEs
+
+// TODO
+
+Once connected, your AI assistant will list ReportPortal-related "tools" it can invoke. You can then ask your questions in chat, and the assistant will call those tools on your behalf.
 
 ## Features
 
 The ReportPortal MCP server provides a comprehensive set of capabilities for interacting with ReportPortal:
 
 ### Launch Management
-- List and filter launches with pagination
+- List and filter launches (test runs) with pagination
 - Get launch details by name or ID
-- Force finish running launches
+- Force-finish running launches
 - Delete launches
-- Run automated analysis on launches (auto analysis, unique error analysis)
+- Run automated analyses (auto analysis, unique error analysis) on launches
 
 ### Test Item Analysis
 - List test items within launches
-- Get detailed test item information
+- Get detailed information on each test item
 - View test execution statistics and failures
+- Retrieve test logs and attachments
 
 ### Report Generation
 - Analyze launches to get detailed test execution insights
 - Generate structured reports with statistics and failure analysis
 
-### Extensibility
-- Add custom tools through code extensions
-- Define new prompts via YAML files in the `prompts` directory
-- Access structured resource data for launches and test items
+## Available Tools (commands)
 
-## Installation
+| Tool Name                  | Description                                      | Parameters                                                                                                    |
+|----------------------------|--------------------------------------------------|---------------------------------------------------------------------------------------------------------------|
+| Get Launches by filter            | Lists ReportPortal launches with pagination by filter      |  `name`, `description`, `owner`, `number`, `start_time`, `end_time`, `attributes`, `sort`, `page`, `page-size` (all optional)                                                                     |
+| Get Last Launch by Name    | Retrieves the most recent launch by name         | `launch`                                                                                                      |
+| Run Auto Analysis          | Runs auto analysis on a launch                   | `launch_id`, `analyzer_mode`, `analyzer_type`, `analyzer_item_modes`                                          |
+| Run Unique Error Analysis  | Runs unique error analysis on a launch           | `launch_id`, `remove_numbers`                                                                                 |
+| Force Finish Launch        | Forces a launch to finish                        | `launch_id`                                                                                                   |
+| Delete Launch              | Deletes a specific launch                        | `launch_id`                                                                                                   |
+| Get Test Items by filter  | Lists test items for a specific launch           | `launch-id` (required), `name`, `description`, `status`, `has_retries`, `start_time`, `end_time`, `attributes`, `parent_id`, `defect_comment`, `auto_analyzed`, `ignored_in_aa`, `pattern_name`, `ticket_id`, `sort`, `page`, `page-size` (all optional)                                                        |
+| Get Logs by filter  | Lists logs for a specific test item or nested step          | `parent-id` (required), `log_level`, `log_content`, `logs_with_attachments`, `status`, `sort`, `page`, `page-size` (all optional)                                                        |
+| Get Attachment by ID        | Retrieves an attachment binary by id        | `attachment_id`                                                                                                |
+| Run Unique Error Analysis  | Runs unique error analysis on a launch           | `launch_id`, `remove_numbers`                                                                                 |
+| Get Test Item by ID        | Retrieves details of a specific test item        | `test_item_id`                                                                                                |
+
+### Available Prompts
+
+#### Analyze Launch
+
+Analyzes a ReportPortal launch and provides detailed information about test results, failures, and statistics.
+
+Parameters:
+- `launch_id`: ID of the launch to analyze
+
+### Example Queries (Natural Language)
+
+Here are some real-world examples of what you might ask your AI after setup (the assistant's response will be drawn from ReportPortal data):
+
+- **"List the 5 most recent test launches."** – returns a paginated list of recent test runs with names and statuses.
+- **"What tests failed in the latest run?"** – shows failed test items for the most recent launch.
+- **"Show me details of launch with number 1234."** – fetches information (ID, name, description, stats) for that specific launch.
+- **"Run an analysis on launch ABC."** – triggers the ReportPortal's auto-analysis to summarize results and failures for launch "ABC".
+- **"Finish the running launch with ID 4321."** – forces a currently running test launch to stop.
+- **"Show me the top five 500-level errors in the last hour"** - lists the top 5 such errors from the recent test results.
+
+Each query above corresponds to a "tool" provided by the MCP server, but you just phrase it naturally.
+The AI will invoke the correct command behind the scenes.
+These features let you query and manage your test reports in many ways through simple chat interactions.
+
+## For developers
 
 ### Prerequisites
-
 - Go 1.24.1 or later
-- A ReportPortal instance
+- A running ReportPortal instance
 
 ### Building from Source
 
@@ -50,89 +187,67 @@ cd reportportal-mcp-server
 go build -o reportportal-mcp-server ./cmd/reportportal-mcp-server
 ```
 
-## Configuration
+This creates an executable called `reportportal-mcp-server`.
 
-The server uses environment variables for configuration:
+### Configuration
 
-| Variable       | Description                              | Default |
-|----------------|------------------------------------------|---------|
-| `RP_HOST`      | ReportPortal host URL                    |         |
-| `RP_API_TOKEN` | ReportPortal API token                   |         |
-| `RP_PROJECT`   | (optional) ReportPortal project name     |         |
-| `MCP_PORT`     | (optional) Port to run the MCP server on | `4389`  |
+The server needs to know where your ReportPortal is and how to authenticate. Set these environment variables in your shell:
 
-## Usage
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `RP_HOST` | The URL of your ReportPortal (e.g. https://myreportportal.example.com) | Yes |
+| `RP_PROJECT` | Your default project name in ReportPortal | Optional |
+| `RP_API_TOKEN` | Your ReportPortal API token (for access) | Yes |
+| `MCP_PORT` | Port for the MCP server | `4389` |
+
+For example:
+
+```bash
+export RP_HOST="https://your-reportportal-instance.com"
+export RP_PROJECT="YourProjectInReportPortal"
+export RP_API_TOKEN="your-api-token"
+```
 
 ### Starting the Server
 
-```bash
-# Set required environment variables
-export RP_HOST="https://your-reportportal-instance.com"
-export RP_PROJECT="your-project"
-export RP_TOKEN="your-api-token"
+After configuring the env vars as above, simply run:
 
-# Run the server
+```bash
 ./reportportal-mcp-server
 ```
 
-### Available Tools
+This will start the MCP server on the configured port.
 
-| Tool Name                  | Description                                      | Parameters                                                                                                    |
-|----------------------------|--------------------------------------------------|---------------------------------------------------------------------------------------------------------------|
-| List Launches              | Lists ReportPortal launches with pagination      | `page` (optional), `page-size` (optional)                                                                     |
-| Get Last Launch by Name    | Retrieves the most recent launch by name         | `launch`                                                                                                      |
-| Force Finish Launch        | Forces a launch to finish                        | `launch_id`                                                                                                   |
-| Delete Launch              | Deletes a specific launch                        | `launch_id`                                                                                                   |
-| Get Last Launch by Filter  | Retrieves the most recent launch by filters      | `name`, `description`, `uuid`, `status`, `start_time`, `end_time`, `attributes`, `mode`, `sort` (all optional)|
-| List Test Items by Launch  | Lists test items for a specific launch           | `launch-id`, `page` (optional), `page-size` (optional)                                                        |
-| Get Test Item by ID        | Retrieves details of a specific test item        | `test_item_id`                                                                                                |
-| Run Auto Analysis          | Runs auto analysis on a launch                   | `launch_id`, `analyzer_mode`, `analyzer_type`, `analyzer_item_modes`                                          |
-| Run Unique Error Analysis  | Runs unique error analysis on a launch           | `launch_id`, `remove_numbers`                                                                                 |
+Once running, the MCP server is ready to accept queries from your AI tool.
 
-### Available Prompts
+### Development
 
-#### Analyze Launch
+To set up a development environment or contribute:
 
-Analyzes a ReportPortal launch and provides detailed information about test results, failures, and statistics.
-
-Parameters:
-- `launch_id`: ID of the launch to analyze
-
-### Available Resources
-
-| Resource Type | Description                         | Properties |
-|---------------|-------------------------------------|------------|
-| Launch Resource | Structured access to launch data    | • Basic launch info (ID, name, description)<br>• Test execution statistics<br>• Timing information<br>• Status and execution mode |
-| Test Item Resource | Structured access to test item data | • Basic test item info (ID, name, description)<br>• Test execution status and type<br>• Parent information and hierarchy position<br>• Issue details (when applicable)<br>• Timing information (start time, end time, duration)<br>• Test attributes and parameters<br>• Path to the test in the test suite hierarchy |
-
-This table format makes the available resources more scannable while preserving all the key information about each resource type.
-
-## Development
-
-### Setting up Development Environment
+### Task Tool
+Install Go Task v3:
 ```bash
-# Install Task
 go install github.com/go-task/task/v3/cmd/task@latest
+```
 
-# Install dependencies
+### Dependencies
+Run task deps to install Go dependencies:
+```bash
 task deps
 ```
 
-### Building
+### Build
 ```bash
-# Build the server
 task build
 ```
 
-### Running Tests
+### Tests
 ```bash
-# Run all tests
 task test
 ```
 
-### Running the MCP Server
+### Build with Docker
 ```bash
-# Build Docker Image
 task docker:build
 ```
 
@@ -153,21 +268,16 @@ task inspector
 ### Code Quality
 
 ```bash
-# Run linters
+# Lint
 task lint
 
-# Format code
+# Format
 task fmt
 ```
 
-### Docker
+### Extending the Server
 
-```bash
-# Build Docker image
-task docker:build
-```
-
-### Adding New Tools
+#### Adding new Tools
 
 To add a new tool, create a new method in the appropriate resource file and add it to the server in the `NewServer` function:
 
@@ -184,7 +294,8 @@ func NewServer(...) *server.MCPServer {
     // ...
 }
 ```
-### Adding New Prompts
+
+#### Adding new Prompts
 
 To add a new prompt, simply create a YAML file describing your prompt and place it in the `prompts` folder at the root of the project. The server will automatically read and initialize all prompts from this directory on startup—no code changes are required.
 
@@ -198,4 +309,4 @@ This approach allows you to extend the server's capabilities with custom prompts
 
 ## License
 
-This project is licensed under the [Apache 2.0 License](LICENSE).
+This project is licensed under the Apache 2.0 License.
