@@ -6,7 +6,7 @@
 
 ## What is the ReportPortal MCP Server?
 
-The ReportPortal MCP Server is a bridge between your ReportPortal instance and AI chat assistants (such as Claude Desktop, GitHub Copilot, Cursor). In simple terms, it lets you ask questions in plain English about your test runs and get answers directly from ReportPortal. 
+The ReportPortal MCP Server is a bridge between your ReportPortal instance and AI chat assistants (such as Claude Desktop, GitHub Copilot, Cursor). In simple terms, it lets you ask questions in plain English about your test runs and get answers directly from ReportPortal. It follows the official [MCP](https://modelcontextprotocol.io/overview) guidelines.
 
 For example, instead of logging into the ReportPortal UI, you could ask your AI assistant "What tests failed in the last run?" or "List the 5 most recent test runs," and it will fetch that information from ReportPortal for you. This makes it easy for QA testers and managers to query test results using natural language, speeding up analysis and reporting.
 
@@ -22,6 +22,8 @@ For example, instead of logging into the ReportPortal UI, you could ask your AI 
 There are two ways to run the latest version of the ReportPortal MCP Server.
 
 ### Via Docker (recommended).
+
+The MCP server is available on the official ReportPortal's [DockerHub](https://hub.docker.com/r/reportportal/mcp-server).
 
 ```json
 {
@@ -51,6 +53,8 @@ There are two ways to run the latest version of the ReportPortal MCP Server.
 ```
 
 ### Using pre-built binaries.
+
+The OS pre-built binaries can be downloaded from the official releases on [GitHub](https://github.com/reportportal/reportportal-mcp-server/releases).
 
 ```json
 {
@@ -130,7 +134,7 @@ The ReportPortal MCP server provides a comprehensive set of capabilities for int
 - Analyze launches to get detailed test execution insights
 - Generate structured reports with statistics and failure analysis
 
-## Available Tools (commands)
+### Available Tools (commands)
 
 | Tool Name                  | Description                                      | Parameters                                                                                                    |
 |----------------------------|--------------------------------------------------|---------------------------------------------------------------------------------------------------------------|
@@ -309,4 +313,4 @@ This approach allows you to extend the server's capabilities with custom prompts
 
 ## License
 
-This project is licensed under the Apache 2.0 License.
+This project is licensed under the [Apache 2.0 License](LICENSE).
