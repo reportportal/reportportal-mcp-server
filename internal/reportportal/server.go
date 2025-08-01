@@ -61,6 +61,7 @@ func NewServer(
 	s.AddTool(testItems.toolListTestItemsByFilter())
 	s.AddTool(testItems.toolGetTestItemLogsByFilter())
 	s.AddTool(testItems.toolGetTestItemAttachment())
+	s.AddTool(testItems.toolGetTestSuitesByFilter())
 	s.AddResourceTemplate(testItems.resourceTestItem())
 
 	prompts, err := readPrompts(promptFiles, "prompts")

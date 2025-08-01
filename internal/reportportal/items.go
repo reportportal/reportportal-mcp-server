@@ -514,3 +514,148 @@ func (lr *TestItemResources) toolGetTestItemLogsByFilter() (tool mcp.Tool, handl
 			return mcp.NewToolResultText(string(rawBody)), nil
 		})
 }
+
+// toolGetTestSuitesByFilter creates a tool to get test suites for a specific launch.
+func (lr *TestItemResources) toolGetTestSuitesByFilter() (tool mcp.Tool, handler server.ToolHandlerFunc) {
+	options := []mcp.ToolOption{
+		// Tool metadata
+		mcp.WithDescription(
+			"Get list of test suites for a specific launch ID with optional filters",
+		),
+		lr.projectParameter,
+		mcp.WithNumber("launch-id", // ID of the launch
+			mcp.Description("Suites with specific Launch ID, this is a required parameter"),
+		),
+	}
+
+	// Add pagination parameters
+	options = append(options, setPaginationOptions(defaultSortingForSuites)...)
+
+	// Add other parameters
+	options = append(options, []mcp.ToolOption{
+		// Optional filters
+		mcp.WithString("filter.cnt.name", // Suite name
+			mcp.Description("Suites name should contain this substring"),
+		),
+		mcp.WithString(
+			"filter.has.compositeAttribute", // Suite attributes
+			mcp.Description(
+				"Suites have this combination of the attribute values, format: attribute1,attribute2:attribute3,... etc. string without spaces",
+			),
+		),
+		mcp.WithString(
+			"filter.has.attributeKey", // Suite attribute keys
+			mcp.Description(
+				"Suites have these attribute keys (one or few)",
+			),
+		),
+		mcp.WithString("filter.cnt.description", // Suite description
+			mcp.Description("Suites description should contains this substring"),
+		),
+		mcp.WithString("filter.eq.parentId", // Parent ID
+			mcp.Description("Suites parent ID equals"),
+		),
+		mcp.WithString(
+			"filter.btw.startTime.from", // Start time from timestamp
+			mcp.Description(
+				"Suites with start time from timestamp (GMT timezone(UTC+00:00), RFC3339 format or Unix epoch)",
+			),
+		),
+		mcp.WithString(
+			"filter.btw.startTime.to", // Start time to timestamp
+			mcp.Description(
+				"Suites with start time to timestamp (GMT timezone(UTC+00:00), RFC3339 format or Unix epoch)",
+			),
+		),
+	}...)
+
+	return mcp.NewTool(
+			"get_test_suites_by_filter",
+			options...), lr.analytics.WithAnalytics("get_test_suites_by_filter", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			slog.Debug("START PROCESSING")
+			project, err := extractProject(request)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+
+			launchId, err := request.RequireInt("launch-id")
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+
+			// Extract optional filter parameters
+			filterName := request.GetString("filter.cnt.name", "")
+			filterAttributes := request.GetString("filter.has.compositeAttribute", "")
+			filterAttributeKeys := request.GetString("filter.has.attributeKey", "")
+			filterDescription := request.GetString("filter.cnt.description", "")
+			filterStartTimeFrom := request.GetString("filter.btw.startTime.from", "")
+			filterStartTimeTo := request.GetString("filter.btw.startTime.to", "")
+			filterParentId := request.GetString("filter.eq.parentId", "")
+
+			urlValues := url.Values{
+				"providerType":   {defaultProviderType},
+				"filter.in.type": {defaultFilterInTypeSuites},
+			}
+			urlValues.Add("launchId", strconv.Itoa(launchId))
+
+			// Add optional filters to urlValues if they have values
+			if filterName != "" {
+				urlValues.Add("filter.cnt.name", filterName)
+			}
+			if filterDescription != "" {
+				urlValues.Add("filter.cnt.description", filterDescription)
+			}
+			if filterParentId != "" {
+				_, err := strconv.ParseUint(filterParentId, 10, 64)
+				if err != nil {
+					return mcp.NewToolResultError(
+						fmt.Sprintf("invalid parent filter ID value: %s", filterParentId),
+					), nil
+				}
+				urlValues.Add("filter.eq.parentId", filterParentId)
+			}
+
+			filterStartTime, err := processStartTimeFilter(filterStartTimeFrom, filterStartTimeTo)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			if filterStartTime != "" {
+				urlValues.Add("filter.btw.startTime", filterStartTime)
+			}
+
+			ctxWithParams := WithQueryParams(ctx, urlValues)
+			// Prepare "requiredUrlParams" for the API request because the ReportPortal API v2 expects them in a specific format
+			requiredUrlParams := map[string]string{
+				"launchId": strconv.Itoa(launchId),
+			}
+			// Build the API request with filters
+			apiRequest := lr.client.TestItemAPI.GetTestItemsV2(ctxWithParams, project).
+				Params(requiredUrlParams)
+
+			// Apply pagination parameters
+			apiRequest = applyPaginationOptions(apiRequest, request, defaultSortingForSuites)
+
+			// Process attribute keys and combine with composite attributes
+			filterAttributes = processAttributeKeys(filterAttributes, filterAttributeKeys)
+			if filterAttributes != "" {
+				apiRequest = apiRequest.FilterHasCompositeAttribute(filterAttributes)
+			}
+
+			// Execute the request
+			items, rs, err := apiRequest.Execute()
+			if err != nil {
+				return mcp.NewToolResultError(extractResponseError(err, rs)), nil
+			}
+
+			// Serialize the test suites into JSON format
+			r, err := json.Marshal(items)
+			if err != nil {
+				return mcp.NewToolResultError(
+					fmt.Sprintf("failed to marshal response: %v", err),
+				), nil
+			}
+
+			// Return the serialized test suites as a text result
+			return mcp.NewToolResultText(string(r)), nil
+		})
+}
