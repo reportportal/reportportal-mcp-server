@@ -81,7 +81,7 @@ Choose your favourite AI Tool to connect.
 {
   "mcpServers": {
     "reportportal": {
-      // choose the Docker or binary installation from the section above
+      // choose the Docker or binary configuration from the section above
     }
   }
 }
@@ -111,7 +111,7 @@ Documentation: [Claude Code guide](https://docs.anthropic.com/en/docs/claude-cod
 {
   "mcpServers": {
     "reportportal": {
-      // choose the Docker or binary installation from the section above
+      // choose the Docker or binary configuration from the section above
     }
   }
 }
@@ -128,7 +128,7 @@ Documentation: [Claude Code guide](https://docs.anthropic.com/en/docs/claude-cod
 {
   "servers": {
     "reportportal": {
-      // choose the Docker or binary installation from the section above
+      // choose the Docker or binary configuration from the section above
     }
   }
 }
@@ -143,7 +143,7 @@ Documentation: [Claude Code guide](https://docs.anthropic.com/en/docs/claude-cod
 {
   "servers": {
     "reportportal": {
-      // choose the Docker or binary installation from the section above
+      // choose the Docker or binary configuration from the section above
     }
   }
 }
