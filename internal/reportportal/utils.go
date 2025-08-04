@@ -18,11 +18,13 @@ const (
 	defaultPageSize            = 50                      // Default number of elements per page
 	defaultSortingForLaunches  = "startTime,number,DESC" // default sorting order for launches
 	defaultSortingForItems     = "startTime,DESC"        // default sorting order for items
+	defaultSortingForSuites    = "startTime,ASC"         // default sorting order for suites
 	defaultSortingForLogs      = "logTime,ASC"           // default sorting order for logs
 	defaultProviderType        = "launch"                // default provider type
 	defaultFilterEqHasChildren = "false"                 // items which don't have children
 	defaultFilterEqHasStats    = "true"
 	defaultFilterInType        = "STEP"
+	defaultFilterInTypeSuites  = "SUITE,TEST"
 	defaultItemLogLevel        = "TRACE" // Default log level for test item logs
 )
 
@@ -40,11 +42,11 @@ func setPaginationOptions(sortingParams string) []mcp.ToolOption {
 			mcp.DefaultNumber(firstPage),
 			mcp.Description("Page number"),
 		),
-		mcp.WithNumber("page.size", // Parameter for specifying the page size
+		mcp.WithNumber("page-size", // Parameter for specifying the page size
 			mcp.DefaultNumber(defaultPageSize),
 			mcp.Description("Page size"),
 		),
-		mcp.WithString("page.sort", // Sorting fields and direction
+		mcp.WithString("page-sort", // Sorting fields and direction
 			mcp.DefaultString(sortingParams),
 			mcp.Description("Sorting fields and direction"),
 		),
@@ -63,14 +65,14 @@ func applyPaginationOptions[T PaginatedRequest[T]](
 		pageInt = math.MaxInt32
 	}
 
-	// Extract the "page.size" parameter from the request
-	pageSizeInt := request.GetInt("page.size", defaultPageSize)
+	// Extract the "page-size" parameter from the request
+	pageSizeInt := request.GetInt("page-size", defaultPageSize)
 	if pageSizeInt > math.MaxInt32 {
 		pageSizeInt = math.MaxInt32
 	}
 
-	// Extract the "page.sort" parameter from the request
-	pageSort := request.GetString("page.sort", sortingParams)
+	// Extract the "page-sort" parameter from the request
+	pageSort := request.GetString("page-sort", sortingParams)
 
 	// Apply pagination directly
 	return apiRequest.
