@@ -66,16 +66,16 @@ func main() {
 				Before:      initLogger(),
 			},
 			{
-				Name:        "sse", // Subcommand to start the server in SSE mode
-				Description: "Start ReportPortal MCP Server in SSE mode",
-				Action:      runSSEServer, // Function to execute for this subcommand
+				Name:        "streaming", // Subcommand to start the server in streaming mode
+				Description: "Start ReportPortal MCP Server in streaming mode",
+				Action:      runStreamingServer, // Function to execute for this subcommand
 				Before:      initLogger(),
 				Flags: []cli.Flag{
 					&cli.StringFlag{
 						Name:     "addr",
 						Required: false,
 						Sources:  cli.EnvVars("ADDR"),
-						Value:    ":8080", // Default address to bind the SSE server
+						Value:    ":8080", // Default address to bind the streaming server
 					},
 				},
 			},
@@ -158,23 +158,23 @@ func runStdioServer(ctx context.Context, cmd *cli.Command) error {
 	return nil
 }
 
-// runSSEServer starts the ReportPortal MCP server in SSE mode.
-func runSSEServer(ctx context.Context, cmd *cli.Command) error {
+// runStreamingServer starts the ReportPortal MCP server in streaming mode.
+func runStreamingServer(ctx context.Context, cmd *cli.Command) error {
 	mcpServer, err := newMCPServer(cmd)
 	if err != nil {
 		return fmt.Errorf("failed to create ReportPortal MCP server: %w", err)
 	}
-	sseServer := server.NewSSEServer(mcpServer)
-	addr := cmd.String("addr") // Address to bind the SSE server to
+	streamingServer := server.NewStreamableHTTPServer(mcpServer)
+	addr := cmd.String("addr") // Address to bind the streaming server to
 
 	// Start listening for messages in a separate goroutine
 	errC := make(chan error, 1)
 	go func() {
-		errC <- sseServer.Start(addr)
+		errC <- streamingServer.Start(addr)
 	}()
 
 	// Log that the server is running
-	slog.Info("ReportPortal MCP Server running on SSE", "addr", addr)
+	slog.Info("ReportPortal MCP Server running in streaming mode", "addr", addr)
 
 	// Wait for a shutdown signal or an error from the server
 	select {
@@ -182,7 +182,7 @@ func runSSEServer(ctx context.Context, cmd *cli.Command) error {
 		slog.Error("shutting down server...")
 		sCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if err := sseServer.Shutdown(sCtx); err != nil {
+		if err := streamingServer.Shutdown(sCtx); err != nil {
 			slog.Error("error during server shutdown", "error", err)
 		}
 	case err := <-errC: // Error occurred while running the server
