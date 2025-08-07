@@ -60,7 +60,7 @@ jobs:
           echo "TAG=$(echo '${{ steps.meta.outputs.tags }}' | cut -d',' -f1)" >> $GITHUB_OUTPUT
 
       - name: Build and push Docker image
-        uses: mend/gh-actions/.github/actions/docker-build-push-ecr@v1.0.28
+        uses: mend/gh-actions/.github/actions/docker-build-push-ecr@v1.0.49
         with:
           repository: ${{ env.ECR_REPOSITORY }}
           image-tag: ${{ github.event_name == 'pull_request' && 'pr-test' || steps.first_tag.outputs.TAG }}
