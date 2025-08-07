@@ -42,29 +42,32 @@ jobs:
       - name: Run build (local Go binary)
         run: task app:build
 
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_IAM_ROLE_ARN }}
+          role-session-name: GitHubActionsSession
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
       - name: Extract metadata
-        if: github.event_name != 'pull_request'
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}
+          images: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}
           tags: |
             type=ref,event=branch
+            type=ref,event=pr
             type=sha,prefix=sha-,format=short
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: Extract first tag from metadata
-        if: github.event_name != 'pull_request'
-        id: first_tag
-        run: |
-          echo "TAG=$(echo '${{ steps.meta.outputs.tags }}' | cut -d',' -f1)" >> $GITHUB_OUTPUT
-
       - name: Build and push Docker image
-        uses: mend/gh-actions/.github/actions/docker-build-push-ecr@v1.0.28
+        uses: docker/build-push-action@v5
         with:
-          repository: ${{ env.ECR_REPOSITORY }}
-          image-tag: ${{ github.event_name == 'pull_request' && 'pr-test' || steps.first_tag.outputs.TAG }}
-          dockerfile-path: .
-          aws-role-to-assume: ${{ vars.AWS_IAM_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
+          context: .
           push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
