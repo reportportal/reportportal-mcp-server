@@ -1,0 +1,48 @@
+name: Build and Push Docker Image
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+
+env:
+  ECR_REGISTRY: ${{ vars.ECR_REGISTRY }}
+  ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+  AWS_REGION: ${{ vars.AWS_REGION }}
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build-and-push:
+    runs-on: [mend-self-hosted, profile=arch-small]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix=sha-,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Docker image
+        uses: mend/gh-actions/.github/workflows/build-push-generic-microservice.yaml@v1.0.25
+        with:
+          repository: ${{ env.ECR_REPOSITORY }}
+          image-tag: ${{ steps.meta.outputs.tags }}
+          dockerfile-path: .
+          aws-role-to-assume: ${{ vars.AWS_IAM_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          push: ${{ github.event_name != 'pull_request' }}
