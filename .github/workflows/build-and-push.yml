@@ -20,14 +20,29 @@ permissions:
   contents: read
 
 jobs:
-  build-and-push:
+  build-and-test:
     runs-on: [mend-self-hosted, profile=arch-small]
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.4'
+
+      - name: Install Task
+        uses: arduino/setup-task@v2
+
+      - name: Run unit tests
+        run: task test
+
+      - name: Run build (local Go binary)
+        run: task app:build
+
       - name: Extract metadata
+        if: github.event_name != 'pull_request'
         id: meta
         uses: docker/metadata-action@v5
         with:
@@ -37,11 +52,17 @@ jobs:
             type=sha,prefix=sha-,format=short
             type=raw,value=latest,enable={{is_default_branch}}
 
+      - name: Extract first tag from metadata
+        if: github.event_name != 'pull_request'
+        id: first_tag
+        run: |
+          echo "TAG=$(echo '${{ steps.meta.outputs.tags }}' | cut -d',' -f1)" >> $GITHUB_OUTPUT
+
       - name: Build and push Docker image
-        uses: mend/gh-actions/.github/workflows/build-push-generic-microservice.yaml@v1.0.25
+        uses: mend/gh-actions/.github/actions/docker-build-push-ecr@main
         with:
           repository: ${{ env.ECR_REPOSITORY }}
-          image-tag: ${{ steps.meta.outputs.tags }}
+          image-tag: ${{ github.event_name == 'pull_request' && 'pr-test' || steps.first_tag.outputs.TAG }}
           dockerfile-path: .
           aws-role-to-assume: ${{ vars.AWS_IAM_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
