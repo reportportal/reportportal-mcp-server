@@ -18,6 +18,7 @@ env:
 permissions:
   id-token: write
   contents: read
+  actions: read
 
 jobs:
   build-and-test:
