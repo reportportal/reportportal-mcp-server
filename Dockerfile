@@ -24,4 +24,4 @@ WORKDIR /server
 # Copy the binary from the build stage
 COPY --from=build /build/reportportal-mcp-server .
 # Command to run the server
-CMD ["./reportportal-mcp-server", "stdio"]
+CMD ["./reportportal-mcp-server"]
