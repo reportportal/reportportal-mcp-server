@@ -5,8 +5,9 @@ vars:
   GOLANG_CI: "docker run --rm -v $(pwd):/app -w /app golangci/golangci-lint:{{.GOLANGCI_LINT_VERSION}} golangci-lint"
   IMAGE_NAME: "reportportal-mcp-server"
   IMAGE_NAME_DEBUG: "reportportal-mcp-server-debug"
-  INSPECTOR: "npx @modelcontextprotocol/inspector@0.15.0"
+  INSPECTOR: "npx @modelcontextprotocol/inspector"
   DLV_PORT: "52202"
+  STREAMABLE_HTTP_PORT: "8080"
 dotenv: [ '.env' ]
 tasks:
   fmt:
@@ -44,6 +45,12 @@ tasks:
   docker:build-debug:
     desc: "Builds docker image with dlv for debugging"
     cmd: "docker build -f debug.dockerfile -t {{.IMAGE_NAME_DEBUG}} ."
+
+  docker:run:
+    desc: "Runs docker mcp server http streamable mode"
+    deps: [ docker:build ]
+    cmd: >
+      docker run -i --rm -p {{.STREAMABLE_HTTP_PORT}}:{{.STREAMABLE_HTTP_PORT}} -e "RP_API_TOKEN=$RP_API_TOKEN" -e "RP_PROJECT=$RP_PROJECT" -e "RP_HOST=$RP_HOST" {{.IMAGE_NAME}} -- streaming
 
   inspector:
     desc: "Runs inspector in production mode"

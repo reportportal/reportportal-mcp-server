@@ -27,8 +27,4 @@ COPY --from=builder /go/bin/dlv /usr/local/bin/dlv
 
 WORKDIR /app
 
-# Expose Delve debug port and MCP server port
-EXPOSE 52202 8080
-
-# Start Delve without immediately starting the program
-ENTRYPOINT ["dlv", "exec", "/app/server", "--headless", "--listen=:52202", "--api-version=2", "--log", "--accept-multiclient", "--"]
+ENTRYPOINT ["dlv", "exec", "/app/server", "--headless", "--listen=:52202", "--api-version=2", "--log", "--accept-multiclient"]
