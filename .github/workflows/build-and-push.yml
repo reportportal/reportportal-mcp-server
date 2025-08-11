@@ -1,72 +1,45 @@
-name: Build and Push Docker Image
+name: Deploy Existing Image
 
 on:
-  push:
-    branches:
-      - main
-    tags:
-      - 'v*'
-  pull_request:
-    branches:
-      - main
-
-env:
-  ECR_REGISTRY: ${{ vars.ECR_REGISTRY }}
-  ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
-  AWS_REGION: ${{ vars.AWS_REGION }}
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Image tag to deploy (e.g. v1.2.3)'
+        required: true
+        type: string
 
 permissions:
-  id-token: write
-  contents: read
-  actions: read
+  contents: write
 
 jobs:
-  build-and-test:
+  prepare:
     runs-on: [mend-self-hosted, profile=sast-qa]
-
+    outputs:
+      TAG: ${{ steps.set-tag.outputs.TAG }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - id: set-tag
+        run: echo "TAG=${{ github.event.inputs.image_tag }}" >> "$GITHUB_OUTPUT"
 
-      - name: Setup Go
-        uses: actions/setup-go@v5
+  deploy-and-wait-for-sync:
+    needs: [prepare]
+    runs-on: [mend-self-hosted, profile=arch-small]
+    env:
+      IMAGE_TAG: ${{ needs.prepare.outputs.TAG }}
+    steps:
+      - name: Check out Mend helm-charts Repo
+        uses: actions/checkout@v3
         with:
-          go-version: '1.24.4'
+          repository: mend/helm-charts
+          token: ${{ secrets.GH_TOKEN }}
+          ref: main
+          path: helm-charts-clone
 
-      - name: Install Task
-        uses: arduino/setup-task@v2
-
-      - name: Run unit tests
-        run: task test
-
-      - name: Run build (local Go binary)
-        run: task app:build
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ vars.AWS_IAM_ROLE_ARN }}
-          role-session-name: GitHubActionsSession
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}
-          tags: |
-            type=ref,event=pr
-            type=sha,prefix=sha-,format=short
-            type=raw,value=latest,enable={{is_default_branch}}
-
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+      - name: Change image in helm chart values file
+        run: |
+          cd ./helm-charts-clone/values/reportportal-mcp-server/infra
+          sed -i 's/tag: .*/tag: '"${IMAGE_TAG}"'/g' ./values-infra-dev.yaml
+          git config --global user.name 'AutoRelease'
+          git config --global user.email 'AutoRelease'
+          git add .
+          git commit -m "GH Actions AutoRelease ${IMAGE_TAG}" || echo "No changes to commit"
+          git push

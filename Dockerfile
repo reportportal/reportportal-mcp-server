@@ -23,7 +23,8 @@ FROM gcr.io/distroless/base-debian12
 WORKDIR /server
 # Copy the binary from the build stage
 COPY --from=build /build/reportportal-mcp-server .
-# Expose MCP SSE port (informational)
-EXPOSE 4389
-# Default to SSE mode on port 4389
-CMD ["./reportportal-mcp-server", "sse", "--addr", ":4389"]
+
+ENTRYPOINT ["./reportportal-mcp-server"]
+
+# Command to run the server
+CMD ["stdio"]
