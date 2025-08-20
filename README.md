@@ -105,7 +105,9 @@ Documentation: [Claude Code guide](https://docs.anthropic.com/en/docs/claude-cod
 
 ### Cursor (AI Code Editor)
 
-[![Install MCP Server](https://cursor.com/deeplink/mcp-install-dark.svg)](https://cursor.com/en/install-mcp?name=reportportal&config=eyJjb21tYW5kIjoiZG9ja2VyIHJ1biAtaSAtLXJtIC1lIFJQX0FQSV9UT0tFTiAtZSBSUF9IT1NUIC1lIFJQX1BST0pFQ1QgcmVwb3J0cG9ydGFsL21jcC1zZXJ2ZXIiLCJlbnYiOnsiUlBfQVBJX1RPS0VOIjoieW91ci1hcGktdG9rZW4iLCJSUF9IT1NUIjoiaHR0cHM6Ly95b3VyLXJlcG9ydHBvcnRhbC1pbnN0YW5jZS5jb20iLCJSUF9QUk9KRUNUIjoiWW91clByb2plY3RJblJlcG9ydFBvcnRhbCJ9fQ%3D%3D)
+Just click [![Install MCP Server](https://cursor.com/deeplink/mcp-install-dark.svg)](https://cursor.com/en/install-mcp?name=reportportal&config=eyJjb21tYW5kIjoiZG9ja2VyIHJ1biAtaSAtLXJtIC1lIFJQX0FQSV9UT0tFTiAtZSBSUF9IT1NUIC1lIFJQX1BST0pFQ1QgcmVwb3J0cG9ydGFsL21jcC1zZXJ2ZXIiLCJlbnYiOnsiUlBfQVBJX1RPS0VOIjoieW91ci1hcGktdG9rZW4iLCJSUF9IT1NUIjoiaHR0cHM6Ly95b3VyLXJlcG9ydHBvcnRhbC1pbnN0YW5jZS5jb20iLCJSUF9QUk9KRUNUIjoiWW91clByb2plY3RJblJlcG9ydFBvcnRhbCJ9fQ%3D%3D)
+
+Or follow the next steps:
 
 1. In Cursor, go to **Settings → Extensions → MCP** and click to add a new global MCP server.
 2. Add a new MCP server entry that runs the ReportPortal MCP Server.
