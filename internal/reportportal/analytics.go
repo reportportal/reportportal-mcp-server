@@ -47,8 +47,8 @@ type AnalyticsConfig struct {
 
 // GAEvent represents a Google Analytics 4 event
 type GAEvent struct {
-	Name       string                 `json:"name"`
-	Parameters map[string]interface{} `json:"parameters"`
+	Name   string                 `json:"name"`
+	Params map[string]interface{} `json:"params"`
 }
 
 // GAPayload represents the full GA4 payload
@@ -95,6 +95,8 @@ func NewAnalytics(userID string, apiSecret string) (*Analytics, error) {
 			finalUserID = "unknown"
 		} else {
 			finalUserID = generatedID
+			// GA4 expects string, so we add a "." at the end due to API requirements
+			finalUserID = finalUserID + "."
 		}
 	}
 
@@ -175,11 +177,20 @@ func (a *Analytics) sendEvent(ctx context.Context, event GAEvent) error {
 		return fmt.Errorf("failed to marshal analytics payload: %w", err)
 	}
 
-	slog.Debug("Sending GA4 request",
-		"measurement_id", a.config.MeasurementID,
-		"payload_size", len(jsonData),
-		"event_name", event.Name,
-	)
+	// Log the outgoing request details with pretty-printed JSON
+	slog.Debug("GA4 HTTP Request", "event_name", event.Name)
+
+	// Pretty print the JSON payload for debugging
+	var prettyPayload interface{}
+	if jsonErr := json.Unmarshal(jsonData, &prettyPayload); jsonErr == nil {
+		if prettyData, prettyErr := json.MarshalIndent(prettyPayload, "", "  "); prettyErr == nil {
+			slog.Debug("Request payload:", "json", string(prettyData))
+		} else {
+			slog.Debug("Request payload:", "json", string(jsonData))
+		}
+	} else {
+		slog.Debug("Request payload:", "json", string(jsonData))
+	}
 
 	url := fmt.Sprintf("%s?measurement_id=%s&api_secret=%s",
 		ga4EndpointURL, a.config.MeasurementID, a.config.APISecret)
@@ -191,13 +202,10 @@ func (a *Analytics) sendEvent(ctx context.Context, event GAEvent) error {
 
 	req.Header.Set("Content-Type", "application/json")
 
-	startTime := time.Now()
 	resp, err := a.httpClient.Do(req)
 	if err != nil {
 		slog.Error("GA4 HTTP request failed",
 			"error", err,
-			"measurement_id", a.config.MeasurementID,
-			"duration_ms", time.Since(startTime).Milliseconds(),
 		)
 		return fmt.Errorf("failed to send analytics request: %w", err)
 	}
@@ -207,8 +215,6 @@ func (a *Analytics) sendEvent(ctx context.Context, event GAEvent) error {
 		}
 	}()
 
-	duration := time.Since(startTime)
-
 	// Read response body for logging
 	body, readErr := io.ReadAll(resp.Body)
 	if readErr != nil {
@@ -216,39 +222,38 @@ func (a *Analytics) sendEvent(ctx context.Context, event GAEvent) error {
 		body = []byte("failed to read response")
 	}
 
-	// Log response details for all status codes
-	responseFields := []interface{}{
-		"status_code", resp.StatusCode,
-		"status_text", http.StatusText(resp.StatusCode),
-		"duration_ms", duration.Milliseconds(),
-		"response_size", len(body),
-		"measurement_id", a.config.MeasurementID,
-		"content_type", resp.Header.Get("Content-Type"),
+	// Pretty print response body if it's JSON
+	if len(body) > 0 {
+		var prettyJSON interface{}
+		if jsonErr := json.Unmarshal(body, &prettyJSON); jsonErr == nil {
+			if prettyBody, prettyErr := json.MarshalIndent(prettyJSON, "", "  "); prettyErr == nil {
+				slog.Debug("Response body:", "json", string(prettyBody))
+			} else {
+				slog.Debug("Response body:", "text", string(body))
+			}
+		} else {
+			slog.Debug("Response body:", "text", string(body))
+		}
 	}
 
-	// Add response headers for debugging
-	if len(resp.Header) > 0 {
-		responseFields = append(responseFields, "response_headers", fmt.Sprintf("%v", resp.Header))
-	}
+	// Log response details for all status codes
+	statusInfo := fmt.Sprintf("%d (%s)", resp.StatusCode, http.StatusText(resp.StatusCode))
+	slog.Debug("GA4 HTTP Response", "status", statusInfo)
 
 	switch {
 	case resp.StatusCode == http.StatusOK:
-		slog.Debug("GA4 analytics event sent successfully",
-			responseFields...,
-		)
+		slog.Debug("GA4 analytics event sent successfully")
 		if len(body) > 0 {
 			slog.Debug("GA4 response body (200 OK)", "body", string(body))
 		}
 
 	case resp.StatusCode == http.StatusNoContent:
-		slog.Debug("GA4 analytics event accepted (no content response)",
-			responseFields...,
-		)
+		slog.Debug("GA4 analytics event accepted (no content response)")
 
 	case resp.StatusCode >= 400 && resp.StatusCode < 500:
 		// Client errors (400-499)
 		slog.Error("GA4 client error - check payload format or authentication",
-			append(responseFields, "response_body", string(body))...,
+			"response_body", string(body),
 		)
 		return fmt.Errorf(
 			"analytics client error %d (%s): %s",
@@ -260,7 +265,7 @@ func (a *Analytics) sendEvent(ctx context.Context, event GAEvent) error {
 	case resp.StatusCode >= 500:
 		// Server errors (500+)
 		slog.Error("GA4 server error - Google Analytics service issue",
-			append(responseFields, "response_body", string(body))...,
+			"response_body", string(body),
 		)
 		return fmt.Errorf(
 			"analytics server error %d (%s): %s",
@@ -272,7 +277,7 @@ func (a *Analytics) sendEvent(ctx context.Context, event GAEvent) error {
 	default:
 		// Unexpected status codes
 		slog.Warn("GA4 unexpected response status",
-			append(responseFields, "response_body", string(body))...,
+			"response_body", string(body),
 		)
 		return fmt.Errorf(
 			"analytics unexpected status %d (%s): %s",
@@ -323,6 +328,8 @@ func getOrCreateUserID() (string, error) {
 
 	// Create new user ID
 	userID := xid.New().String()
+	// GA4 expects string, so we add a "." at the end due to API requirements
+	userID = userID + "."
 
 	// Ensure directory exists
 	if err := os.MkdirAll(filepath.Dir(userIDPath), 0o750); err != nil {
@@ -524,7 +531,7 @@ func (a *Analytics) sendBatchMetrics(ctx context.Context, metrics map[string]int
 	// Create batch event with all tool metrics
 	event := GAEvent{
 		Name: "mcp_batch_event",
-		Parameters: map[string]interface{}{
+		Params: map[string]interface{}{
 			"user_id":    a.config.UserID,
 			"platform":   runtime.GOOS,
 			"version":    "1.0.0",
@@ -536,7 +543,7 @@ func (a *Analytics) sendBatchMetrics(ctx context.Context, metrics map[string]int
 	for toolName, count := range metrics {
 		// Use tool_<name>_count as parameter name
 		paramName := fmt.Sprintf("tool_%s_count", toolName)
-		event.Parameters[paramName] = count
+		event.Params[paramName] = count
 
 		slog.Debug("Adding tool metric to batch",
 			"tool", toolName,
