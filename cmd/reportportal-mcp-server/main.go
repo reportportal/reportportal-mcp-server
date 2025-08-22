@@ -64,8 +64,11 @@ func main() {
 				Value:    "", // Empty means auto-generate persistent ID
 			},
 			&cli.BoolFlag{
-				Name:  "analytics-off", // Disable analytics completely
-				Usage: "Disable Google Analytics tracking",
+				Name:     "analytics-off", // Disable analytics completely
+				Required: false,
+				Sources:  cli.EnvVars("RP_MCP_ANALYTICS_OFF"),
+				Usage:    "Disable Google Analytics tracking",
+				Value:    false,
 			},
 		},
 		Commands: []*cli.Command{
@@ -118,7 +121,7 @@ func initLogger() func(ctx context.Context, command *cli.Command) (context.Conte
 	}
 }
 
-func newMCPServer(cmd *cli.Command) (*server.MCPServer, error) {
+func newMCPServer(cmd *cli.Command) (*server.MCPServer, *mcpreportportal.Analytics, error) {
 	// Retrieve required parameters from the command flags
 	token := cmd.String("token")                           // API token
 	host := cmd.String("host")                             // ReportPortal host URL
@@ -129,28 +132,28 @@ func newMCPServer(cmd *cli.Command) (*server.MCPServer, error) {
 
 	hostUrl, err := url.Parse(host)
 	if err != nil {
-		return nil, fmt.Errorf("invalid host URL: %w", err)
+		return nil, nil, fmt.Errorf("invalid host URL: %w", err)
 	}
 
 	// Create a new stdio server using the ReportPortal client
-	mcpServer, err := mcpreportportal.NewServer(
+	mcpServer, analytics, err := mcpreportportal.NewServer(
 		version,
 		hostUrl,
 		token,
 		project,
 		userID,
 		analyticsAPISecret,
-		analyticsOff,
+		!analyticsOff, // Convert analyticsOff to analyticsOn
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create ReportPortal MCP server: %w", err)
+		return nil, nil, fmt.Errorf("failed to create ReportPortal MCP server: %w", err)
 	}
-	return mcpServer, nil
+	return mcpServer, analytics, nil
 }
 
 // runStdioServer starts the ReportPortal MCP server in stdio mode.
 func runStdioServer(ctx context.Context, cmd *cli.Command) error {
-	mcpServer, err := newMCPServer(cmd)
+	mcpServer, analytics, err := newMCPServer(cmd)
 	if err != nil {
 		return fmt.Errorf("failed to create ReportPortal MCP server: %w", err)
 	}
@@ -169,9 +172,11 @@ func runStdioServer(ctx context.Context, cmd *cli.Command) error {
 	// Wait for a shutdown signal or an error from the server
 	select {
 	case <-ctx.Done(): // Context canceled (e.g., SIGTERM received)
-		slog.Error("shutting down server...")
+		slog.Info("shutting down server...")
+		mcpreportportal.StopAnalytics(analytics, "")
 	case err := <-errC: // Error occurred while running the server
 		if err != nil {
+			mcpreportportal.StopAnalytics(analytics, "server error")
 			return fmt.Errorf("error running server: %w", err)
 		}
 	}
@@ -181,7 +186,7 @@ func runStdioServer(ctx context.Context, cmd *cli.Command) error {
 
 // runStreamingServer starts the ReportPortal MCP server in streaming mode.
 func runStreamingServer(ctx context.Context, cmd *cli.Command) error {
-	mcpServer, err := newMCPServer(cmd)
+	mcpServer, analytics, err := newMCPServer(cmd)
 	if err != nil {
 		return fmt.Errorf("failed to create ReportPortal MCP server: %w", err)
 	}
@@ -200,7 +205,8 @@ func runStreamingServer(ctx context.Context, cmd *cli.Command) error {
 	// Wait for a shutdown signal or an error from the server
 	select {
 	case <-ctx.Done(): // Context canceled (e.g., SIGTERM received)
-		slog.Error("shutting down server...")
+		slog.Info("shutting down server...")
+		mcpreportportal.StopAnalytics(analytics, "")
 		sCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := streamingServer.Shutdown(sCtx); err != nil {
@@ -208,6 +214,7 @@ func runStreamingServer(ctx context.Context, cmd *cli.Command) error {
 		}
 	case err := <-errC: // Error occurred while running the server
 		if err != nil {
+			mcpreportportal.StopAnalytics(analytics, "server error")
 			return fmt.Errorf("error running server: %w", err)
 		}
 	}
