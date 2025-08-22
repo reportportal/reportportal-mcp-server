@@ -21,8 +21,8 @@ func NewServer(
 	hostUrl *url.URL,
 	token, defaultProject string,
 	userID, analyticsAPISecret string,
-	analyticsOff bool,
-) (*server.MCPServer, error) {
+	analyticsOn bool,
+) (*server.MCPServer, *Analytics, error) {
 	s := server.NewMCPServer(
 		"reportportal-mcp-server",
 		version,
@@ -38,11 +38,11 @@ func NewServer(
 
 	// Initialize analytics (disabled if analyticsOff is true)
 	var analytics *Analytics
-	if !analyticsOff {
+	if analyticsOn {
 		var err error
 		analytics, err = NewAnalytics(userID, analyticsAPISecret)
 		if err != nil {
-			return nil, fmt.Errorf("failed to initialize analytics: %w", err)
+			return nil, nil, fmt.Errorf("failed to initialize analytics: %w", err)
 		}
 	}
 
@@ -66,14 +66,14 @@ func NewServer(
 
 	prompts, err := readPrompts(promptFiles, "prompts")
 	if err != nil {
-		return nil, fmt.Errorf("failed to load prompts: %w", err)
+		return nil, nil, fmt.Errorf("failed to load prompts: %w", err)
 	}
 	for _, prompt := range prompts {
 		// Add each prompt to the server
 		s.AddPrompt(prompt.Prompt, prompt.Handler)
 	}
 
-	return s, nil
+	return s, analytics, nil
 }
 
 // readPrompts reads multiple YAML files containing prompt definitions

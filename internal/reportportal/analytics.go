@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -28,18 +29,17 @@ const (
 	// Configuration
 	measurementID = "G-WJGRCEFLXF"
 
-	// Environment variable to control analytics
-	analyticsEnabledEnvVar = "RP_MCP_ANALYTICS_ENABLED"
-
 	// User ID storage (unified client_id and user_id)
 	userIDFileName = ".reportportal-mcp-user-id"
+
+	// User ID storage directory
+	userIDConfigDir = "ReportPortalMCP"
 
 	userID = "692"
 )
 
 // AnalyticsConfig holds the analytics configuration
 type AnalyticsConfig struct {
-	Enabled       bool
 	MeasurementID string
 	APISecret     string
 	UserID        string // Unified ID used as both client_id and user_id
@@ -47,8 +47,8 @@ type AnalyticsConfig struct {
 
 // GAEvent represents a Google Analytics 4 event
 type GAEvent struct {
-	Name       string                 `json:"name"`
-	Parameters map[string]interface{} `json:"parameters"`
+	Name   string                 `json:"name"`
+	Params map[string]interface{} `json:"params"`
 }
 
 // GAPayload represents the full GA4 payload
@@ -76,59 +76,49 @@ type Analytics struct {
 
 // NewAnalytics creates a new Analytics instance
 func NewAnalytics(userID string, apiSecret string) (*Analytics, error) {
-	enabled := isAnalyticsEnabled()
-
+	// Analytics enablement is now controlled by the caller (CLI flags)
 	slog.Debug("Initializing analytics",
-		"enabled_by_env", enabled,
 		"has_api_secret", apiSecret != "",
 		"user_id", userID,
 		"measurement_id", measurementID,
 	)
+
+	// If API secret is empty, disable analytics
+	if apiSecret == "" {
+		return nil, fmt.Errorf("analytics disabled: missing API secret")
+	}
 
 	// Use provided userID or generate a persistent one
 	finalUserID := userID
 	if finalUserID == "" {
 		generatedID, err := getOrCreateUserID()
 		if err != nil {
-			slog.Warn("Failed to get user ID, analytics disabled", "error", err)
-			enabled = false
+			slog.Warn("Failed to get user ID, using fallback", "error", err)
 			finalUserID = "unknown"
 		} else {
 			finalUserID = generatedID
 		}
+	} else {
+		// Ensure provided userID has the "." postfix for GA4 requirements
+		if !strings.HasSuffix(finalUserID, ".") {
+			finalUserID = finalUserID + "."
+		}
 	}
 
 	config := &AnalyticsConfig{
-		Enabled:       enabled,
 		MeasurementID: measurementID,
 		APISecret:     apiSecret,
 		UserID:        finalUserID,
 	}
 
-	if enabled && apiSecret != "" {
-		userIDPreview := finalUserID
-		if len(finalUserID) > 8 {
-			userIDPreview = finalUserID[:8] + "..."
-		}
-		slog.Debug("Analytics initialized and enabled",
-			"measurement_id", measurementID,
-			"user_id", userIDPreview,
-		)
-	} else {
-		slog.Debug("Analytics disabled",
-			"enabled", enabled,
-			"has_api_secret", apiSecret != "",
-			"reason", func() string {
-				if !enabled {
-					return "disabled by environment variable"
-				}
-				if apiSecret == "" {
-					return "missing API secret"
-				}
-				return "unknown"
-			}(),
-		)
+	userIDPreview := finalUserID
+	if len(finalUserID) > 8 {
+		userIDPreview = finalUserID[:8] + "..."
 	}
+	slog.Debug("Analytics initialized and enabled",
+		"measurement_id", measurementID,
+		"user_id", userIDPreview,
+	)
 
 	analytics := &Analytics{
 		config: config,
@@ -140,19 +130,15 @@ func NewAnalytics(userID string, apiSecret string) (*Analytics, error) {
 		tickerDone: make(chan struct{}),
 	}
 
-	// Start background metrics processing if analytics is enabled
-	if config.Enabled && apiSecret != "" {
-		analytics.startMetricsProcessor()
-	}
+	analytics.startMetricsProcessor()
 
 	return analytics, nil
 }
 
 // TrackMCPEvent tracks an MCP tool event by incrementing its metric counter
 func (a *Analytics) TrackMCPEvent(ctx context.Context, toolName string) {
-	if a == nil || !a.config.Enabled || a.config.APISecret == "" {
+	if a == nil {
 		slog.Debug("Analytics disabled or missing API secret",
-			"enabled", a != nil && a.config.Enabled,
 			"has_secret", a != nil && a.config.APISecret != "",
 			"tool", toolName)
 		return
@@ -161,12 +147,16 @@ func (a *Analytics) TrackMCPEvent(ctx context.Context, toolName string) {
 	a.incrementMetric(toolName)
 }
 
-// sendEvent sends an event to Google Analytics 4
-func (a *Analytics) sendEvent(ctx context.Context, event GAEvent) error {
+// sendBatchEvents sends multiple events to Google Analytics 4 in a single HTTP request
+func (a *Analytics) sendBatchEvents(ctx context.Context, events []GAEvent) error {
+	if len(events) == 0 {
+		return nil
+	}
+
 	payload := GAPayload{
-		ClientID:    a.config.UserID, // Use unified ID for client identification
-		UserID:      a.config.UserID, // Use same unified ID for user identification
-		Events:      []GAEvent{event},
+		ClientID:    a.config.UserID, // Contains number with "." postfix
+		UserID:      a.config.UserID, // Contains number with "." postfix
+		Events:      events,          // Multiple events in single request
 		TimestampMS: time.Now().UnixMicro(),
 	}
 
@@ -175,11 +165,20 @@ func (a *Analytics) sendEvent(ctx context.Context, event GAEvent) error {
 		return fmt.Errorf("failed to marshal analytics payload: %w", err)
 	}
 
-	slog.Debug("Sending GA4 request",
-		"measurement_id", a.config.MeasurementID,
-		"payload_size", len(jsonData),
-		"event_name", event.Name,
-	)
+	// Log the outgoing request details with pretty-printed JSON
+	slog.Debug("GA4 Batch HTTP Request", "events_count", len(events))
+
+	// Pretty print the JSON payload for debugging
+	var prettyPayload interface{}
+	if jsonErr := json.Unmarshal(jsonData, &prettyPayload); jsonErr == nil {
+		if prettyData, prettyErr := json.MarshalIndent(prettyPayload, "", "  "); prettyErr == nil {
+			slog.Debug("Batch request payload:", "json", string(prettyData))
+		} else {
+			slog.Debug("Batch request payload:", "json", string(jsonData))
+		}
+	} else {
+		slog.Debug("Batch request payload:", "json", string(jsonData))
+	}
 
 	url := fmt.Sprintf("%s?measurement_id=%s&api_secret=%s",
 		ga4EndpointURL, a.config.MeasurementID, a.config.APISecret)
@@ -191,13 +190,11 @@ func (a *Analytics) sendEvent(ctx context.Context, event GAEvent) error {
 
 	req.Header.Set("Content-Type", "application/json")
 
-	startTime := time.Now()
 	resp, err := a.httpClient.Do(req)
 	if err != nil {
-		slog.Error("GA4 HTTP request failed",
+		slog.Error("GA4 batch HTTP request failed",
 			"error", err,
-			"measurement_id", a.config.MeasurementID,
-			"duration_ms", time.Since(startTime).Milliseconds(),
+			"events_count", len(events),
 		)
 		return fmt.Errorf("failed to send analytics request: %w", err)
 	}
@@ -207,8 +204,6 @@ func (a *Analytics) sendEvent(ctx context.Context, event GAEvent) error {
 		}
 	}()
 
-	duration := time.Since(startTime)
-
 	// Read response body for logging
 	body, readErr := io.ReadAll(resp.Body)
 	if readErr != nil {
@@ -216,88 +211,25 @@ func (a *Analytics) sendEvent(ctx context.Context, event GAEvent) error {
 		body = []byte("failed to read response")
 	}
 
-	// Log response details for all status codes
-	responseFields := []interface{}{
-		"status_code", resp.StatusCode,
-		"status_text", http.StatusText(resp.StatusCode),
-		"duration_ms", duration.Milliseconds(),
-		"response_size", len(body),
-		"measurement_id", a.config.MeasurementID,
-		"content_type", resp.Header.Get("Content-Type"),
-	}
-
-	// Add response headers for debugging
-	if len(resp.Header) > 0 {
-		responseFields = append(responseFields, "response_headers", fmt.Sprintf("%v", resp.Header))
-	}
-
-	switch {
-	case resp.StatusCode == http.StatusOK:
-		slog.Debug("GA4 analytics event sent successfully",
-			responseFields...,
-		)
-		if len(body) > 0 {
-			slog.Debug("GA4 response body (200 OK)", "body", string(body))
+	// Pretty print response body if it's JSON
+	if len(body) > 0 {
+		var prettyJSON interface{}
+		if jsonErr := json.Unmarshal(body, &prettyJSON); jsonErr == nil {
+			if prettyBody, prettyErr := json.MarshalIndent(prettyJSON, "", "  "); prettyErr == nil {
+				slog.Debug("Batch response body:", "json", string(prettyBody))
+			} else {
+				slog.Debug("Batch response body:", "text", string(body))
+			}
+		} else {
+			slog.Debug("Batch response body:", "text", string(body))
 		}
-
-	case resp.StatusCode == http.StatusNoContent:
-		slog.Debug("GA4 analytics event accepted (no content response)",
-			responseFields...,
-		)
-
-	case resp.StatusCode >= 400 && resp.StatusCode < 500:
-		// Client errors (400-499)
-		slog.Error("GA4 client error - check payload format or authentication",
-			append(responseFields, "response_body", string(body))...,
-		)
-		return fmt.Errorf(
-			"analytics client error %d (%s): %s",
-			resp.StatusCode,
-			http.StatusText(resp.StatusCode),
-			string(body),
-		)
-
-	case resp.StatusCode >= 500:
-		// Server errors (500+)
-		slog.Error("GA4 server error - Google Analytics service issue",
-			append(responseFields, "response_body", string(body))...,
-		)
-		return fmt.Errorf(
-			"analytics server error %d (%s): %s",
-			resp.StatusCode,
-			http.StatusText(resp.StatusCode),
-			string(body),
-		)
-
-	default:
-		// Unexpected status codes
-		slog.Warn("GA4 unexpected response status",
-			append(responseFields, "response_body", string(body))...,
-		)
-		return fmt.Errorf(
-			"analytics unexpected status %d (%s): %s",
-			resp.StatusCode,
-			http.StatusText(resp.StatusCode),
-			string(body),
-		)
 	}
+
+	// Log response details for all status codes
+	statusInfo := fmt.Sprintf("%d (%s)", resp.StatusCode, http.StatusText(resp.StatusCode))
+	slog.Debug("GA4 Batch HTTP Response", "status", statusInfo, "events_count", len(events))
 
 	return nil
-}
-
-// isAnalyticsEnabled checks if analytics is enabled via environment variable
-func isAnalyticsEnabled() bool {
-	envValue := os.Getenv(analyticsEnabledEnvVar)
-	// Default to true if not set, false if explicitly set to "false", "0", or "off"
-	if envValue == "" {
-		return true
-	}
-	switch envValue {
-	case "false", "0", "off", "disabled":
-		return false
-	default:
-		return true
-	}
 }
 
 // getOrCreateUserID gets existing user ID or creates a new one
@@ -316,13 +248,23 @@ func getOrCreateUserID() (string, error) {
 	if data, err := os.ReadFile(filepath.Clean(userIDPath)); err == nil {
 		userID := string(bytes.TrimSpace(data))
 		if len(userID) > 0 {
-			slog.Debug("Using existing user ID", "path", userIDPath)
+			// Ensure existing user ID has the "." postfix for GA4 requirements
+			if !strings.HasSuffix(userID, ".") {
+				userID = userID + "."
+				// Update the file with the corrected format
+				if writeErr := os.WriteFile(userIDPath, []byte(userID), 0o600); writeErr != nil {
+					slog.Warn("Failed to update user ID file with postfix", "error", writeErr)
+				}
+			}
+			slog.Debug("Using existing user ID", "path", userIDPath, "user_id", userID)
 			return userID, nil
 		}
 	}
 
 	// Create new user ID
 	userID := xid.New().String()
+	// GA4 expects string, so we add a "." at the end due to API requirements
+	userID = userID + "."
 
 	// Ensure directory exists
 	if err := os.MkdirAll(filepath.Dir(userIDPath), 0o750); err != nil {
@@ -349,7 +291,7 @@ func getUserIDPath() (string, error) {
 		if appData == "" {
 			return "", fmt.Errorf("APPDATA environment variable not set")
 		}
-		baseDir = filepath.Join(appData, "ReportPortalMCP")
+		baseDir = filepath.Join(appData, userIDConfigDir)
 
 	case "darwin":
 		// Use Application Support on macOS
@@ -357,7 +299,7 @@ func getUserIDPath() (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("failed to get home directory: %w", err)
 		}
-		baseDir = filepath.Join(homeDir, "Library", "Application Support", "ReportPortalMCP")
+		baseDir = filepath.Join(homeDir, "Library", "Application Support", userIDConfigDir)
 
 	default:
 		// Use XDG config directory on Linux/Unix
@@ -369,7 +311,7 @@ func getUserIDPath() (string, error) {
 			}
 			xdgConfig = filepath.Join(homeDir, ".config")
 		}
-		baseDir = filepath.Join(xdgConfig, "reportportal-mcp")
+		baseDir = filepath.Join(xdgConfig, userIDConfigDir)
 	}
 
 	return filepath.Join(baseDir, userIDFileName), nil
@@ -452,7 +394,7 @@ func (a *Analytics) Stop() {
 
 // incrementMetric atomically increments the counter for a tool
 func (a *Analytics) incrementMetric(toolName string) {
-	if a == nil || !a.config.Enabled {
+	if a == nil {
 		return
 	}
 
@@ -477,7 +419,7 @@ func (a *Analytics) incrementMetric(toolName string) {
 
 // processMetrics collects and sends all non-zero metrics to GA4
 func (a *Analytics) processMetrics() {
-	if a == nil || !a.config.Enabled {
+	if a == nil {
 		return
 	}
 
@@ -518,39 +460,52 @@ func (a *Analytics) processMetrics() {
 // sendBatchMetrics sends multiple tool metrics as a batch event to GA4
 func (a *Analytics) sendBatchMetrics(ctx context.Context, metrics map[string]int64) {
 	if len(metrics) == 0 {
+		slog.Debug("No metrics to send")
 		return
 	}
 
-	// Create batch event with all tool metrics
-	event := GAEvent{
-		Name: "mcp_batch_event",
-		Parameters: map[string]interface{}{
-			"user_id":    a.config.UserID,
-			"platform":   runtime.GOOS,
-			"version":    "1.0.0",
-			"batch_size": len(metrics),
-		},
-	}
+	// Extract numeric part of UserID for custom_user_id parameter (remove "." postfix)
+	customUserID := strings.TrimSuffix(a.config.UserID, ".")
 
-	// Add each tool metric as a parameter
+	// Collect all individual events for batch sending
+	var events []GAEvent
+
+	// Create individual events for each tool usage (matching analytics-client format)
 	for toolName, count := range metrics {
-		// Use tool_<name>_count as parameter name
-		paramName := fmt.Sprintf("tool_%s_count", toolName)
-		event.Parameters[paramName] = count
-
-		slog.Debug("Adding tool metric to batch",
-			"tool", toolName,
-			"count", count,
-			"param_name", paramName,
-		)
+		// Create multiple events if count > 1 (each tool usage gets its own event)
+		for i := int64(0); i < count; i++ {
+			event := GAEvent{
+				Name: "mcp_event_triggered",
+				Params: map[string]interface{}{
+					"custom_user_id": customUserID,          // The unique number of the users
+					"event_name":     "mcp_event_triggered", // Event name
+					"tool":           toolName,              // The name of the tool
+				},
+			}
+			events = append(events, event)
+		}
 	}
 
-	if err := a.sendEvent(ctx, event); err != nil {
-		slog.Error("Failed to send batch metrics", "error", err, "metrics_count", len(metrics))
+	// Send all events in a single batch HTTP request
+	if err := a.sendBatchEvents(ctx, events); err != nil {
+		slog.Error("Failed to send batch tool events", "error", err, "events_count", len(events))
 	} else {
 		slog.Debug("Batch metrics sent successfully",
 			"tools_count", len(metrics),
+			"total_events", len(events),
 			"measurement_id", a.config.MeasurementID,
 		)
+	}
+}
+
+// StopAnalytics gracefully stops the analytics client if it exists
+func StopAnalytics(analytics *Analytics, reason string) {
+	if analytics != nil {
+		if reason != "" {
+			slog.Info("stopping analytics", "reason", reason)
+		} else {
+			slog.Info("stopping analytics...")
+		}
+		analytics.Stop()
 	}
 }
