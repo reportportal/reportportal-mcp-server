@@ -3,23 +3,20 @@ package mcpreportportal
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
-	"os"
-	"path/filepath"
-	"runtime"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
-	"github.com/rs/xid"
 )
 
 const (
@@ -29,14 +26,28 @@ const (
 	// Configuration
 	measurementID = "G-WJGRCEFLXF"
 
-	// User ID storage (unified client_id and user_id)
-	userIDFileName = ".reportportal-mcp-user-id"
-
-	// User ID storage directory
-	userIDConfigDir = "ReportPortalMCP"
-
 	userID = "692"
+
+	HashAlgorithm = "SHA256-128bit"
+
+	// Batch send interval for analytics data
+	batchSendInterval = 10 * time.Second
+
+	maxPerRequest = 25
 )
+
+// HashToken creates a secure hash of the token
+func HashToken(token string) string {
+	if token == "" {
+		return ""
+	}
+
+	// Create full SHA256 hash of the token
+	hash := sha256.Sum256([]byte(token))
+
+	// Return full hash
+	return hex.EncodeToString(hash[:])
+}
 
 // AnalyticsConfig holds the analytics configuration
 type AnalyticsConfig struct {
@@ -74,51 +85,40 @@ type Analytics struct {
 	tickerDone chan struct{}
 }
 
-// NewAnalytics creates a new Analytics instance
-func NewAnalytics(userID string, apiSecret string) (*Analytics, error) {
+// NewAnalytics creates a new Analytics instance with mandatory RP API token for secure hashing
+// Parameters:
+//   - userID: Custom user identifier (used for logging purposes only)
+//   - apiSecret: Google Analytics 4 API secret for authentication (required)
+//   - rpAPIToken: ReportPortal API token for secure hashing (required, always used for actual user ID)
+//
+// Returns error if apiSecret or rpAPIToken is empty
+func NewAnalytics(userID string, apiSecret string, rpAPIToken string) (*Analytics, error) {
 	// Analytics enablement is now controlled by the caller (CLI flags)
 	slog.Debug("Initializing analytics",
-		"has_api_secret", apiSecret != "",
+		"has_ga4_secret", apiSecret != "",
 		"user_id", userID,
+		"has_rp_token", rpAPIToken != "",
 		"measurement_id", measurementID,
 	)
 
-	// If API secret is empty, disable analytics
+	// If GA4 API secret is empty, disable analytics
 	if apiSecret == "" {
-		return nil, fmt.Errorf("analytics disabled: missing API secret")
+		return nil, fmt.Errorf("analytics disabled: missing GA4 API secret")
 	}
 
-	// Use provided userID or generate a persistent one
-	finalUserID := userID
-	if finalUserID == "" {
-		generatedID, err := getOrCreateUserID()
-		if err != nil {
-			slog.Warn("Failed to get user ID, using fallback", "error", err)
-			finalUserID = "unknown"
-		} else {
-			finalUserID = generatedID
-		}
-	} else {
-		// Ensure provided userID has the "." postfix for GA4 requirements
-		if !strings.HasSuffix(finalUserID, ".") {
-			finalUserID = finalUserID + "."
-		}
+	// RP API token is required for security
+	if rpAPIToken == "" {
+		return nil, fmt.Errorf("analytics disabled: missing RP API token for secure hashing")
 	}
+
+	// Use RP API token's secure hash as the primary identifier
+	hashedToken := HashToken(rpAPIToken)
 
 	config := &AnalyticsConfig{
 		MeasurementID: measurementID,
 		APISecret:     apiSecret,
-		UserID:        finalUserID,
+		UserID:        hashedToken,
 	}
-
-	userIDPreview := finalUserID
-	if len(finalUserID) > 8 {
-		userIDPreview = finalUserID[:8] + "..."
-	}
-	slog.Debug("Analytics initialized and enabled",
-		"measurement_id", measurementID,
-		"user_id", userIDPreview,
-	)
 
 	analytics := &Analytics{
 		config: config,
@@ -138,8 +138,7 @@ func NewAnalytics(userID string, apiSecret string) (*Analytics, error) {
 // TrackMCPEvent tracks an MCP tool event by incrementing its metric counter
 func (a *Analytics) TrackMCPEvent(ctx context.Context, toolName string) {
 	if a == nil {
-		slog.Debug("Analytics disabled or missing API secret",
-			"has_secret", a != nil && a.config.APISecret != "",
+		slog.Debug("Analytics disabled",
 			"tool", toolName)
 		return
 	}
@@ -229,92 +228,10 @@ func (a *Analytics) sendBatchEvents(ctx context.Context, events []GAEvent) error
 	statusInfo := fmt.Sprintf("%d (%s)", resp.StatusCode, http.StatusText(resp.StatusCode))
 	slog.Debug("GA4 Batch HTTP Response", "status", statusInfo, "events_count", len(events))
 
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("GA4 batch HTTP error: status=%s", statusInfo)
+	}
 	return nil
-}
-
-// getOrCreateUserID gets existing user ID or creates a new one
-func getOrCreateUserID() (string, error) {
-	userIDPath, err := getUserIDPath()
-	if err != nil {
-		return "", fmt.Errorf("failed to get user ID path: %w", err)
-	}
-
-	// Validate the path to prevent directory traversal
-	if !filepath.IsAbs(userIDPath) {
-		return "", fmt.Errorf("user ID path must be absolute")
-	}
-
-	// Try to read existing user ID
-	if data, err := os.ReadFile(filepath.Clean(userIDPath)); err == nil {
-		userID := string(bytes.TrimSpace(data))
-		if len(userID) > 0 {
-			// Ensure existing user ID has the "." postfix for GA4 requirements
-			if !strings.HasSuffix(userID, ".") {
-				userID = userID + "."
-				// Update the file with the corrected format
-				if writeErr := os.WriteFile(userIDPath, []byte(userID), 0o600); writeErr != nil {
-					slog.Warn("Failed to update user ID file with postfix", "error", writeErr)
-				}
-			}
-			slog.Debug("Using existing user ID", "path", userIDPath, "user_id", userID)
-			return userID, nil
-		}
-	}
-
-	// Create new user ID
-	userID := xid.New().String()
-	// GA4 expects string, so we add a "." at the end due to API requirements
-	userID = userID + "."
-
-	// Ensure directory exists
-	if err := os.MkdirAll(filepath.Dir(userIDPath), 0o750); err != nil {
-		return "", fmt.Errorf("failed to create user ID directory: %w", err)
-	}
-
-	// Write user ID to file
-	if err := os.WriteFile(userIDPath, []byte(userID), 0o600); err != nil {
-		return "", fmt.Errorf("failed to write user ID: %w", err)
-	}
-
-	slog.Debug("Created new user ID", "path", userIDPath, "user_id", userID)
-	return userID, nil
-}
-
-// getUserIDPath returns the cross-platform path for storing user ID
-func getUserIDPath() (string, error) {
-	var baseDir string
-
-	switch runtime.GOOS {
-	case "windows":
-		// Use APPDATA on Windows
-		appData := os.Getenv("APPDATA")
-		if appData == "" {
-			return "", fmt.Errorf("APPDATA environment variable not set")
-		}
-		baseDir = filepath.Join(appData, userIDConfigDir)
-
-	case "darwin":
-		// Use Application Support on macOS
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("failed to get home directory: %w", err)
-		}
-		baseDir = filepath.Join(homeDir, "Library", "Application Support", userIDConfigDir)
-
-	default:
-		// Use XDG config directory on Linux/Unix
-		xdgConfig := os.Getenv("XDG_CONFIG_HOME")
-		if xdgConfig == "" {
-			homeDir, err := os.UserHomeDir()
-			if err != nil {
-				return "", fmt.Errorf("failed to get home directory: %w", err)
-			}
-			xdgConfig = filepath.Join(homeDir, ".config")
-		}
-		baseDir = filepath.Join(xdgConfig, userIDConfigDir)
-	}
-
-	return filepath.Join(baseDir, userIDFileName), nil
 }
 
 // WithAnalytics wraps a tool handler to add analytics tracking
@@ -349,15 +266,15 @@ func GetAnalyticArg() string {
 	return finalResult
 }
 
-// startMetricsProcessor starts the background goroutine that processes metrics every 10 seconds
+// startMetricsProcessor starts the background goroutine that sends analytics batches at regular intervals
 func (a *Analytics) startMetricsProcessor() {
 	a.wg.Add(1)
 	go func() {
 		defer a.wg.Done()
-		ticker := time.NewTicker(10 * time.Second)
+		ticker := time.NewTicker(batchSendInterval)
 		defer ticker.Stop()
 
-		slog.Debug("Analytics metrics processor started", "interval", "10s")
+		slog.Debug("Analytics metrics processor started", "interval", batchSendInterval)
 
 		for {
 			select {
@@ -464,8 +381,8 @@ func (a *Analytics) sendBatchMetrics(ctx context.Context, metrics map[string]int
 		return
 	}
 
-	// Extract numeric part of UserID for custom_user_id parameter (remove "." postfix)
-	customUserID := strings.TrimSuffix(a.config.UserID, ".")
+	// Use the full hashed UserID for custom_user_id parameter
+	customUserID := a.config.UserID
 
 	// Collect all individual events for batch sending
 	var events []GAEvent
@@ -486,15 +403,20 @@ func (a *Analytics) sendBatchMetrics(ctx context.Context, metrics map[string]int
 		}
 	}
 
-	// Send all events in a single batch HTTP request
-	if err := a.sendBatchEvents(ctx, events); err != nil {
-		slog.Error("Failed to send batch tool events", "error", err, "events_count", len(events))
-	} else {
-		slog.Debug("Batch metrics sent successfully",
-			"tools_count", len(metrics),
-			"total_events", len(events),
-			"measurement_id", a.config.MeasurementID,
-		)
+	// Send events in chunks to respect GA4 MP limits (e.g., 25 events/request)
+	sent := 0
+	failed := 0
+	for start := 0; start < len(events); start += maxPerRequest {
+		end := start + maxPerRequest
+		if end > len(events) {
+			end = len(events)
+		}
+		if err := a.sendBatchEvents(ctx, events[start:end]); err != nil {
+			failed += end - start
+			slog.Error("Failed to send batch tool events", "error", err, "events_count", end-start)
+			continue
+		}
+		sent += end - start
 	}
 }
 
