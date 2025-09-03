@@ -3,8 +3,12 @@ package mcpreportportal
 import (
 	"context"
 	"net/url"
+	"strings"
+
+	"github.com/google/uuid"
 )
 
+// contextKey is a type for context keys to avoid collisions
 type contextKey string
 
 var contextKeyQueryParams = contextKey(
@@ -20,4 +24,21 @@ func QueryParamsFromContext(ctx context.Context) (url.Values, bool) {
 	// Retrieve the query parameters from the context
 	queryParams, ok := ctx.Value(contextKeyQueryParams).(url.Values)
 	return queryParams, ok
+}
+
+// ValidateRPToken performs validation on RP API tokens
+// Returns true if the token appears to be a valid ReportPortal API token
+func ValidateRPToken(token string) bool {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return false
+	}
+
+	// Check for valid UUID format using proper parsing
+	if uuid.Validate(token) == nil {
+		return true
+	}
+
+	// Fallback: minimum length check for non-UUID tokens
+	return len(token) >= 16
 }
