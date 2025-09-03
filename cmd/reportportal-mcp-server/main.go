@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
@@ -31,6 +32,14 @@ func main() {
 	// Create a context that listens for OS interrupt or termination signals
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// Get MCP mode from environment variable, default to stdio
+	rawMcpMode := strings.ToLower(os.Getenv("MCP_MODE"))
+	slog.Debug("MCP_MODE env variable is set to: " + rawMcpMode)
+	mcpMode := strings.ToLower(rawMcpMode)
+	if mcpMode == "" {
+		mcpMode = "stdio"
+	}
 
 	// Common flags for all modes
 	commonFlags := []cli.Flag{
@@ -75,56 +84,72 @@ func main() {
 		},
 	}
 
+	// HTTP-specific flags (only included when MCP_MODE is http)
+	httpFlags := []cli.Flag{
+		&cli.IntFlag{
+			Name:     "port",
+			Required: false,
+			Sources:  cli.EnvVars("MCP_SERVER_PORT"),
+			Usage:    "HTTP server port",
+			Value:    8080,
+		},
+		&cli.StringFlag{
+			Name:     "host",
+			Required: false,
+			Sources:  cli.EnvVars("MCP_SERVER_HOST"),
+			Usage:    "HTTP bind host/interface (e.g., 0.0.0.0, 127.0.0.1, ::)",
+			Value:    "",
+		},
+		&cli.IntFlag{
+			Name:     "max-workers",
+			Required: false,
+			Sources:  cli.EnvVars("RP_MAX_WORKERS"),
+			Usage:    "Maximum number of worker goroutines (0 = auto-detect as CPU count * 2)",
+			Value:    0,
+		},
+		&cli.IntFlag{
+			Name:     "connection-timeout",
+			Required: false,
+			Sources:  cli.EnvVars("RP_CONNECTION_TIMEOUT"),
+			Usage:    "Connection timeout in seconds",
+			Value:    30,
+		},
+	}
+
+	// Build flags based on MCP mode
+	var allFlags []cli.Flag
+	allFlags = append(allFlags, commonFlags...)
+	if mcpMode == "http" {
+		allFlags = append(allFlags, httpFlags...)
+	}
+
 	// Define the CLI command structure
 	cmd := &cli.Command{
-		Version:        fmt.Sprintf("%s (%s) %s", version, commit, date),
-		Description:    `ReportPortal MCP Server`,
-		DefaultCommand: "stdio", // Default to stdio mode
-		Commands: []*cli.Command{
-			{
-				Name:        "stdio",
-				Description: "Start ReportPortal MCP Server in stdio mode",
-				Flags:       commonFlags,
-				Action:      runStdioServer,
-				Before:      initLogger(),
-			},
-			{
-				Name:        "http",
-				Description: "Start ReportPortal MCP Server in HTTP streaming mode",
-				Flags: append(commonFlags, []cli.Flag{
-					&cli.IntFlag{
-						Name:     "port",
-						Required: false,
-						Sources:  cli.EnvVars("MCP_SERVER_PORT"),
-						Usage:    "HTTP server port",
-						Value:    8080,
-					},
-					&cli.StringFlag{
-						Name:     "host",
-						Required: false,
-						Sources:  cli.EnvVars("MCP_SERVER_HOST"),
-						Usage:    "HTTP bind host/interface (e.g., 0.0.0.0, 127.0.0.1, ::)",
-						Value:    "",
-					},
-					// Performance tuning flags for HTTP mode
-					&cli.IntFlag{
-						Name:     "max-workers",
-						Required: false,
-						Sources:  cli.EnvVars("RP_MAX_WORKERS"),
-						Usage:    "Maximum number of worker goroutines (0 = auto-detect as CPU count * 2)",
-						Value:    0,
-					},
-					&cli.IntFlag{
-						Name:     "connection-timeout",
-						Required: false,
-						Sources:  cli.EnvVars("RP_CONNECTION_TIMEOUT"),
-						Usage:    "Connection timeout in seconds",
-						Value:    30,
-					},
-				}...),
-				Action: runStreamingServer,
-				Before: initLogger(),
-			},
+		Version: fmt.Sprintf("%s (%s) %s", version, commit, date),
+		Description: `ReportPortal MCP Server
+
+ENVIRONMENT VARIABLES:
+   MCP_MODE    Server mode: "stdio" (default) or "http"
+               Controls which server type to run and which flags are available`,
+		Flags:  allFlags,
+		Before: initLogger(),
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			// Check mcpMode and run appropriate server
+			switch mcpMode {
+			case "http":
+				return runStreamingServer(ctx, cmd)
+			case "stdio":
+				return runStdioServer(ctx, cmd)
+			default:
+				slog.Info(
+					"unknown MCP_MODE, defaulting to stdio",
+					"mode",
+					mcpMode,
+					"supported",
+					"stdio, http",
+				)
+				return runStdioServer(ctx, cmd)
+			}
 		},
 	}
 

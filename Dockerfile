@@ -24,7 +24,8 @@ WORKDIR /server
 # Copy the binary from the build stage
 COPY --from=build /build/reportportal-mcp-server .
 
-ENTRYPOINT ["./reportportal-mcp-server"]
+# Expose default HTTP port (can be overridden by MCP_SERVER_PORT)
+EXPOSE 8080
 
-# Command to run the server
-CMD ["stdio"]
+# Run the server - will read MCP_MODE environment variable
+ENTRYPOINT ["./reportportal-mcp-server"]

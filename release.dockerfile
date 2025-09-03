@@ -6,4 +6,4 @@ WORKDIR /server
 # see https://goreleaser.com/errors/docker-build/#do
 COPY reportportal-mcp-server .
 # Command to run the server
-CMD ["./reportportal-mcp-server", "stdio"]
+CMD ["./reportportal-mcp-server"]
