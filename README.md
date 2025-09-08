@@ -165,8 +165,9 @@ Once connected, your AI assistant will list ReportPortal-related "tools" it can 
 
 ## ReportPortal compatibility
 
-It is strongly recommended to use the latest versions of ReportPortal.
-The version 1.x of this MCP server supports ReportPortal product versions from [25.1](https://github.com/reportportal/reportportal/releases/tag/25.1) (where the API service version not lower than [5.14.0](https://github.com/reportportal/service-api/releases/tag/5.14.0)).
+It is strongly recommended to use the **latest versions** of ReportPortal.
+
+The version 1.x of this MCP server supports ReportPortal product versions from [25.1](https://github.com/reportportal/reportportal/releases/tag/25.1) (where the API service version not lower than [5.14.0](https://github.com/reportportal/service-api/releases/tag/5.14.0)).\
 Compatibility with older versions has not been tested and may result in incorrect work of the MCP server.
 
 ## Features
