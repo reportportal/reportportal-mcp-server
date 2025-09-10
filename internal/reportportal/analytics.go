@@ -32,6 +32,9 @@ const (
 	customUserIdPrefix = "rp_"
 
 	HashAlgorithm = "SHA256-128bit"
+
+	// Batch send interval for analytics data
+	batchSendInterval = 10 * time.Second
 )
 
 // HashTokenWithPrefix creates a secure hash of the token with a prefix
@@ -285,15 +288,15 @@ func GetAnalyticArg() string {
 	return finalResult
 }
 
-// startMetricsProcessor starts the background goroutine that processes metrics every 10 seconds
+// startMetricsProcessor starts the background goroutine that sends analytics batches at regular intervals
 func (a *Analytics) startMetricsProcessor() {
 	a.wg.Add(1)
 	go func() {
 		defer a.wg.Done()
-		ticker := time.NewTicker(10 * time.Second)
+		ticker := time.NewTicker(batchSendInterval)
 		defer ticker.Stop()
 
-		slog.Debug("Analytics metrics processor started", "interval", "10s")
+		slog.Debug("Analytics metrics processor started", "interval", batchSendInterval)
 
 		for {
 			select {
