@@ -17,34 +17,45 @@ import (
 
 func TestNewAnalytics(t *testing.T) {
 	tests := []struct {
-		name      string
-		userID    string
-		apiSecret string
-		wantErr   bool
+		name       string
+		userID     string
+		apiSecret  string
+		rpAPIToken string
+		wantErr    bool
 	}{
 		{
-			name:      "valid config with secrets",
-			userID:    "test-user-123",
-			apiSecret: "test-secret",
-			wantErr:   false,
+			name:       "valid config with secrets",
+			userID:     "test-user-123",
+			apiSecret:  "test-secret",
+			rpAPIToken: "rp_test-token-123",
+			wantErr:    false,
 		},
 		{
-			name:      "empty user ID - should generate one",
-			userID:    "",
-			apiSecret: "test-secret",
-			wantErr:   false,
+			name:       "empty user ID - should use RP token hash",
+			userID:     "",
+			apiSecret:  "test-secret",
+			rpAPIToken: "rp_test-token-456",
+			wantErr:    false,
 		},
 		{
-			name:      "no api secret",
-			userID:    "test-user-123",
-			apiSecret: "",
-			wantErr:   true,
+			name:       "no api secret",
+			userID:     "test-user-123",
+			apiSecret:  "",
+			rpAPIToken: "rp_test-token-789",
+			wantErr:    true,
+		},
+		{
+			name:       "no RP API token",
+			userID:     "test-user-123",
+			apiSecret:  "test-secret",
+			rpAPIToken: "",
+			wantErr:    true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			analytics, err := NewAnalytics(tt.userID, tt.apiSecret)
+			analytics, err := NewAnalytics(tt.userID, tt.apiSecret, tt.rpAPIToken)
 
 			if tt.wantErr {
 				assert.Error(t, err)
@@ -242,7 +253,7 @@ func TestAnalyticsIntegration(t *testing.T) {
 	defer testServer.Close()
 
 	// Create analytics instance
-	analytics, err := NewAnalytics("test-user", "test-secret")
+	analytics, err := NewAnalytics("test-user", "test-secret", "rp_test-token-analytics")
 	require.NoError(t, err)
 	require.NotNil(t, analytics)
 
@@ -393,12 +404,12 @@ func TestConcurrentMetricIncrement(t *testing.T) {
 
 func TestAnalyticsUserIDGeneration(t *testing.T) {
 	// Test with empty user ID - should generate one
-	analytics1, err := NewAnalytics("", "test-secret")
+	analytics1, err := NewAnalytics("", "test-secret", "rp_test-token-gen1")
 	assert.NoError(t, err)
 	assert.NotNil(t, analytics1)
 
 	// Test with provided user ID
-	analytics2, err := NewAnalytics("custom-user-id", "test-secret")
+	analytics2, err := NewAnalytics("custom-user-id", "test-secret", "rp_test-token-gen2")
 	assert.NoError(t, err)
 	assert.NotNil(t, analytics2)
 
