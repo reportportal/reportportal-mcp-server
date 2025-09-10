@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"runtime"
 	"syscall"
 	"time"
 
@@ -70,6 +71,35 @@ func main() {
 				Usage:    "Disable Google Analytics tracking",
 				Value:    false,
 			},
+			// Performance tuning flags
+			&cli.IntFlag{
+				Name:     "max-workers",
+				Required: false,
+				Sources:  cli.EnvVars("RP_MAX_WORKERS"),
+				Usage:    "Maximum number of worker goroutines (0 = auto-detect as CPU count * 2)",
+				Value:    0,
+			},
+			&cli.IntFlag{
+				Name:     "buffer-size",
+				Required: false,
+				Sources:  cli.EnvVars("RP_BUFFER_SIZE"),
+				Usage:    "Request buffer size (0 = auto-detect as workers * 10)",
+				Value:    0,
+			},
+			&cli.IntFlag{
+				Name:     "connection-limit",
+				Required: false,
+				Sources:  cli.EnvVars("RP_CONNECTION_LIMIT"),
+				Usage:    "Maximum concurrent connections",
+				Value:    1000,
+			},
+			&cli.IntFlag{
+				Name:     "connection-timeout",
+				Required: false,
+				Sources:  cli.EnvVars("RP_CONNECTION_TIMEOUT"),
+				Usage:    "Connection timeout in seconds",
+				Value:    30,
+			},
 		},
 		Commands: []*cli.Command{
 			{
@@ -119,6 +149,44 @@ func initLogger() func(ctx context.Context, command *cli.Command) (context.Conte
 
 		return ctx, nil
 	}
+}
+
+// buildHTTPServerConfig creates HTTPServerConfig from CLI flags with smart defaults.
+// This replaces the removed GetProductionConfig/GetHighTrafficConfig factory functions.
+func buildHTTPServerConfig(cmd *cli.Command) (mcpreportportal.HTTPServerConfig, error) {
+	// Retrieve required parameters from CLI flags
+	host := cmd.String("host")
+	token := cmd.String("token")
+	project := cmd.String("project")
+	userID := cmd.String("user-id")
+	analyticsAPISecret := mcpreportportal.GetAnalyticArg()
+	analyticsOff := cmd.Bool("analytics-off")
+
+	// Performance tuning parameters with defaults
+	maxWorkers := cmd.Int("max-workers")
+	connectionTimeoutSec := cmd.Int("connection-timeout")
+
+	// Apply auto-detection for zero values
+	if maxWorkers <= 0 {
+		maxWorkers = runtime.NumCPU() * 2
+	}
+
+	hostUrl, err := url.Parse(host)
+	if err != nil {
+		return mcpreportportal.HTTPServerConfig{}, fmt.Errorf("invalid host URL: %w", err)
+	}
+
+	return mcpreportportal.HTTPServerConfig{
+		Version:               fmt.Sprintf("%s (%s) %s", version, commit, date),
+		HostURL:               hostUrl,
+		FallbackRPToken:       token,
+		DefaultProject:        project,
+		UserID:                userID,
+		GA4Secret:             analyticsAPISecret,
+		AnalyticsOn:           !analyticsOff,
+		MaxConcurrentRequests: maxWorkers * 4, // Scale concurrent HTTP requests based on CPU count
+		ConnectionTimeout:     time.Duration(connectionTimeoutSec) * time.Second,
+	}, nil
 }
 
 func newMCPServer(cmd *cli.Command) (*server.MCPServer, *mcpreportportal.Analytics, error) {
@@ -184,13 +252,18 @@ func runStdioServer(ctx context.Context, cmd *cli.Command) error {
 	return nil
 }
 
-// runStreamingServer starts the ReportPortal MCP server in streaming mode.
+// runStreamingServer starts the ReportPortal MCP server in streaming mode with HTTP token extraction.
 func runStreamingServer(ctx context.Context, cmd *cli.Command) error {
-	mcpServer, analytics, err := newMCPServer(cmd)
+	// Build HTTP server configuration from CLI flags with performance tuning
+	config, err := buildHTTPServerConfig(cmd)
 	if err != nil {
-		return fmt.Errorf("failed to create ReportPortal MCP server: %w", err)
+		return fmt.Errorf("failed to build HTTP server config: %w", err)
 	}
-	streamingServer := server.NewStreamableHTTPServer(mcpServer)
+
+	streamingServer, analytics, err := mcpreportportal.CreateHTTPServerWithMiddleware(config)
+	if err != nil {
+		return fmt.Errorf("failed to create HTTP MCP server: %w", err)
+	}
 	addr := cmd.String("addr") // Address to bind the streaming server to
 
 	// Start listening for messages in a separate goroutine
