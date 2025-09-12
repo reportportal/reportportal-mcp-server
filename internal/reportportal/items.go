@@ -2,9 +2,9 @@ package mcpreportportal
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/url"
 	"strconv"
@@ -218,21 +218,13 @@ func (lr *TestItemResources) toolGetTestItemsByFilter() (tool mcp.Tool, handler 
 			}
 
 			// Execute the request
-			items, rs, err := apiRequest.Execute()
+			_, response, err := apiRequest.Execute()
 			if err != nil {
-				return mcp.NewToolResultError(extractResponseError(err, rs)), nil
-			}
-
-			// Serialize the launches into JSON format
-			r, err := json.Marshal(items)
-			if err != nil {
-				return mcp.NewToolResultError(
-					fmt.Sprintf("failed to marshal response: %v", err),
-				), nil
+				return mcp.NewToolResultError(extractResponseError(err, response)), nil
 			}
 
 			// Return the serialized launches as a text result
-			return mcp.NewToolResultText(string(r)), nil
+			return readResponseBody(response)
 		})
 }
 
@@ -257,22 +249,14 @@ func (lr *TestItemResources) toolGetTestItemById() (mcp.Tool, server.ToolHandler
 			}
 
 			// Fetch the testItem with given ID
-			testItem, _, err := lr.client.TestItemAPI.GetTestItem(ctx, testItemID, project).
+			_, response, err := lr.client.TestItemAPI.GetTestItem(ctx, testItemID, project).
 				Execute()
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-
-			// Serialize the first testItem in the result into JSON format
-			r, err := json.Marshal(testItem)
-			if err != nil {
-				return mcp.NewToolResultError(
-					fmt.Sprintf("failed to marshal response: %v", err),
-				), nil
+				return mcp.NewToolResultError(extractResponseError(err, response)), nil
 			}
 
 			// Return the serialized testItem as a text result
-			return mcp.NewToolResultText(string(r)), nil
+			return readResponseBody(response)
 		})
 }
 
@@ -349,16 +333,10 @@ func (lr *TestItemResources) toolGetTestItemAttachment() (mcp.Tool, server.ToolH
 				return mcp.NewToolResultError(extractResponseError(err, response)), nil
 			}
 
-			defer func() {
-				if closeErr := response.Body.Close(); closeErr != nil {
-					slog.Error("failed to close response body", "error", closeErr)
-				}
-			}()
-			rawBody, err := io.ReadAll(response.Body)
+			// Handle response body with cleanup
+			rawBody, err := readResponseBodyRaw(response)
 			if err != nil {
-				return mcp.NewToolResultError(
-					fmt.Sprintf("failed to read response body: %v", err),
-				), nil
+				return mcp.NewToolResultError(extractResponseError(err, response)), nil
 			}
 
 			contentType := response.Header.Get("Content-Type")
@@ -379,7 +357,7 @@ func (lr *TestItemResources) toolGetTestItemAttachment() (mcp.Tool, server.ToolH
 					mcp.BlobResourceContents{
 						URI:      response.Request.URL.String(),
 						MIMEType: contentType,
-						Blob:     string(rawBody),
+						Blob:     base64.StdEncoding.EncodeToString(rawBody),
 					},
 				), nil
 			}
@@ -500,18 +478,7 @@ func (lr *TestItemResources) toolGetTestItemLogsByFilter() (tool mcp.Tool, handl
 				return mcp.NewToolResultError(extractResponseError(err, response)), nil
 			}
 
-			defer func() {
-				if closeErr := response.Body.Close(); closeErr != nil {
-					slog.Error("failed to close response body", "error", closeErr)
-				}
-			}()
-			rawBody, err := io.ReadAll(response.Body)
-			if err != nil {
-				return mcp.NewToolResultError(
-					fmt.Sprintf("failed to read response body: %v", err),
-				), nil
-			}
-			return mcp.NewToolResultText(string(rawBody)), nil
+			return readResponseBody(response)
 		})
 }
 
@@ -642,20 +609,12 @@ func (lr *TestItemResources) toolGetTestSuitesByFilter() (tool mcp.Tool, handler
 			}
 
 			// Execute the request
-			items, rs, err := apiRequest.Execute()
+			_, response, err := apiRequest.Execute()
 			if err != nil {
-				return mcp.NewToolResultError(extractResponseError(err, rs)), nil
-			}
-
-			// Serialize the test suites into JSON format
-			r, err := json.Marshal(items)
-			if err != nil {
-				return mcp.NewToolResultError(
-					fmt.Sprintf("failed to marshal response: %v", err),
-				), nil
+				return mcp.NewToolResultError(extractResponseError(err, response)), nil
 			}
 
 			// Return the serialized test suites as a text result
-			return mcp.NewToolResultText(string(r)), nil
+			return readResponseBody(response)
 		})
 }
