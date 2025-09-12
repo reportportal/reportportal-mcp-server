@@ -3,6 +3,7 @@ package mcpreportportal
 import (
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"net/http"
 	"strconv"
@@ -223,4 +224,44 @@ func isTextContent(mediaType string) bool {
 	}
 
 	return false
+}
+
+// readResponseBody safely reads an HTTP response body and ensures proper cleanup.
+// It handles the defer close pattern with error logging and returns an MCP tool result.
+func readResponseBody(response *http.Response) (*mcp.CallToolResult, error) {
+	// Ensure response body is always closed
+	defer func() {
+		if closeErr := response.Body.Close(); closeErr != nil {
+			slog.Error("failed to close response body", "error", closeErr)
+		}
+	}()
+
+	// Read the response body
+	rawBody, err := io.ReadAll(response.Body)
+	if err != nil {
+		return mcp.NewToolResultError(
+			fmt.Sprintf("failed to read response body: %v", err),
+		), nil
+	}
+
+	return mcp.NewToolResultText(string(rawBody)), nil
+}
+
+// readResponseBodyRaw safely reads an HTTP response body and ensures proper cleanup.
+// It returns the raw body bytes along with any error, suitable for custom content type handling.
+func readResponseBodyRaw(response *http.Response) ([]byte, error) {
+	// Ensure response body is always closed
+	defer func() {
+		if closeErr := response.Body.Close(); closeErr != nil {
+			slog.Error("failed to close response body", "error", closeErr)
+		}
+	}()
+
+	// Read the response body
+	rawBody, err := io.ReadAll(response.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %v", err)
+	}
+
+	return rawBody, nil
 }
