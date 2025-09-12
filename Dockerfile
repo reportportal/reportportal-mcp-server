@@ -1,4 +1,4 @@
-ARG APP_VERSION="dev"
+ARG APP_VERSION="develop"
 
 FROM golang:1.24.4 AS build
 # allow this step access to build arg
