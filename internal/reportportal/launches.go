@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"log/slog"
 	"net/url"
 	"strconv"
 	"strings"
@@ -149,18 +147,7 @@ func (lr *LaunchResources) toolGetLaunches() (tool mcp.Tool, handler server.Tool
 				return mcp.NewToolResultError(extractResponseError(err, response)), nil
 			}
 
-			defer func() {
-				if closeErr := response.Body.Close(); closeErr != nil {
-					slog.Error("failed to close response body", "error", closeErr)
-				}
-			}()
-			rawBody, err := io.ReadAll(response.Body)
-			if err != nil {
-				return mcp.NewToolResultError(
-					fmt.Sprintf("failed to read response body: %v", err),
-				), nil
-			}
-			return mcp.NewToolResultText(string(rawBody)), nil
+			return readResponseBody(response)
 		})
 }
 
@@ -182,22 +169,18 @@ func (lr *LaunchResources) toolRunQualityGate() (tool mcp.Tool, handler server.T
 				return mcp.NewToolResultError(err.Error()), nil
 			}
 
-			_, rs, err := lr.client.PluginAPI.ExecutePluginCommand(ctx, "startQualityGate", "quality gate", project).
+			_, response, err := lr.client.PluginAPI.ExecutePluginCommand(ctx, "startQualityGate", "quality gate", project).
 				RequestBody(map[string]interface{}{
 					"async":    false, // Run the quality gate synchronously
 					"launchId": launchID,
 				}).
 				Execute()
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return mcp.NewToolResultError(extractResponseError(err, response)), nil
 			}
 
-			// we don't do any special handling of the response, just return it as text
-			resBytes, err := io.ReadAll(rs.Body)
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			return mcp.NewToolResultText(string(resBytes)), nil
+			// Handle response body and return it as a text result
+			return readResponseBody(response)
 		})
 }
 
