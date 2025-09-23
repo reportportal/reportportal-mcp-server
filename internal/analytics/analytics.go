@@ -1,4 +1,4 @@
-package mcpreportportal
+package analytics
 
 import (
 	"bytes"
@@ -14,9 +14,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
 )
 
 const (
@@ -28,10 +25,8 @@ const (
 
 	userID = "692"
 
-	HashAlgorithm = "SHA256-128bit"
-
 	// Batch send interval for analytics data
-	batchSendInterval = 10 * time.Second
+	BatchSendInterval = 10 * time.Second
 
 	maxPerRequest = 25
 )
@@ -234,22 +229,6 @@ func (a *Analytics) sendBatchEvents(ctx context.Context, events []GAEvent) error
 	return nil
 }
 
-// WithAnalytics wraps a tool handler to add analytics tracking
-func (a *Analytics) WithAnalytics(
-	toolName string,
-	handler server.ToolHandlerFunc,
-) server.ToolHandlerFunc {
-	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		// Track the event before executing the tool (synchronous since it's just incrementing a counter)
-		if a != nil {
-			a.TrackMCPEvent(ctx, toolName)
-		}
-
-		// Execute the original handler
-		return handler(ctx, request)
-	}
-}
-
 func GetAnalyticArg() string {
 	seed := uint32(0x1337)
 	p1Bytes := []byte{107, 110, 74, 83}
@@ -271,10 +250,10 @@ func (a *Analytics) startMetricsProcessor() {
 	a.wg.Add(1)
 	go func() {
 		defer a.wg.Done()
-		ticker := time.NewTicker(batchSendInterval)
+		ticker := time.NewTicker(BatchSendInterval)
 		defer ticker.Stop()
 
-		slog.Debug("Analytics metrics processor started", "interval", batchSendInterval)
+		slog.Debug("Analytics metrics processor started", "interval", BatchSendInterval)
 
 		for {
 			select {

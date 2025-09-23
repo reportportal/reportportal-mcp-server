@@ -1,4 +1,4 @@
-package mcpreportportal
+package analytics
 
 import (
 	"bytes"
@@ -13,6 +13,8 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/reportportal/reportportal-mcp-server/internal/utils"
 )
 
 func TestNewAnalytics(t *testing.T) {
@@ -175,7 +177,7 @@ func TestWithAnalytics(t *testing.T) {
 	}
 
 	// Wrap the handler
-	wrappedHandler := analytics.WithAnalytics("test_tool", handler)
+	wrappedHandler := utils.WithAnalytics(analytics, "test_tool", handler)
 
 	// Call the wrapped handler
 	result, err := wrappedHandler(context.Background(), mcp.CallToolRequest{})
@@ -197,7 +199,7 @@ func TestWithAnalyticsNilAnalytics(t *testing.T) {
 
 	// Test with nil analytics
 	var analytics *Analytics
-	wrappedHandler := analytics.WithAnalytics("test_tool", handler)
+	wrappedHandler := utils.WithAnalytics(analytics, "test_tool", handler)
 
 	// Call the wrapped handler
 	result, err := wrappedHandler(context.Background(), mcp.CallToolRequest{})
@@ -267,7 +269,7 @@ func TestAnalyticsIntegration(t *testing.T) {
 	}
 
 	// Wrap with analytics
-	wrappedHandler := analytics.WithAnalytics("test_tool", handler)
+	wrappedHandler := utils.WithAnalytics(analytics, "test_tool", handler)
 
 	// Call the handler multiple times
 	for i := 0; i < 3; i++ {

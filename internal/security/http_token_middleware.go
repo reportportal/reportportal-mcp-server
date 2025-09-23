@@ -1,16 +1,18 @@
-package mcpreportportal
+package security
 
 import (
 	"context"
 	"log/slog"
 	"net/http"
 	"strings"
+
+	"github.com/reportportal/reportportal-mcp-server/internal/utils"
 )
 
 // Context keys for passing data through request context
 const (
 	// RPTokenContextKey is used to store RP API token in request context
-	RPTokenContextKey contextKey = "rp_api_token" //nolint:gosec // This is a context key, not a credential
+	RPTokenContextKey utils.ContextKey = "rp_api_token" //nolint:gosec // This is a context key, not a credential
 )
 
 // HTTPTokenMiddleware returns an HTTP middleware function that extracts RP API tokens
@@ -49,7 +51,7 @@ func extractRPTokenFromRequest(r *http.Request) string {
 			token := strings.TrimSpace(parts[1])
 
 			// Validate the extracted token before processing
-			if !ValidateRPToken(token) {
+			if !utils.ValidateRPToken(token) {
 				slog.Debug("Invalid RP API token rejected",
 					"source", "Authorization Bearer",
 					"validation", "failed")

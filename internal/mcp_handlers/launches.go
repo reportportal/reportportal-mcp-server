@@ -1,4 +1,4 @@
-package mcpreportportal
+package mcp_handlers
 
 import (
 	"context"
@@ -13,37 +13,58 @@ import (
 	"github.com/reportportal/goRP/v5/pkg/gorp"
 	"github.com/reportportal/goRP/v5/pkg/openapi"
 	"github.com/yosida95/uritemplate/v3"
+
+	"github.com/reportportal/reportportal-mcp-server/internal/analytics"
+	"github.com/reportportal/reportportal-mcp-server/internal/utils"
 )
 
 // LaunchResources is a struct that encapsulates the ReportPortal client.
 type LaunchResources struct {
 	client           *gorp.Client // Client to interact with the ReportPortal API
 	projectParameter mcp.ToolOption
-	analytics        *Analytics
+	analytics        *analytics.Analytics
 }
 
-func NewLaunchResources(
+func newLaunchResources(
 	client *gorp.Client,
 	defaultProject string,
-	analytics *Analytics,
+	analytics *analytics.Analytics,
 ) *LaunchResources {
 	return &LaunchResources{
 		client:           client,
-		projectParameter: newProjectParameter(defaultProject),
+		projectParameter: utils.NewProjectParameter(defaultProject),
 		analytics:        analytics,
 	}
+}
+
+// RegisterLaunchTools registers all launch-related tools and resources with the MCP server
+func RegisterLaunchTools(
+	s *server.MCPServer,
+	rpClient *gorp.Client,
+	defaultProject string,
+	analyticsClient *analytics.Analytics,
+) {
+	launches := newLaunchResources(rpClient, defaultProject, analyticsClient)
+	s.AddTool(launches.toolGetLaunches())
+	s.AddTool(launches.toolGetLastLaunchByName())
+	s.AddTool(launches.toolForceFinishLaunch())
+	s.AddTool(launches.toolDeleteLaunch())
+	s.AddTool(launches.toolRunAutoAnalysis())
+	s.AddTool(launches.toolUniqueErrorAnalysis())
+	s.AddTool(launches.toolRunQualityGate())
+	s.AddResourceTemplate(launches.resourceLaunch())
 }
 
 // toolGetLaunches creates a tool to retrieve a paginated list of launches from ReportPortal.
 func (lr *LaunchResources) toolGetLaunches() (tool mcp.Tool, handler server.ToolHandlerFunc) {
 	options := []mcp.ToolOption{
 		// Tool metadata
-		mcp.WithDescription("Get list of last ReportPortal launches"),
+		mcp.WithDescription("Get list of last ReportPortal launches by filters"),
 		lr.projectParameter,
 	}
 
 	// Add pagination parameters
-	options = append(options, setPaginationOptions(defaultSortingForLaunches)...)
+	options = append(options, utils.SetPaginationOptions(utils.DefaultSortingForLaunches)...)
 
 	// Add other parameters
 	options = append(options, []mcp.ToolOption{
@@ -90,8 +111,8 @@ func (lr *LaunchResources) toolGetLaunches() (tool mcp.Tool, handler server.Tool
 
 	return mcp.NewTool(
 			"get_launches",
-			options...), lr.analytics.WithAnalytics("get_launches", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			project, err := extractProject(request)
+			options...), utils.WithAnalytics(lr.analytics, "get_launches", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			project, err := utils.ExtractProject(request)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
@@ -115,7 +136,10 @@ func (lr *LaunchResources) toolGetLaunches() (tool mcp.Tool, handler server.Tool
 			if filterDescription != "" {
 				urlValues.Add("filter.cnt.description", filterDescription)
 			}
-			filterStartTime, err := processStartTimeFilter(filterStartTimeFrom, filterStartTimeTo)
+			filterStartTime, err := utils.ProcessStartTimeFilter(
+				filterStartTimeFrom,
+				filterStartTimeTo,
+			)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
@@ -129,25 +153,29 @@ func (lr *LaunchResources) toolGetLaunches() (tool mcp.Tool, handler server.Tool
 				urlValues.Add("filter.gte.number", strconv.Itoa(filterGreaterThanNumber))
 			}
 
-			ctxWithParams := WithQueryParams(ctx, urlValues)
+			ctxWithParams := utils.WithQueryParams(ctx, urlValues)
 			// Build API request and apply pagination directly
 			apiRequest := lr.client.LaunchAPI.GetProjectLaunches(ctxWithParams, project)
 
 			// Apply pagination parameters
-			apiRequest = applyPaginationOptions(apiRequest, request, defaultSortingForLaunches)
+			apiRequest = utils.ApplyPaginationOptions(
+				apiRequest,
+				request,
+				utils.DefaultSortingForLaunches,
+			)
 
 			// Process attribute keys and combine with composite attributes
-			filterAttributes = processAttributeKeys(filterAttributes, filterAttributeKeys)
+			filterAttributes = utils.ProcessAttributeKeys(filterAttributes, filterAttributeKeys)
 			if filterAttributes != "" {
 				apiRequest = apiRequest.FilterHasCompositeAttribute(filterAttributes)
 			}
 
 			_, response, err := apiRequest.Execute()
 			if err != nil {
-				return mcp.NewToolResultError(extractResponseError(err, response)), nil
+				return mcp.NewToolResultError(utils.ExtractResponseError(err, response)), nil
 			}
 
-			return readResponseBody(response)
+			return utils.ReadResponseBody(response)
 		})
 }
 
@@ -159,8 +187,8 @@ func (lr *LaunchResources) toolRunQualityGate() (tool mcp.Tool, handler server.T
 			mcp.WithNumber("launch_id", // Parameter for specifying the launch ID
 				mcp.Description("Launch ID"),
 			),
-		), lr.analytics.WithAnalytics("run_quality_gate", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			project, err := extractProject(request)
+		), utils.WithAnalytics(lr.analytics, "run_quality_gate", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			project, err := utils.ExtractProject(request)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
@@ -176,11 +204,11 @@ func (lr *LaunchResources) toolRunQualityGate() (tool mcp.Tool, handler server.T
 				}).
 				Execute()
 			if err != nil {
-				return mcp.NewToolResultError(extractResponseError(err, response)), nil
+				return mcp.NewToolResultError(utils.ExtractResponseError(err, response)), nil
 			}
 
 			// Handle response body and return it as a text result
-			return readResponseBody(response)
+			return utils.ReadResponseBody(response)
 		})
 }
 
@@ -188,13 +216,13 @@ func (lr *LaunchResources) toolRunQualityGate() (tool mcp.Tool, handler server.T
 func (lr *LaunchResources) toolGetLastLaunchByName() (mcp.Tool, server.ToolHandlerFunc) {
 	return mcp.NewTool("get_last_launch_by_name",
 			// Tool metadata
-			mcp.WithDescription("Get list of last ReportPortal launches"),
+			mcp.WithDescription("Get last launch by name from ReportPortal"),
 			lr.projectParameter,
 			mcp.WithString("launch", // Parameter for specifying the launch name
 				mcp.Description("Launch name"),
 			),
-		), lr.analytics.WithAnalytics("get_last_launch_by_name", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			project, err := extractProject(request)
+		), utils.WithAnalytics(lr.analytics, "get_last_launch_by_name", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			project, err := utils.ExtractProject(request)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
@@ -210,13 +238,17 @@ func (lr *LaunchResources) toolGetLastLaunchByName() (mcp.Tool, server.ToolHandl
 			urlValues := url.Values{
 				"filter.cnt.name": {launchName},
 			}
-			ctxWithParams := WithQueryParams(ctx, urlValues)
+			ctxWithParams := utils.WithQueryParams(ctx, urlValues)
 
 			// Fetch the launches matching the provided name
 			apiRequest := lr.client.LaunchAPI.GetProjectLaunches(ctxWithParams, project)
 
 			// Apply pagination parameters
-			apiRequest = applyPaginationOptions(apiRequest, request, defaultSortingForLaunches)
+			apiRequest = utils.ApplyPaginationOptions(
+				apiRequest,
+				request,
+				utils.DefaultSortingForLaunches,
+			)
 
 			launches, _, err := apiRequest.Execute()
 			if err != nil {
@@ -244,11 +276,11 @@ func (lr *LaunchResources) toolDeleteLaunch() (mcp.Tool, server.ToolHandlerFunc)
 			// Tool metadata
 			mcp.WithDescription("Delete ReportPortal launch"),
 			lr.projectParameter,
-			mcp.WithString("launch_id", // Parameter for specifying the launch name
+			mcp.WithNumber("launch_id", // Parameter for specifying the launch name
 				mcp.Description("Launch ID"),
 			),
-		), lr.analytics.WithAnalytics("launch_delete", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			project, err := extractProject(request)
+		), utils.WithAnalytics(lr.analytics, "launch_delete", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			project, err := utils.ExtractProject(request)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
@@ -275,7 +307,7 @@ func (lr *LaunchResources) toolRunAutoAnalysis() (mcp.Tool, server.ToolHandlerFu
 			// Tool metadata
 			mcp.WithDescription("Run auto analysis on ReportPortal launch"),
 			lr.projectParameter,
-			mcp.WithString("launch_id", // Parameter for specifying the launch name
+			mcp.WithNumber("launch_id", // Parameter for specifying the launch name
 				mcp.Description("Launch ID"),
 			),
 			mcp.WithString(
@@ -302,8 +334,8 @@ func (lr *LaunchResources) toolRunAutoAnalysis() (mcp.Tool, server.ToolHandlerFu
 				mcp.Enum("to_investigate", "auto_analyzed", "manually_analyzed"),
 				mcp.DefaultArray([]string{"to_investigate"}),
 			),
-		), lr.analytics.WithAnalytics("run_auto_analysis", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			project, err := extractProject(request)
+		), utils.WithAnalytics(lr.analytics, "run_auto_analysis", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			project, err := utils.ExtractProject(request)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
@@ -352,7 +384,7 @@ func (lr *LaunchResources) toolUniqueErrorAnalysis() (mcp.Tool, server.ToolHandl
 			// Tool metadata
 			mcp.WithDescription("Run unique error analysis on ReportPortal launch"),
 			lr.projectParameter,
-			mcp.WithString("launch_id", // Parameter for specifying the launch name
+			mcp.WithNumber("launch_id", // Parameter for specifying the launch name
 				mcp.Description("Launch ID"),
 			),
 			mcp.WithBoolean(
@@ -360,8 +392,8 @@ func (lr *LaunchResources) toolUniqueErrorAnalysis() (mcp.Tool, server.ToolHandl
 				mcp.Description("Remove numbers from analyzed logs"),
 				mcp.DefaultBool(false),
 			),
-		), lr.analytics.WithAnalytics("run_unique_error_analysis", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			project, err := extractProject(request)
+		), utils.WithAnalytics(lr.analytics, "run_unique_error_analysis", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			project, err := utils.ExtractProject(request)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
@@ -394,13 +426,13 @@ func (lr *LaunchResources) toolUniqueErrorAnalysis() (mcp.Tool, server.ToolHandl
 func (lr *LaunchResources) toolForceFinishLaunch() (mcp.Tool, server.ToolHandlerFunc) {
 	return mcp.NewTool("launch_force_finish",
 			// Tool metadata
-			mcp.WithDescription("Delete ReportPortal launch"),
+			mcp.WithDescription("Force-finish ReportPortal launch"),
 			lr.projectParameter,
-			mcp.WithString("launch_id", // Parameter for specifying the launch name
+			mcp.WithNumber("launch_id", // Parameter for specifying the launch name
 				mcp.Description("Launch ID"),
 			),
-		), lr.analytics.WithAnalytics("launch_force_finish", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			project, err := extractProject(request)
+		), utils.WithAnalytics(lr.analytics, "launch_force_finish", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			project, err := utils.ExtractProject(request)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}

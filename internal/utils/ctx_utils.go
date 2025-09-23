@@ -1,4 +1,4 @@
-package mcpreportportal
+package utils
 
 import (
 	"context"
@@ -8,10 +8,10 @@ import (
 	"github.com/google/uuid"
 )
 
-// contextKey is a type for context keys to avoid collisions
-type contextKey string
+// ContextKey is a type for context keys to avoid collisions
+type ContextKey string
 
-var contextKeyQueryParams = contextKey(
+var contextKeyQueryParams = ContextKey(
 	"queryParams",
 ) // Key for storing query parameters in the context
 

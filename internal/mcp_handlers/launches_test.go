@@ -1,4 +1,4 @@
-package mcpreportportal
+package mcp_handlers
 
 import (
 	"context"
@@ -43,8 +43,9 @@ func TestListLaunchesTool(t *testing.T) {
 	srv := mcptest.NewUnstartedServer(t)
 
 	serverURL, _ := url.Parse(mockServer.URL)
-	launchTools := NewLaunchResources(gorp.NewClient(serverURL, ""), testProject, nil)
-	srv.AddTool(launchTools.toolGetLaunches())
+	launchTools := newLaunchResources(gorp.NewClient(serverURL, ""), testProject, nil)
+	tool, handler := launchTools.toolGetLaunches()
+	srv.AddTool(tool, handler)
 
 	err := srv.Start(ctx)
 	require.NoError(t, err)

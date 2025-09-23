@@ -1,4 +1,4 @@
-package mcpreportportal
+package utils
 
 import (
 	"fmt"
@@ -9,24 +9,22 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/mark3labs/mcp-go/mcp"
 )
 
 const (
-	firstPage                  = 1                       // Default starting page for pagination
-	singleResult               = 1                       // Default number of results per page
-	defaultPageSize            = 50                      // Default number of elements per page
-	defaultSortingForLaunches  = "startTime,number,DESC" // default sorting order for launches
-	defaultSortingForItems     = "startTime,DESC"        // default sorting order for items
-	defaultSortingForSuites    = "startTime,ASC"         // default sorting order for suites
-	defaultSortingForLogs      = "logTime,ASC"           // default sorting order for logs
-	defaultProviderType        = "launch"                // default provider type
-	defaultFilterEqHasChildren = "false"                 // items which don't have children
-	defaultFilterEqHasStats    = "true"
-	defaultFilterInType        = "STEP"
-	defaultFilterInTypeSuites  = "SUITE,TEST"
-	defaultItemLogLevel        = "TRACE" // Default log level for test item logs
+	FirstPage                  = 1                       // Default starting page for pagination
+	DefaultPageSize            = 50                      // Default number of elements per page
+	DefaultSortingForLaunches  = "startTime,number,DESC" // default sorting order for launches
+	DefaultSortingForItems     = "startTime,DESC"        // default sorting order for items
+	DefaultSortingForSuites    = "startTime,ASC"         // default sorting order for suites
+	DefaultSortingForLogs      = "logTime,ASC"           // default sorting order for logs
+	DefaultProviderType        = "launch"                // default provider type
+	DefaultFilterEqHasChildren = "false"                 // items which don't have children
+	DefaultFilterEqHasStats    = "true"
+	DefaultFilterInType        = "STEP"
+	DefaultFilterInTypeSuites  = "SUITE,TEST"
+	DefaultItemLogLevel        = "TRACE"       // Default log level for test item logs
+	maxInt32                   = math.MaxInt32 // Standard library constant for maximum int32 value
 )
 
 // PaginatedRequest is a generic interface for API requests that support pagination
@@ -36,65 +34,7 @@ type PaginatedRequest[T any] interface {
 	PageSort(string) T
 }
 
-// setPaginationOptions returns the standard pagination parameters for MCP tools
-func setPaginationOptions(sortingParams string) []mcp.ToolOption {
-	return []mcp.ToolOption{
-		mcp.WithNumber("page", // Parameter for specifying the page number
-			mcp.DefaultNumber(firstPage),
-			mcp.Description("Page number"),
-		),
-		mcp.WithNumber("page-size", // Parameter for specifying the page size
-			mcp.DefaultNumber(defaultPageSize),
-			mcp.Description("Page size"),
-		),
-		mcp.WithString("page-sort", // Sorting fields and direction
-			mcp.DefaultString(sortingParams),
-			mcp.Description("Sorting fields and direction"),
-		),
-	}
-}
-
-// applyPaginationOptions extracts pagination from request and applies it to API request
-func applyPaginationOptions[T PaginatedRequest[T]](
-	apiRequest T,
-	request mcp.CallToolRequest,
-	sortingParams string,
-) T {
-	// Extract the "page" parameter from the request
-	pageInt := request.GetInt("page", firstPage)
-	if pageInt > math.MaxInt32 {
-		pageInt = math.MaxInt32
-	}
-
-	// Extract the "page-size" parameter from the request
-	pageSizeInt := request.GetInt("page-size", defaultPageSize)
-	if pageSizeInt > math.MaxInt32 {
-		pageSizeInt = math.MaxInt32
-	}
-
-	// Extract the "page-sort" parameter from the request
-	pageSort := request.GetString("page-sort", sortingParams)
-
-	// Apply pagination directly
-	return apiRequest.
-		PagePage(int32(pageInt)).     //nolint:gosec
-		PageSize(int32(pageSizeInt)). //nolint:gosec
-		PageSort(pageSort)
-}
-
-func newProjectParameter(defaultProject string) mcp.ToolOption {
-	return mcp.WithString("project", // Parameter for specifying the project name)
-		mcp.Description("Project name"),
-		mcp.DefaultString(defaultProject),
-		mcp.Required(),
-	)
-}
-
-func extractProject(rq mcp.CallToolRequest) (string, error) {
-	return rq.RequireString("project")
-}
-
-func extractResponseError(err error, rs *http.Response) (errText string) {
+func ExtractResponseError(err error, rs *http.Response) (errText string) {
 	errText = err.Error()
 	if rs != nil && rs.Body != nil {
 		// Check if the original error indicates the body is already closed
@@ -156,7 +96,7 @@ func parseTimestampToEpoch(timestampStr string) (int64, error) {
 }
 
 // processStartTimeFilter processes start time interval filter and returns the formatted filter string
-func processStartTimeFilter(filterStartTimeFrom, filterStartTimeTo string) (string, error) {
+func ProcessStartTimeFilter(filterStartTimeFrom, filterStartTimeTo string) (string, error) {
 	// Process start time interval filter
 	var filterStartTime string
 	if filterStartTimeFrom != "" && filterStartTimeTo != "" {
@@ -181,7 +121,7 @@ func processStartTimeFilter(filterStartTimeFrom, filterStartTimeTo string) (stri
 }
 
 // processAttributeKeys processes attribute keys by adding ":" suffix where needed and combines with existing attributes
-func processAttributeKeys(filterAttributes, filterAttributeKeys string) string {
+func ProcessAttributeKeys(filterAttributes, filterAttributeKeys string) string {
 	if filterAttributeKeys == "" {
 		return filterAttributes
 	}
@@ -194,7 +134,7 @@ func processAttributeKeys(filterAttributes, filterAttributeKeys string) string {
 		}
 
 		if colonIndex := strings.Index(key, ":"); colonIndex > 0 && colonIndex < len(key)-1 {
-			processed = append(processed, key[colonIndex+1:]) // Extract postfix
+			processed = append(processed, key) // Keep full key with colon
 		} else if !strings.HasSuffix(key, ":") {
 			processed = append(processed, key+":") // Add suffix
 		} else {
@@ -211,7 +151,7 @@ func processAttributeKeys(filterAttributes, filterAttributeKeys string) string {
 	return result
 }
 
-func isTextContent(mediaType string) bool {
+func IsTextContent(mediaType string) bool {
 	lowerType := strings.ToLower(mediaType)
 
 	// Text types (most common)
@@ -250,7 +190,7 @@ func isAlreadyClosedError(err error) bool {
 
 // readResponseBodyRaw safely reads an HTTP response body and ensures proper cleanup.
 // It returns the raw body bytes along with any error, suitable for custom content type handling.
-func readResponseBodyRaw(response *http.Response) ([]byte, error) {
+func ReadResponseBodyRaw(response *http.Response) ([]byte, error) {
 	// Ensure response body is always closed
 	if response == nil || response.Body == nil {
 		return nil, fmt.Errorf("empty HTTP response body")
@@ -272,18 +212,4 @@ func readResponseBodyRaw(response *http.Response) ([]byte, error) {
 	}
 
 	return rawBody, nil
-}
-
-// readResponseBody safely reads an HTTP response body and ensures proper cleanup.
-// It handles the defer close pattern with graceful error handling and returns an MCP tool result.
-// This is a convenience wrapper around readResponseBodyRaw for MCP tool results.
-func readResponseBody(response *http.Response) (*mcp.CallToolResult, error) {
-	rawBody, err := readResponseBodyRaw(response)
-	if err != nil {
-		return mcp.NewToolResultError(
-			fmt.Sprintf("failed to read response body: %v", err),
-		), nil
-	}
-
-	return mcp.NewToolResultText(string(rawBody)), nil
 }

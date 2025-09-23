@@ -1,4 +1,4 @@
-package mcpreportportal
+package mcp_handlers
 
 import (
 	"context"
@@ -13,25 +13,44 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/reportportal/goRP/v5/pkg/gorp"
 	"github.com/yosida95/uritemplate/v3"
+
+	"github.com/reportportal/reportportal-mcp-server/internal/analytics"
+	"github.com/reportportal/reportportal-mcp-server/internal/utils"
 )
 
 // TestItemResources is a struct that encapsulates the ReportPortal client.
 type TestItemResources struct {
 	client           *gorp.Client // Client to interact with the ReportPortal API
 	projectParameter mcp.ToolOption
-	analytics        *Analytics
+	analytics        *analytics.Analytics
 }
 
-func NewTestItemResources(
+func newTestItemResources(
 	client *gorp.Client,
 	defaultProject string,
-	analytics *Analytics,
+	analytics *analytics.Analytics,
 ) *TestItemResources {
 	return &TestItemResources{
 		client:           client,
-		projectParameter: newProjectParameter(defaultProject),
+		projectParameter: utils.NewProjectParameter(defaultProject),
 		analytics:        analytics,
 	}
+}
+
+// RegisterTestItemTools registers all test item-related tools and resources with the MCP server
+func RegisterTestItemTools(
+	s *server.MCPServer,
+	rpClient *gorp.Client,
+	defaultProject string,
+	analyticsClient *analytics.Analytics,
+) {
+	testItems := newTestItemResources(rpClient, defaultProject, analyticsClient)
+	s.AddTool(testItems.toolGetTestItemById())
+	s.AddTool(testItems.toolGetTestItemsByFilter())
+	s.AddTool(testItems.toolGetTestItemLogsByFilter())
+	s.AddTool(testItems.toolGetTestItemAttachment())
+	s.AddTool(testItems.toolGetTestSuitesByFilter())
+	s.AddResourceTemplate(testItems.resourceTestItem())
 }
 
 // toolGetTestItemsByFilter creates a tool to list test items for a specific launch.
@@ -48,7 +67,7 @@ func (lr *TestItemResources) toolGetTestItemsByFilter() (tool mcp.Tool, handler 
 	}
 
 	// Add pagination parameters
-	options = append(options, setPaginationOptions(defaultSortingForItems)...)
+	options = append(options, utils.SetPaginationOptions(utils.DefaultSortingForItems)...)
 
 	// Add other parameters
 	options = append(options, []mcp.ToolOption{
@@ -117,9 +136,9 @@ func (lr *TestItemResources) toolGetTestItemsByFilter() (tool mcp.Tool, handler 
 
 	return mcp.NewTool(
 			"get_test_items_by_filter",
-			options...), lr.analytics.WithAnalytics("get_test_items_by_filter", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			options...), utils.WithAnalytics(lr.analytics, "get_test_items_by_filter", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			slog.Debug("START PROCESSING")
-			project, err := extractProject(request)
+			project, err := utils.ExtractProject(request)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
@@ -146,10 +165,10 @@ func (lr *TestItemResources) toolGetTestItemsByFilter() (tool mcp.Tool, handler 
 			filterPatternName := request.GetString("filter-any-patternName", "")
 
 			urlValues := url.Values{
-				"providerType":          {defaultProviderType},
-				"filter.eq.hasStats":    {defaultFilterEqHasStats},
-				"filter.eq.hasChildren": {defaultFilterEqHasChildren},
-				"filter.in.type":        {defaultFilterInType},
+				"providerType":          {utils.DefaultProviderType},
+				"filter.eq.hasStats":    {utils.DefaultFilterEqHasStats},
+				"filter.eq.hasChildren": {utils.DefaultFilterEqHasChildren},
+				"filter.in.type":        {utils.DefaultFilterInType},
 			}
 			urlValues.Add("launchId", strconv.Itoa(launchId))
 
@@ -182,7 +201,10 @@ func (lr *TestItemResources) toolGetTestItemsByFilter() (tool mcp.Tool, handler 
 				urlValues.Add("filter.any.patternName", filterPatternName)
 			}
 
-			filterStartTime, err := processStartTimeFilter(filterStartTimeFrom, filterStartTimeTo)
+			filterStartTime, err := utils.ProcessStartTimeFilter(
+				filterStartTimeFrom,
+				filterStartTimeTo,
+			)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
@@ -193,7 +215,7 @@ func (lr *TestItemResources) toolGetTestItemsByFilter() (tool mcp.Tool, handler 
 				urlValues.Add("filter.in.ignoreAnalyzer", strconv.FormatBool(filterIgnoreAnalyzer))
 			}
 
-			ctxWithParams := WithQueryParams(ctx, urlValues)
+			ctxWithParams := utils.WithQueryParams(ctx, urlValues)
 			// Prepare "requiredUrlParams" for the API request because the ReportPortal API v2 expects them in a specific format
 			requiredUrlParams := map[string]string{
 				"launchId": strconv.Itoa(launchId),
@@ -203,10 +225,14 @@ func (lr *TestItemResources) toolGetTestItemsByFilter() (tool mcp.Tool, handler 
 				Params(requiredUrlParams)
 
 			// Apply pagination parameters
-			apiRequest = applyPaginationOptions(apiRequest, request, defaultSortingForItems)
+			apiRequest = utils.ApplyPaginationOptions(
+				apiRequest,
+				request,
+				utils.DefaultSortingForItems,
+			)
 
 			// Process attribute keys and combine with composite attributes
-			filterAttributes = processAttributeKeys(filterAttributes, filterAttributeKeys)
+			filterAttributes = utils.ProcessAttributeKeys(filterAttributes, filterAttributeKeys)
 			if filterAttributes != "" {
 				apiRequest = apiRequest.FilterHasCompositeAttribute(filterAttributes)
 			}
@@ -220,11 +246,11 @@ func (lr *TestItemResources) toolGetTestItemsByFilter() (tool mcp.Tool, handler 
 			// Execute the request
 			_, response, err := apiRequest.Execute()
 			if err != nil {
-				return mcp.NewToolResultError(extractResponseError(err, response)), nil
+				return mcp.NewToolResultError(utils.ExtractResponseError(err, response)), nil
 			}
 
 			// Return the serialized launches as a text result
-			return readResponseBody(response)
+			return utils.ReadResponseBody(response)
 		})
 }
 
@@ -237,8 +263,8 @@ func (lr *TestItemResources) toolGetTestItemById() (mcp.Tool, server.ToolHandler
 			mcp.WithString("test_item_id", // Parameter for specifying the test item ID
 				mcp.Description("Test Item ID"),
 			),
-		), lr.analytics.WithAnalytics("get_test_item_by_id", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			project, err := extractProject(request)
+		), utils.WithAnalytics(lr.analytics, "get_test_item_by_id", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			project, err := utils.ExtractProject(request)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
@@ -252,11 +278,11 @@ func (lr *TestItemResources) toolGetTestItemById() (mcp.Tool, server.ToolHandler
 			_, response, err := lr.client.TestItemAPI.GetTestItem(ctx, testItemID, project).
 				Execute()
 			if err != nil {
-				return mcp.NewToolResultError(extractResponseError(err, response)), nil
+				return mcp.NewToolResultError(utils.ExtractResponseError(err, response)), nil
 			}
 
 			// Return the serialized testItem as a text result
-			return readResponseBody(response)
+			return utils.ReadResponseBody(response)
 		})
 }
 
@@ -308,8 +334,8 @@ func (lr *TestItemResources) toolGetTestItemAttachment() (mcp.Tool, server.ToolH
 			mcp.WithString("attachment-content-id", // Parameter for specifying the test item ID
 				mcp.Description("Attachment binary content ID"),
 			),
-		), lr.analytics.WithAnalytics("get_test_item_attachment_by_id", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			project, err := extractProject(request)
+		), utils.WithAnalytics(lr.analytics, "get_test_item_attachment_by_id", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			project, err := utils.ExtractProject(request)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
@@ -330,19 +356,19 @@ func (lr *TestItemResources) toolGetTestItemAttachment() (mcp.Tool, server.ToolH
 			response, err := lr.client.FileStorageAPI.GetFile(ctx, attachmentId, project).
 				Execute()
 			if err != nil {
-				return mcp.NewToolResultError(extractResponseError(err, response)), nil
+				return mcp.NewToolResultError(utils.ExtractResponseError(err, response)), nil
 			}
 
 			// Handle response body with cleanup
-			rawBody, err := readResponseBodyRaw(response)
+			rawBody, err := utils.ReadResponseBodyRaw(response)
 			if err != nil {
-				return mcp.NewToolResultError(extractResponseError(err, response)), nil
+				return mcp.NewToolResultError(utils.ExtractResponseError(err, response)), nil
 			}
 
 			contentType := response.Header.Get("Content-Type")
 
 			// Return appropriate MCP result type based on content type
-			if isTextContent(contentType) {
+			if utils.IsTextContent(contentType) {
 				return mcp.NewToolResultResource(
 					fmt.Sprintf("Text content (%s, %d bytes)", contentType, len(rawBody)),
 					mcp.TextResourceContents{
@@ -364,7 +390,7 @@ func (lr *TestItemResources) toolGetTestItemAttachment() (mcp.Tool, server.ToolH
 		})
 }
 
-// toolGetTestItemLogsByFilter creates a tool to get test items logs for a specific launch.
+// ToolGetTestItemLogsByFilter creates a tool to get test items logs for a specific launch.
 func (lr *TestItemResources) toolGetTestItemLogsByFilter() (tool mcp.Tool, handler server.ToolHandlerFunc) {
 	return mcp.NewTool(
 			"get_test_item_logs_by_filter",
@@ -376,20 +402,20 @@ func (lr *TestItemResources) toolGetTestItemLogsByFilter() (tool mcp.Tool, handl
 				mcp.Description("Items with specific Parent Item ID, this is a required parameter"),
 			),
 			mcp.WithNumber("page", // Parameter for specifying the page number
-				mcp.DefaultNumber(firstPage),
+				mcp.DefaultNumber(utils.FirstPage),
 				mcp.Description("Page number"),
 			),
 			mcp.WithNumber("page-size", // Parameter for specifying the page size
-				mcp.DefaultNumber(defaultPageSize),
+				mcp.DefaultNumber(utils.DefaultPageSize),
 				mcp.Description("Page size"),
 			),
 			mcp.WithString("page-sort", // Sorting fields and direction
-				mcp.DefaultString(defaultSortingForLogs),
+				mcp.DefaultString(utils.DefaultSortingForLogs),
 				mcp.Description("Sorting fields and direction"),
 			),
 			// Optional filters
 			mcp.WithString("filter-gte-level", // Item's log level
-				mcp.DefaultString(defaultItemLogLevel),
+				mcp.DefaultString(utils.DefaultItemLogLevel),
 				mcp.Description("Get logs only with specific log level"),
 			),
 			mcp.WithString(
@@ -412,9 +438,9 @@ func (lr *TestItemResources) toolGetTestItemLogsByFilter() (tool mcp.Tool, handl
 					"Items with status, can be a list of values: PASSED, FAILED, SKIPPED, INTERRUPTED, IN_PROGRESS, WARN, INFO",
 				),
 			),
-		), lr.analytics.WithAnalytics("get_test_item_logs_by_filter", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		), utils.WithAnalytics(lr.analytics, "get_test_item_logs_by_filter", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			slog.Debug("START PROCESSING")
-			project, err := extractProject(request)
+			project, err := utils.ExtractProject(request)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
@@ -460,7 +486,7 @@ func (lr *TestItemResources) toolGetTestItemLogsByFilter() (tool mcp.Tool, handl
 				}
 			}
 
-			ctxWithParams := WithQueryParams(ctx, urlValues)
+			ctxWithParams := utils.WithQueryParams(ctx, urlValues)
 			// Prepare "requiredUrlParams" for the API request because the ReportPortal API expects them in a specific format
 			requiredUrlParams := map[string]string{
 				"parentId": parentIdStr,
@@ -470,15 +496,19 @@ func (lr *TestItemResources) toolGetTestItemLogsByFilter() (tool mcp.Tool, handl
 				Params(requiredUrlParams)
 
 			// Apply pagination parameters
-			apiRequest = applyPaginationOptions(apiRequest, request, defaultSortingForLogs)
+			apiRequest = utils.ApplyPaginationOptions(
+				apiRequest,
+				request,
+				utils.DefaultSortingForLogs,
+			)
 
 			// Execute the request
 			_, response, err := apiRequest.Execute()
 			if err != nil {
-				return mcp.NewToolResultError(extractResponseError(err, response)), nil
+				return mcp.NewToolResultError(utils.ExtractResponseError(err, response)), nil
 			}
 
-			return readResponseBody(response)
+			return utils.ReadResponseBody(response)
 		})
 }
 
@@ -496,7 +526,7 @@ func (lr *TestItemResources) toolGetTestSuitesByFilter() (tool mcp.Tool, handler
 	}
 
 	// Add pagination parameters
-	options = append(options, setPaginationOptions(defaultSortingForSuites)...)
+	options = append(options, utils.SetPaginationOptions(utils.DefaultSortingForSuites)...)
 
 	// Add other parameters
 	options = append(options, []mcp.ToolOption{
@@ -538,9 +568,9 @@ func (lr *TestItemResources) toolGetTestSuitesByFilter() (tool mcp.Tool, handler
 
 	return mcp.NewTool(
 			"get_test_suites_by_filter",
-			options...), lr.analytics.WithAnalytics("get_test_suites_by_filter", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			options...), utils.WithAnalytics(lr.analytics, "get_test_suites_by_filter", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			slog.Debug("START PROCESSING")
-			project, err := extractProject(request)
+			project, err := utils.ExtractProject(request)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
@@ -560,8 +590,8 @@ func (lr *TestItemResources) toolGetTestSuitesByFilter() (tool mcp.Tool, handler
 			filterParentId := request.GetString("filter.eq.parentId", "")
 
 			urlValues := url.Values{
-				"providerType":   {defaultProviderType},
-				"filter.in.type": {defaultFilterInTypeSuites},
+				"providerType":   {utils.DefaultProviderType},
+				"filter.in.type": {utils.DefaultFilterInTypeSuites},
 			}
 			urlValues.Add("launchId", strconv.Itoa(launchId))
 
@@ -582,7 +612,10 @@ func (lr *TestItemResources) toolGetTestSuitesByFilter() (tool mcp.Tool, handler
 				urlValues.Add("filter.eq.parentId", filterParentId)
 			}
 
-			filterStartTime, err := processStartTimeFilter(filterStartTimeFrom, filterStartTimeTo)
+			filterStartTime, err := utils.ProcessStartTimeFilter(
+				filterStartTimeFrom,
+				filterStartTimeTo,
+			)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
@@ -590,7 +623,7 @@ func (lr *TestItemResources) toolGetTestSuitesByFilter() (tool mcp.Tool, handler
 				urlValues.Add("filter.btw.startTime", filterStartTime)
 			}
 
-			ctxWithParams := WithQueryParams(ctx, urlValues)
+			ctxWithParams := utils.WithQueryParams(ctx, urlValues)
 			// Prepare "requiredUrlParams" for the API request because the ReportPortal API v2 expects them in a specific format
 			requiredUrlParams := map[string]string{
 				"launchId": strconv.Itoa(launchId),
@@ -600,10 +633,14 @@ func (lr *TestItemResources) toolGetTestSuitesByFilter() (tool mcp.Tool, handler
 				Params(requiredUrlParams)
 
 			// Apply pagination parameters
-			apiRequest = applyPaginationOptions(apiRequest, request, defaultSortingForSuites)
+			apiRequest = utils.ApplyPaginationOptions(
+				apiRequest,
+				request,
+				utils.DefaultSortingForSuites,
+			)
 
 			// Process attribute keys and combine with composite attributes
-			filterAttributes = processAttributeKeys(filterAttributes, filterAttributeKeys)
+			filterAttributes = utils.ProcessAttributeKeys(filterAttributes, filterAttributeKeys)
 			if filterAttributes != "" {
 				apiRequest = apiRequest.FilterHasCompositeAttribute(filterAttributes)
 			}
@@ -611,10 +648,10 @@ func (lr *TestItemResources) toolGetTestSuitesByFilter() (tool mcp.Tool, handler
 			// Execute the request
 			_, response, err := apiRequest.Execute()
 			if err != nil {
-				return mcp.NewToolResultError(extractResponseError(err, response)), nil
+				return mcp.NewToolResultError(utils.ExtractResponseError(err, response)), nil
 			}
 
 			// Return the serialized test suites as a text result
-			return readResponseBody(response)
+			return utils.ReadResponseBody(response)
 		})
 }

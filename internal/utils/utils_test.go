@@ -1,4 +1,4 @@
-package mcpreportportal
+package utils
 
 import (
 	"strings"
@@ -40,10 +40,10 @@ func TestProcessAttributeKeys(t *testing.T) {
 			expected:            "key1:",
 		},
 		{
-			name:                "single key:value pair extracts value",
+			name:                "single key:value pair preserves full key:value",
 			filterAttributes:    "",
 			filterAttributeKeys: "key1:value1",
-			expected:            "value1",
+			expected:            "key1:value1",
 		},
 
 		// Multiple keys cases
@@ -60,10 +60,10 @@ func TestProcessAttributeKeys(t *testing.T) {
 			expected:            "key1:,key2:,key3:",
 		},
 		{
-			name:                "multiple key:value pairs extract values",
+			name:                "multiple key:value pairs preserve full key:value",
 			filterAttributes:    "",
 			filterAttributeKeys: "key1:value1,key2:value2,key3:value3",
-			expected:            "value1,value2,value3",
+			expected:            "key1:value1,key2:value2,key3:value3",
 		},
 
 		// Mixed cases
@@ -71,13 +71,13 @@ func TestProcessAttributeKeys(t *testing.T) {
 			name:                "mixed keys and key:value pairs",
 			filterAttributes:    "",
 			filterAttributeKeys: "key1,key2:value2,key3:",
-			expected:            "key1:,value2,key3:",
+			expected:            "key1:,key2:value2,key3:",
 		},
 		{
 			name:                "mixed with existing filterAttributes",
 			filterAttributes:    "existing",
 			filterAttributeKeys: "key1,key2:value2",
-			expected:            "existing,key1:,value2",
+			expected:            "existing,key1:,key2:value2",
 		},
 
 		// Whitespace handling
@@ -85,13 +85,13 @@ func TestProcessAttributeKeys(t *testing.T) {
 			name:                "keys with whitespace are trimmed",
 			filterAttributes:    "",
 			filterAttributeKeys: " key1 , key2:value2 , key3: ",
-			expected:            "key1:,value2,key3:",
+			expected:            "key1:,key2:value2,key3:",
 		},
 		{
 			name:                "empty keys after trimming are skipped",
 			filterAttributes:    "",
 			filterAttributeKeys: "key1,,  ,key2:value2",
-			expected:            "key1:,value2",
+			expected:            "key1:,key2:value2",
 		},
 
 		// Edge cases
@@ -108,10 +108,10 @@ func TestProcessAttributeKeys(t *testing.T) {
 			expected:            "key:",
 		},
 		{
-			name:                "multiple colons extracts postfix after first colon",
+			name:                "multiple colons preserves full key:value",
 			filterAttributes:    "",
 			filterAttributeKeys: "key:val:ue",
-			expected:            "val:ue",
+			expected:            "key:val:ue",
 		},
 		{
 			name:                "multiple colons at start gets colon suffix",
@@ -125,7 +125,7 @@ func TestProcessAttributeKeys(t *testing.T) {
 			name:                "complex mixed scenario",
 			filterAttributes:    "pre1,pre2:prevalue",
 			filterAttributeKeys: "env:prod, region , status:active, debug: ",
-			expected:            "pre1,pre2:prevalue,prod,region:,active,debug:",
+			expected:            "pre1,pre2:prevalue,env:prod,region:,status:active,debug:",
 		},
 		{
 			name:                "only whitespace and commas",
@@ -137,9 +137,9 @@ func TestProcessAttributeKeys(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := processAttributeKeys(tt.filterAttributes, tt.filterAttributeKeys)
+			result := ProcessAttributeKeys(tt.filterAttributes, tt.filterAttributeKeys)
 			if result != tt.expected {
-				t.Errorf("processAttributeKeys(%q, %q) = %q, want %q",
+				t.Errorf("ProcessAttributeKeys(%q, %q) = %q, want %q",
 					tt.filterAttributes, tt.filterAttributeKeys, result, tt.expected)
 			}
 		})
@@ -158,7 +158,7 @@ func TestProcessAttributeKeys_Performance(t *testing.T) {
 	largeFilterAttributeKeys := strings.Join(keys, ",")
 
 	// This should not panic or take too long
-	result := processAttributeKeys(filterAttributes, largeFilterAttributeKeys)
+	result := ProcessAttributeKeys(filterAttributes, largeFilterAttributeKeys)
 
 	// Basic validation - should contain the original attributes
 	if !strings.HasPrefix(result, filterAttributes) {
