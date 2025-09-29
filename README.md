@@ -205,7 +205,6 @@ The ReportPortal MCP server provides a comprehensive set of capabilities for int
 | Get Test Items by filter  | Lists test items for a specific launch           | `launch-id` (required), `name`, `description`, `status`, `has_retries`, `start_time_from`, `start_time_to`, `attributes`, `parent_id`, `defect_comment`, `auto_analyzed`, `ignored_in_aa`, `pattern_name`, `ticket_id`, `sort`, `page`, `page-size` (all optional)                                                        |
 | Get Logs by filter  | Lists logs for a specific test item or nested step          | `parent-id` (required), `log_level`, `log_content`, `logs_with_attachments`, `status`, `sort`, `page`, `page-size` (all optional)                                                        |
 | Get Attachment by ID        | Retrieves an attachment binary by id        | `attachment_id`                                                                                                |
-| Run Unique Error Analysis  | Runs unique error analysis on a launch           | `launch_id`, `remove_numbers`                                                                                 |
 | Get Test Item by ID        | Retrieves details of a specific test item        | `test_item_id`                                                                                                |
 
 ### Available Prompts
