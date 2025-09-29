@@ -1,5 +1,14 @@
 version: '3'
 
+# MCP_MODE controls the server mode:
+# - stdio (default): Standard input/output mode for local usage
+# - http: HTTP streaming mode for remote multi-client access
+# 
+# Usage examples:
+# task docker:run                    # Runs in stdio mode (default)
+# task docker:run MCP_MODE=http      # Runs in HTTP mode
+# task docker:run MCP_MODE=http MCP_SERVER_PORT=9000  # Docker HTTP mode on port 9000
+
 vars:
   GOLANGCI_LINT_VERSION: 'v2.1.6'
   GOLANG_CI: "docker run --rm -v $(pwd):/app -w /app golangci/golangci-lint:{{.GOLANGCI_LINT_VERSION}} golangci-lint"
@@ -9,7 +18,8 @@ vars:
   DLV_PORT: "52202"
   MCP_MODE: '{{.MCP_MODE | default "stdio"}}'
   MCP_SERVER_PORT: '{{.MCP_SERVER_PORT | default "8080"}}'
-
+  MCP_SERVER_HOST: '{{.MCP_SERVER_HOST | default ""}}'
+  
 dotenv: [ '.env' ]
 tasks:
   fmt:
@@ -41,27 +51,41 @@ tasks:
       go build -o bin/reportportal-mcp-server cmd/reportportal-mcp-server/main.go
 
   docker:build:
+    deps: [ app:build ]
     desc: "Builds docker image"
     cmd: "docker build -t {{.IMAGE_NAME}} ."
 
   docker:build-debug:
+    deps: [ app:build ]
     desc: "Builds docker image with dlv for debugging"
     cmd: "docker build -f debug.dockerfile -t {{.IMAGE_NAME_DEBUG}} ."
 
   docker:run:
-    desc: "Runs docker mcp server http streamable mode"
+    desc: "Runs docker mcp server in {{.MCP_MODE}} mode"
     deps: [ docker:build ]
     cmd: >
-      docker run -i --rm -p {{.MCP_SERVER_PORT}}:{{.MCP_SERVER_PORT}} -e "RP_API_TOKEN=$RP_API_TOKEN" -e "RP_PROJECT=$RP_PROJECT" -e "RP_HOST=$RP_HOST" {{.IMAGE_NAME}}
+      {{if eq .MCP_MODE "http"}}
+      docker run -i --rm -p {{.MCP_SERVER_PORT}}:{{.MCP_SERVER_PORT}} -e "RP_API_TOKEN=$RP_API_TOKEN" -e "RP_PROJECT=$RP_PROJECT" -e "RP_HOST=$RP_HOST" {{if .MCP_SERVER_HOST}}-e "MCP_SERVER_HOST={{.MCP_SERVER_HOST}}"{{end}} -e "MCP_SERVER_PORT={{.MCP_SERVER_PORT}}" -e "MCP_MODE={{.MCP_MODE}}" {{.IMAGE_NAME}}
+      {{else}}
+      docker run -i --rm -e "RP_API_TOKEN=$RP_API_TOKEN" -e "RP_PROJECT=$RP_PROJECT" -e "RP_HOST=$RP_HOST" -e "MCP_MODE={{.MCP_MODE}}" {{.IMAGE_NAME}}
+      {{end}}
 
   inspector:
-    desc: "Runs inspector in production mode"
+    desc: "Runs inspector in production mode ({{.MCP_MODE}})"
     deps: [ docker:build ]
     cmd: >
-      npx @modelcontextprotocol/inspector -- docker run -i --rm -e "RP_API_TOKEN=$RP_API_TOKEN" -e "RP_PROJECT=$RP_PROJECT" -e "RP_HOST=$RP_HOST" {{.IMAGE_NAME}}
+      {{if eq .MCP_MODE "http"}}
+      {{.INSPECTOR}} -- docker run -i --rm -p {{.MCP_SERVER_PORT}}:{{.MCP_SERVER_PORT}} -e "RP_API_TOKEN=$RP_API_TOKEN" -e "RP_PROJECT=$RP_PROJECT" -e "RP_HOST=$RP_HOST" {{if .MCP_SERVER_HOST}}-e "MCP_SERVER_HOST={{.MCP_SERVER_HOST}}"{{end}} -e "MCP_SERVER_PORT={{.MCP_SERVER_PORT}}" -e "MCP_MODE={{.MCP_MODE}}" {{.IMAGE_NAME}}
+      {{else}}
+      {{.INSPECTOR}} -- docker run -i --rm -e "RP_API_TOKEN=$RP_API_TOKEN" -e "RP_PROJECT=$RP_PROJECT" -e "RP_HOST=$RP_HOST" -e "MCP_MODE={{.MCP_MODE}}" {{.IMAGE_NAME}}
+      {{end}}
 
   inspector-debug:
-    desc: "Runs inspector with the MCP server in debug mode"
+    desc: "Runs inspector with the MCP server in debug mode ({{.MCP_MODE}})"
     deps: [ docker:build-debug ]
     cmd: >
-      {{.INSPECTOR}} -- docker run -p {{.DLV_PORT}}:{{.DLV_PORT}} -i --rm -e "RP_API_TOKEN=$RP_API_TOKEN" -e "RP_PROJECT=$RP_PROJECT" -e "RP_HOST=$RP_HOST" {{.IMAGE_NAME_DEBUG}}
+      {{if eq .MCP_MODE "http"}}
+      {{.INSPECTOR}} -- docker run -p {{.DLV_PORT}}:{{.DLV_PORT}} -p {{.MCP_SERVER_PORT}}:{{.MCP_SERVER_PORT}} -i --rm -e "RP_API_TOKEN=$RP_API_TOKEN" -e "RP_PROJECT=$RP_PROJECT" -e "RP_HOST=$RP_HOST" {{if .MCP_SERVER_HOST}}-e "MCP_SERVER_HOST={{.MCP_SERVER_HOST}}"{{end}} -e "MCP_SERVER_PORT={{.MCP_SERVER_PORT}}" -e "MCP_MODE={{.MCP_MODE}}" {{.IMAGE_NAME_DEBUG}}
+      {{else}}
+      {{.INSPECTOR}} -- docker run -p {{.DLV_PORT}}:{{.DLV_PORT}} -i --rm -e "RP_API_TOKEN=$RP_API_TOKEN" -e "RP_PROJECT=$RP_PROJECT" -e "RP_HOST=$RP_HOST" -e "MCP_MODE={{.MCP_MODE}}" {{.IMAGE_NAME_DEBUG}}
+      {{end}}

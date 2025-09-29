@@ -27,4 +27,7 @@ COPY --from=builder /go/bin/dlv /usr/local/bin/dlv
 
 WORKDIR /app
 
+# Expose debug port and default HTTP port
+EXPOSE 52202 8080
+
 ENTRYPOINT ["dlv", "exec", "/app/server", "--headless", "--listen=:52202", "--api-version=2", "--log", "--accept-multiclient"]
