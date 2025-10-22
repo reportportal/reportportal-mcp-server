@@ -11,9 +11,11 @@ import (
 const (
 	// RPTokenContextKey is used to store RP API token in request context
 	RPTokenContextKey contextKey = "rp_api_token" //nolint:gosec // This is a context key, not a credential
+	// RPProjectContextKey is used to store RP project parameter in request context
+	RPProjectContextKey contextKey = "rp_project" //nolint:gosec // This is a context key, not a credential
 )
 
-// HTTPTokenMiddleware returns an HTTP middleware function that extracts RP API tokens
+// HTTPTokenMiddleware returns an HTTP middleware function that extracts RP API tokens and project parameters
 func HTTPTokenMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Extract RP API token from request headers
@@ -32,6 +34,25 @@ func HTTPTokenMiddleware(next http.Handler) http.Handler {
 				"method", r.Method,
 				"path", r.URL.Path,
 				"checked_headers", []string{"Authorization"})
+		}
+
+		// Extract project parameter from request headers
+		rpProject := extractRPProjectFromRequest(r)
+
+		if rpProject != "" {
+			// Add project to request context for use by MCP handlers
+			r = r.WithContext(WithProjectInContext(r.Context(), rpProject))
+
+			slog.Debug("Extracted RP project parameter from HTTP request",
+				"source", "http_header",
+				"method", r.Method,
+				"path", r.URL.Path,
+				"project", rpProject)
+		} else {
+			slog.Debug("No RP project parameter found in HTTP request headers",
+				"method", r.Method,
+				"path", r.URL.Path,
+				"checked_headers", []string{"X-Project"})
 		}
 
 		// Continue to next handler
@@ -73,4 +94,31 @@ func WithTokenInContext(ctx context.Context, token string) context.Context {
 func GetTokenFromContext(ctx context.Context) (string, bool) {
 	token, ok := ctx.Value(RPTokenContextKey).(string)
 	return token, ok && token != ""
+}
+
+// extractRPProjectFromRequest extracts RP project parameter from HTTP request headers
+// Supports X-Project header
+func extractRPProjectFromRequest(r *http.Request) string {
+	project := strings.TrimSpace(r.Header.Get("X-Project"))
+	if project != "" {
+		slog.Debug("Valid RP project parameter extracted from request header",
+			"source", "X-Project",
+			"project", project)
+		return project
+	}
+	return ""
+}
+
+// WithProjectInContext adds RP project parameter to request context
+func WithProjectInContext(ctx context.Context, project string) context.Context {
+	// Trim whitespace from project parameter
+	project = strings.TrimSpace(project)
+	return context.WithValue(ctx, RPProjectContextKey, project)
+}
+
+// GetProjectFromContext extracts RP project parameter from request context
+func GetProjectFromContext(ctx context.Context) (string, bool) {
+	project, ok := ctx.Value(RPProjectContextKey).(string)
+	res := strings.TrimSpace(project)
+	return res, ok && res != ""
 }

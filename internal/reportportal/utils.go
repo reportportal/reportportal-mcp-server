@@ -1,6 +1,7 @@
 package mcpreportportal
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log/slog"
@@ -90,8 +91,14 @@ func newProjectParameter(defaultProject string) mcp.ToolOption {
 	)
 }
 
-func extractProject(rq mcp.CallToolRequest) (string, error) {
-	return rq.RequireString("project")
+func extractProject(ctx context.Context, rq mcp.CallToolRequest) (string, error) {
+	// First try to get project from context (from HTTP header)
+	if project, ok := GetProjectFromContext(ctx); ok {
+		return project, nil
+	}
+
+	project, err := rq.RequireString("project")
+	return strings.TrimSpace(project), err
 }
 
 func extractResponseError(err error, rs *http.Response) (errText string) {

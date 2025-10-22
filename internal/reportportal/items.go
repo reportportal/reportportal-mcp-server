@@ -119,7 +119,7 @@ func (lr *TestItemResources) toolGetTestItemsByFilter() (tool mcp.Tool, handler 
 			"get_test_items_by_filter",
 			options...), lr.analytics.WithAnalytics("get_test_items_by_filter", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			slog.Debug("START PROCESSING")
-			project, err := extractProject(request)
+			project, err := extractProject(ctx, request)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
@@ -238,7 +238,7 @@ func (lr *TestItemResources) toolGetTestItemById() (mcp.Tool, server.ToolHandler
 				mcp.Description("Test Item ID"),
 			),
 		), lr.analytics.WithAnalytics("get_test_item_by_id", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			project, err := extractProject(request)
+			project, err := extractProject(ctx, request)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
@@ -309,7 +309,7 @@ func (lr *TestItemResources) toolGetTestItemAttachment() (mcp.Tool, server.ToolH
 				mcp.Description("Attachment binary content ID"),
 			),
 		), lr.analytics.WithAnalytics("get_test_item_attachment_by_id", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			project, err := extractProject(request)
+			project, err := extractProject(ctx, request)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
@@ -414,7 +414,7 @@ func (lr *TestItemResources) toolGetTestItemLogsByFilter() (tool mcp.Tool, handl
 			),
 		), lr.analytics.WithAnalytics("get_test_item_logs_by_filter", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			slog.Debug("START PROCESSING")
-			project, err := extractProject(request)
+			project, err := extractProject(ctx, request)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
@@ -540,7 +540,7 @@ func (lr *TestItemResources) toolGetTestSuitesByFilter() (tool mcp.Tool, handler
 			"get_test_suites_by_filter",
 			options...), lr.analytics.WithAnalytics("get_test_suites_by_filter", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			slog.Debug("START PROCESSING")
-			project, err := extractProject(request)
+			project, err := extractProject(ctx, request)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
