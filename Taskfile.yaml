@@ -29,6 +29,11 @@ tasks:
     desc: "Runs GolangCI linter"
     cmd: "{{.GOLANG_CI}} run ./..."
 
+  checks:
+    desc: "Runs checks (formatter and linter)"
+    cmd: |
+      go mod tidy && {{.GOLANG_CI}} fmt ./... && {{.GOLANG_CI}} run ./...
+
   test:
     desc: "Runs tests"
     cmd: "go test ./..."

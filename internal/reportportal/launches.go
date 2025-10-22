@@ -91,7 +91,7 @@ func (lr *LaunchResources) toolGetLaunches() (tool mcp.Tool, handler server.Tool
 	return mcp.NewTool(
 			"get_launches",
 			options...), lr.analytics.WithAnalytics("get_launches", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			project, err := extractProject(request)
+			project, err := extractProject(ctx, request)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
@@ -160,7 +160,7 @@ func (lr *LaunchResources) toolRunQualityGate() (tool mcp.Tool, handler server.T
 				mcp.Description("Launch ID"),
 			),
 		), lr.analytics.WithAnalytics("run_quality_gate", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			project, err := extractProject(request)
+			project, err := extractProject(ctx, request)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
@@ -194,7 +194,7 @@ func (lr *LaunchResources) toolGetLastLaunchByName() (mcp.Tool, server.ToolHandl
 				mcp.Description("Launch name"),
 			),
 		), lr.analytics.WithAnalytics("get_last_launch_by_name", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			project, err := extractProject(request)
+			project, err := extractProject(ctx, request)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
@@ -248,7 +248,7 @@ func (lr *LaunchResources) toolDeleteLaunch() (mcp.Tool, server.ToolHandlerFunc)
 				mcp.Description("Launch ID"),
 			),
 		), lr.analytics.WithAnalytics("launch_delete", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			project, err := extractProject(request)
+			project, err := extractProject(ctx, request)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
@@ -303,7 +303,7 @@ func (lr *LaunchResources) toolRunAutoAnalysis() (mcp.Tool, server.ToolHandlerFu
 				mcp.DefaultArray([]string{"to_investigate"}),
 			),
 		), lr.analytics.WithAnalytics("run_auto_analysis", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			project, err := extractProject(request)
+			project, err := extractProject(ctx, request)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
@@ -361,7 +361,7 @@ func (lr *LaunchResources) toolUniqueErrorAnalysis() (mcp.Tool, server.ToolHandl
 				mcp.DefaultBool(false),
 			),
 		), lr.analytics.WithAnalytics("run_unique_error_analysis", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			project, err := extractProject(request)
+			project, err := extractProject(ctx, request)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
@@ -400,7 +400,7 @@ func (lr *LaunchResources) toolForceFinishLaunch() (mcp.Tool, server.ToolHandler
 				mcp.Description("Launch ID"),
 			),
 		), lr.analytics.WithAnalytics("launch_force_finish", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			project, err := extractProject(request)
+			project, err := extractProject(ctx, request)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
