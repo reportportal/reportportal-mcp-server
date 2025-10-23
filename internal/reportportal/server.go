@@ -19,7 +19,7 @@ var promptFiles embed.FS
 func NewServer(
 	version string,
 	hostUrl *url.URL,
-	token, defaultProject string,
+	token,
 	userID, analyticsAPISecret string,
 	analyticsOn bool,
 ) (*server.MCPServer, *Analytics, error) {
@@ -47,7 +47,7 @@ func NewServer(
 		}
 	}
 
-	launches := NewLaunchResources(rpClient, defaultProject, analytics)
+	launches := NewLaunchResources(rpClient, analytics)
 	s.AddTool(launches.toolGetLaunches())
 	s.AddTool(launches.toolGetLastLaunchByName())
 	s.AddTool(launches.toolForceFinishLaunch())
@@ -57,7 +57,7 @@ func NewServer(
 	s.AddTool(launches.toolRunQualityGate())
 	s.AddResourceTemplate(launches.resourceLaunch())
 
-	testItems := NewTestItemResources(rpClient, defaultProject, analytics)
+	testItems := NewTestItemResources(rpClient, analytics)
 	s.AddTool(testItems.toolGetTestItemById())
 	s.AddTool(testItems.toolGetTestItemsByFilter())
 	s.AddTool(testItems.toolGetTestItemLogsByFilter())

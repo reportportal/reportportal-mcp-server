@@ -203,7 +203,6 @@ func buildHTTPServerConfig(cmd *cli.Command) (mcpreportportal.HTTPServerConfig, 
 	// Retrieve required parameters from CLI flags
 	host := cmd.String("rp-host")
 	token := cmd.String("token")
-	project := cmd.String("project")
 	userID := cmd.String("user-id")
 	analyticsAPISecret := mcpreportportal.GetAnalyticArg()
 	analyticsOff := cmd.Bool("analytics-off")
@@ -226,7 +225,6 @@ func buildHTTPServerConfig(cmd *cli.Command) (mcpreportportal.HTTPServerConfig, 
 		Version:               fmt.Sprintf("%s (%s) %s", version, commit, date),
 		HostURL:               hostUrl,
 		FallbackRPToken:       token,
-		DefaultProject:        project,
 		UserID:                userID,
 		GA4Secret:             analyticsAPISecret,
 		AnalyticsOn:           !analyticsOff,
@@ -239,7 +237,6 @@ func newMCPServer(cmd *cli.Command) (*server.MCPServer, *mcpreportportal.Analyti
 	// Retrieve required parameters from the command flags
 	token := cmd.String("token")                           // API token
 	host := cmd.String("rp-host")                          // ReportPortal host URL
-	project := cmd.String("project")                       // ReportPortal project name
 	userID := cmd.String("user-id")                        // Unified user ID for analytics
 	analyticsAPISecret := mcpreportportal.GetAnalyticArg() // Analytics API secret
 	analyticsOff := cmd.Bool("analytics-off")              // Disable analytics flag
@@ -254,7 +251,6 @@ func newMCPServer(cmd *cli.Command) (*server.MCPServer, *mcpreportportal.Analyti
 		version,
 		hostUrl,
 		token,
-		project,
 		userID,
 		analyticsAPISecret,
 		!analyticsOff, // Convert analyticsOff to analyticsOn
@@ -267,6 +263,11 @@ func newMCPServer(cmd *cli.Command) (*server.MCPServer, *mcpreportportal.Analyti
 
 // runStdioServer starts the ReportPortal MCP server in stdio mode.
 func runStdioServer(ctx context.Context, cmd *cli.Command) error {
+	rpProject := cmd.String("project")
+	if rpProject != "" {
+		// Add project to request context default project name from Environment variable
+		ctx = mcpreportportal.WithProjectInContext(ctx, rpProject)
+	}
 	mcpServer, analytics, err := newMCPServer(cmd)
 	if err != nil {
 		return fmt.Errorf("failed to create ReportPortal MCP server: %w", err)

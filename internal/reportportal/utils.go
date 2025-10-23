@@ -83,22 +83,18 @@ func applyPaginationOptions[T PaginatedRequest[T]](
 		PageSort(pageSort)
 }
 
-func newProjectParameter(defaultProject string) mcp.ToolOption {
-	return mcp.WithString("project", // Parameter for specifying the project name)
-		mcp.Description("Project name"),
-		mcp.DefaultString(defaultProject),
-		mcp.Required(),
-	)
-}
-
 func extractProject(ctx context.Context, rq mcp.CallToolRequest) (string, error) {
-	// First try to get project from context (from HTTP header)
+	// Use project parameter from request
+	if project := strings.TrimSpace(rq.GetString("project", "")); project != "" {
+		return project, nil
+	}
+	// Fallback to project from context (request's HTTP header or environment variable, depends on MCP mode)
 	if project, ok := GetProjectFromContext(ctx); ok {
 		return project, nil
 	}
-
-	project, err := rq.RequireString("project")
-	return strings.TrimSpace(project), err
+	return "", fmt.Errorf(
+		"no project parameter found in request, HTTP header, or environment variable",
+	)
 }
 
 func extractResponseError(err error, rs *http.Response) (errText string) {

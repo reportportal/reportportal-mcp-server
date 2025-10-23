@@ -43,7 +43,7 @@ func TestListLaunchesTool(t *testing.T) {
 	srv := mcptest.NewUnstartedServer(t)
 
 	serverURL, _ := url.Parse(mockServer.URL)
-	launchTools := NewLaunchResources(gorp.NewClient(serverURL, ""), testProject, nil)
+	launchTools := NewLaunchResources(gorp.NewClient(serverURL, ""), nil)
 	srv.AddTool(launchTools.toolGetLaunches())
 
 	err := srv.Start(ctx)

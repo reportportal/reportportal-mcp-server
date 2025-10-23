@@ -40,7 +40,6 @@ type HTTPServerConfig struct {
 	Version         string
 	HostURL         *url.URL
 	FallbackRPToken string
-	DefaultProject  string
 	UserID          string
 	GA4Secret       string
 	AnalyticsOn     bool
@@ -141,7 +140,7 @@ func (hs *HTTPServer) initializeTools() error {
 	rpClient.APIClient.GetConfig().Middleware = QueryParamsMiddleware
 
 	// Add launch management tools with analytics
-	launches := NewLaunchResources(rpClient, hs.config.DefaultProject, hs.analytics)
+	launches := NewLaunchResources(rpClient, hs.analytics)
 
 	hs.mcpServer.AddTool(launches.toolGetLaunches())
 	hs.mcpServer.AddTool(launches.toolGetLastLaunchByName())
@@ -154,7 +153,7 @@ func (hs *HTTPServer) initializeTools() error {
 	hs.mcpServer.AddResourceTemplate(launches.resourceLaunch())
 
 	// Add test item tools
-	testItems := NewTestItemResources(rpClient, hs.config.DefaultProject, hs.analytics)
+	testItems := NewTestItemResources(rpClient, hs.analytics)
 
 	hs.mcpServer.AddTool(testItems.toolGetTestItemById())
 	hs.mcpServer.AddTool(testItems.toolGetTestItemsByFilter())
