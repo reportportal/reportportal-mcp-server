@@ -24,13 +24,14 @@ type TestItemResources struct {
 
 func NewTestItemResources(
 	client *gorp.Client,
-	defaultProject string,
 	analytics *Analytics,
 ) *TestItemResources {
 	return &TestItemResources{
-		client:           client,
-		projectParameter: newProjectParameter(defaultProject),
-		analytics:        analytics,
+		client: client,
+		projectParameter: mcp.WithString("project", // Parameter for specifying the project name)
+			mcp.Description("Project name"),
+		),
+		analytics: analytics,
 	}
 }
 

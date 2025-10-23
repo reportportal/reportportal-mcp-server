@@ -24,13 +24,14 @@ type LaunchResources struct {
 
 func NewLaunchResources(
 	client *gorp.Client,
-	defaultProject string,
 	analytics *Analytics,
 ) *LaunchResources {
 	return &LaunchResources{
-		client:           client,
-		projectParameter: newProjectParameter(defaultProject),
-		analytics:        analytics,
+		client: client,
+		projectParameter: mcp.WithString("project", // Parameter for specifying the project name)
+			mcp.Description("Project name"),
+		),
+		analytics: analytics,
 	}
 }
 

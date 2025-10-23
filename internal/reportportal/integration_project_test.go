@@ -18,31 +18,38 @@ func TestIntegration_ProjectExtractionFlow(t *testing.T) {
 		expectError     bool
 	}{
 		{
-			name:            "HTTP header project takes precedence",
+			name:            "request project takes precedence over HTTP header",
 			httpHeaders:     map[string]string{"X-Project": "http-project"},
 			requestProject:  "request-project",
-			expectedProject: "http-project",
+			expectedProject: "request-project",
 			expectError:     false,
 		},
 		{
-			name:            "fallback to request when no HTTP header",
+			name:            "use request project when no HTTP header",
 			httpHeaders:     map[string]string{},
 			requestProject:  "request-project",
 			expectedProject: "request-project",
 			expectError:     false,
 		},
 		{
-			name:            "fallback to request when empty HTTP header",
+			name:            "use request project when empty HTTP header",
 			httpHeaders:     map[string]string{"X-Project": ""},
 			requestProject:  "request-project",
 			expectedProject: "request-project",
 			expectError:     false,
 		},
 		{
-			name:            "fallback to request when whitespace HTTP header",
+			name:            "use request project when whitespace HTTP header",
 			httpHeaders:     map[string]string{"X-Project": "   "},
 			requestProject:  "request-project",
 			expectedProject: "request-project",
+			expectError:     false,
+		},
+		{
+			name:            "fallback to HTTP header when no request project",
+			httpHeaders:     map[string]string{"X-Project": "http-project"},
+			requestProject:  "",
+			expectedProject: "http-project",
 			expectError:     false,
 		},
 		{
@@ -53,10 +60,17 @@ func TestIntegration_ProjectExtractionFlow(t *testing.T) {
 			expectError:     true,
 		},
 		{
-			name:            "HTTP header with whitespace is trimmed",
+			name:            "HTTP header with whitespace is trimmed when used",
 			httpHeaders:     map[string]string{"X-Project": "  http-project  "},
-			requestProject:  "request-project",
+			requestProject:  "",
 			expectedProject: "http-project",
+			expectError:     false,
+		},
+		{
+			name:            "request project with whitespace is trimmed",
+			httpHeaders:     map[string]string{"X-Project": "http-project"},
+			requestProject:  "  request-project  ",
+			expectedProject: "request-project",
 			expectError:     false,
 		},
 	}
@@ -101,17 +115,19 @@ func TestIntegration_ProjectExtractionFlow(t *testing.T) {
 
 func TestIntegration_CompleteHTTPFlow(t *testing.T) {
 	// Test the complete flow from HTTP request to tool execution
+	// Request parameter should take precedence over HTTP header
 	req := httptest.NewRequest("GET", "/test", nil)
-	req.Header.Set("X-Project", "integration-test-project")
+	req.Header.Set("X-Project", "header-project")
 
 	var capturedProject string
 	var projectFound bool
 
 	// Create a handler that simulates the MCP tool execution
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Simulate MCP tool request
+		// Simulate MCP tool request with explicit project parameter
+		// This should take precedence over the HTTP header
 		mcpRequest := MockCallToolRequest{
-			project: "fallback-project",
+			project: "request-project",
 		}
 
 		// Extract project using our function
@@ -133,8 +149,8 @@ func TestIntegration_CompleteHTTPFlow(t *testing.T) {
 	// Execute request
 	middleware.ServeHTTP(rr, req)
 
-	// Verify results
+	// Verify results - request parameter should win
 	assert.Equal(t, http.StatusOK, rr.Code)
 	assert.True(t, projectFound)
-	assert.Equal(t, "integration-test-project", capturedProject)
+	assert.Equal(t, "request-project", capturedProject)
 }

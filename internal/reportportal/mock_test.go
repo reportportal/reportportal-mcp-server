@@ -59,12 +59,15 @@ func (m MockCallToolRequest) RequireStringSlice(key string) ([]string, error) {
 }
 
 // extractProjectWithMock is a test helper that works with MockCallToolRequest
+// This mimics the actual extractProject function's priority order
 func extractProjectWithMock(ctx context.Context, rq MockCallToolRequest) (string, error) {
-	// First try to get project from context (from HTTP header)
+	// Use project parameter from request (highest priority)
+	if project := strings.TrimSpace(rq.GetString("project", "")); project != "" {
+		return project, nil
+	}
+	// Fallback to project from context (request's HTTP header or environment variable, depends on MCP mode)
 	if project, ok := GetProjectFromContext(ctx); ok {
 		return project, nil
 	}
-
-	project, err := rq.RequireString("project")
-	return strings.TrimSpace(project), err
+	return "", assert.AnError
 }
