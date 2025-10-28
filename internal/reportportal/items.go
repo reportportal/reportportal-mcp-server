@@ -619,3 +619,30 @@ func (lr *TestItemResources) toolGetTestSuitesByFilter() (tool mcp.Tool, handler
 			return readResponseBody(response)
 		})
 }
+
+// toolGetProjectDefectTypes creates a tool to retrieve all defect types for a specific project.
+func (lr *TestItemResources) toolGetProjectDefectTypes() (mcp.Tool, server.ToolHandlerFunc) {
+	return mcp.NewTool(
+			"get_project_defect_types",
+			// Tool metadata
+			mcp.WithDescription(
+				"Get all defect types for a specific project, returns a JSON which contains a list of defect types in the 'configuration/subtypes' array",
+			),
+			lr.projectParameter,
+		), lr.analytics.WithAnalytics("get_project_defect_types", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			project, err := extractProject(ctx, request)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+
+			// Fetch the project with given ID
+			_, response, err := lr.client.ProjectAPI.GetProject(ctx, project).
+				Execute()
+			if err != nil {
+				return mcp.NewToolResultError(extractResponseError(err, response)), nil
+			}
+
+			// Return the serialized project defect types as a text result
+			return readResponseBody(response)
+		})
+}
