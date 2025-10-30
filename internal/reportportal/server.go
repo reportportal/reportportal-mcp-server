@@ -20,7 +20,7 @@ func NewServer(
 	version string,
 	hostUrl *url.URL,
 	token,
-	userID, analyticsAPISecret string,
+	userID, project, analyticsAPISecret string,
 	analyticsOn bool,
 ) (*server.MCPServer, *Analytics, error) {
 	s := server.NewMCPServer(
@@ -47,7 +47,7 @@ func NewServer(
 		}
 	}
 
-	launches := NewLaunchResources(rpClient, analytics)
+	launches := NewLaunchResources(rpClient, analytics, project)
 	s.AddTool(launches.toolGetLaunches())
 	s.AddTool(launches.toolGetLastLaunchByName())
 	s.AddTool(launches.toolForceFinishLaunch())
@@ -57,13 +57,14 @@ func NewServer(
 	s.AddTool(launches.toolRunQualityGate())
 	s.AddResourceTemplate(launches.resourceLaunch())
 
-	testItems := NewTestItemResources(rpClient, analytics)
+	testItems := NewTestItemResources(rpClient, analytics, project)
 	s.AddTool(testItems.toolGetTestItemById())
 	s.AddTool(testItems.toolGetTestItemsByFilter())
 	s.AddTool(testItems.toolGetTestItemLogsByFilter())
 	s.AddTool(testItems.toolGetTestItemAttachment())
 	s.AddTool(testItems.toolGetTestSuitesByFilter())
 	s.AddTool(testItems.toolGetProjectDefectTypes())
+	s.AddTool(testItems.toolUpdateDefectTypeForTestItems())
 	s.AddResourceTemplate(testItems.resourceTestItem())
 
 	prompts, err := readPrompts(promptFiles, "prompts")
