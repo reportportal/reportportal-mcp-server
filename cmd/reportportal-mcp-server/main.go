@@ -59,6 +59,7 @@ func main() {
 			Name:     "project",
 			Required: false,
 			Sources:  cli.EnvVars("RP_PROJECT"),
+			Value:    "",
 			Usage:    "ReportPortal project name",
 		},
 		&cli.StringFlag{
@@ -238,6 +239,7 @@ func newMCPServer(cmd *cli.Command) (*server.MCPServer, *mcpreportportal.Analyti
 	token := cmd.String("token")                           // API token
 	host := cmd.String("rp-host")                          // ReportPortal host URL
 	userID := cmd.String("user-id")                        // Unified user ID for analytics
+	project := cmd.String("project")                       // ReportPortal project name
 	analyticsAPISecret := mcpreportportal.GetAnalyticArg() // Analytics API secret
 	analyticsOff := cmd.Bool("analytics-off")              // Disable analytics flag
 
@@ -252,6 +254,7 @@ func newMCPServer(cmd *cli.Command) (*server.MCPServer, *mcpreportportal.Analyti
 		hostUrl,
 		token,
 		userID,
+		project,
 		analyticsAPISecret,
 		!analyticsOff, // Convert analyticsOff to analyticsOn
 	)

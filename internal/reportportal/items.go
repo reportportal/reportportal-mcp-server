@@ -12,6 +12,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/reportportal/goRP/v5/pkg/gorp"
+	"github.com/reportportal/goRP/v5/pkg/openapi"
 	"github.com/yosida95/uritemplate/v3"
 )
 
@@ -25,11 +26,13 @@ type TestItemResources struct {
 func NewTestItemResources(
 	client *gorp.Client,
 	analytics *Analytics,
+	project string,
 ) *TestItemResources {
 	return &TestItemResources{
 		client: client,
 		projectParameter: mcp.WithString("project", // Parameter for specifying the project name)
 			mcp.Description("Project name"),
+			mcp.DefaultString(project),
 		),
 		analytics: analytics,
 	}
@@ -626,7 +629,8 @@ func (lr *TestItemResources) toolGetProjectDefectTypes() (mcp.Tool, server.ToolH
 			"get_project_defect_types",
 			// Tool metadata
 			mcp.WithDescription(
-				"Get all defect types for a specific project, returns a JSON which contains a list of defect types in the 'configuration/subtypes' array",
+				"Get all defect types for a specific project, returns a JSON which contains a list of defect types in the 'configuration/subtypes' array and represents the defect type ID. "+
+					"Example: {\"NO_DEFECT\": { \"locator\": \"nd001\" }} (where NO_DEFECT is the defect type name, nd001 is the defect type unique id)",
 			),
 			lr.projectParameter,
 		), lr.analytics.WithAnalytics("get_project_defect_types", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -643,6 +647,77 @@ func (lr *TestItemResources) toolGetProjectDefectTypes() (mcp.Tool, server.ToolH
 			}
 
 			// Return the serialized project defect types as a text result
+			return readResponseBody(response)
+		})
+}
+
+// toolUpdateDefectTypeForTestItems creates a tool to update the defect type for a list of specific test items.
+func (lr *TestItemResources) toolUpdateDefectTypeForTestItems() (mcp.Tool, server.ToolHandlerFunc) {
+	return mcp.NewTool(
+			"update_defect_type_for_test_items",
+			// Tool metadata
+			mcp.WithDescription(
+				"This tool is used to update the defect type for a specific test items. "+
+					"The defect type has a unique id which can be received from the tool 'get_project_defect_types'. "+
+					"Example: {\"NO_DEFECT\": { \"locator\": \"nd001\" }} (where NO_DEFECT is the defect type name, nd001 is the defect type unique id)",
+			),
+			lr.projectParameter,
+			mcp.WithArray("test_items_ids", // Parameter for specifying the array of test items IDs
+				mcp.Description("Array of test items IDs"),
+				mcp.Required(),
+			),
+			mcp.WithString(
+				"defect_type_id", // Parameter for specifying the defect type ID
+				mcp.Description(
+					"Defect Type ID, all possible values can be received from the tool 'get_project_defect_types'. "+
+						"Example: {\"NO_DEFECT\": { \"locator\": \"nd001\" }} (where NO_DEFECT is the defect type name, nd001 is the defect type unique id)",
+				),
+				mcp.Required(),
+			),
+		), lr.analytics.WithAnalytics("update_defect_type_for_test_items", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			project, err := extractProject(ctx, request)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+
+			// Extract the "defect_type_id" parameter from the request
+			defectTypeId, err := request.RequireString("defect_type_id")
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			// Extract the "test_items_ids" parameter from the request
+			testItemIdStrs, err := request.RequireStringSlice("test_items_ids")
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+
+			// Build the list of issues
+			issues := make([]openapi.IssueDefinition, 0, len(testItemIdStrs))
+			for _, testItemIdStr := range testItemIdStrs {
+				testItemId, err := strconv.ParseInt(testItemIdStr, 10, 64)
+				if err != nil {
+					return mcp.NewToolResultError(err.Error()), nil
+				}
+				issues = append(issues, openapi.IssueDefinition{
+					TestItemId: testItemId,
+					Issue: openapi.Issue{
+						IssueType: defectTypeId,
+					},
+				})
+			}
+
+			apiRequest := lr.client.TestItemAPI.DefineTestItemIssueType(ctx, project).
+				DefineIssueRQ(openapi.DefineIssueRQ{
+					Issues: issues,
+				})
+
+			// Execute the request
+			_, response, err := apiRequest.Execute()
+			if err != nil {
+				return mcp.NewToolResultError(extractResponseError(err, response)), nil
+			}
+
+			// Return the serialized testItem as a text result
 			return readResponseBody(response)
 		})
 }
