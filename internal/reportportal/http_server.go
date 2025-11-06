@@ -160,6 +160,8 @@ func (hs *HTTPServer) initializeTools() error {
 	hs.mcpServer.AddTool(testItems.toolGetTestItemLogsByFilter())
 	hs.mcpServer.AddTool(testItems.toolGetTestItemAttachment())
 	hs.mcpServer.AddTool(testItems.toolGetTestSuitesByFilter())
+	hs.mcpServer.AddTool(testItems.toolGetProjectDefectTypes())
+	hs.mcpServer.AddTool(testItems.toolUpdateDefectTypeForTestItems())
 
 	hs.mcpServer.AddResourceTemplate(testItems.resourceTestItem())
 
