@@ -95,25 +95,23 @@ func NewHTTPServer(config HTTPServerConfig) (*HTTPServer, error) {
 	httpClient := createHTTPClient(config.ConnectionTimeout)
 
 	// Initialize batch-based analytics
-	// Note: In HTTP mode, FallbackRPToken is intentionally empty (tokens come from HTTP headers).
-	// Analytics requires a token for user ID hashing, so it will be disabled in HTTP mode.
+	// Note: In HTTP mode, FallbackRPToken is always empty (tokens come from HTTP headers).
+	// Analytics uses UserID for identification in HTTP mode.
 	var analytics *Analytics
-	if config.AnalyticsOn && ValidateRPToken(config.FallbackRPToken) && config.GA4Secret != "" {
+	if config.AnalyticsOn && config.GA4Secret != "" {
 		var err error
 		analytics, err = NewAnalytics(
 			config.UserID,
 			config.GA4Secret,
-			config.FallbackRPToken,
+			"", // FallbackRPToken is always empty in HTTP mode
 		)
 		if err != nil {
 			slog.Warn("Failed to initialize analytics", "error", err)
 		} else {
 			slog.Info("HTTP MCP server initialized with batch-based analytics",
 				"has_ga4_secret", config.GA4Secret != "",
-				"has_token", config.FallbackRPToken != "")
+				"uses_user_id", config.UserID != "")
 		}
-	} else if config.AnalyticsOn && config.FallbackRPToken == "" {
-		slog.Info("Analytics disabled in HTTP mode: tokens come from request headers, not fallback token")
 	}
 
 	httpServer := &HTTPServer{

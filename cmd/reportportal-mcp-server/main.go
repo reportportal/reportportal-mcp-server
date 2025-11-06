@@ -50,12 +50,6 @@ func main() {
 			Usage:    "ReportPortal host URL",
 		},
 		&cli.StringFlag{
-			Name:     "token",
-			Required: false, // Optional for HTTP mode (can be passed per-request), required for stdio mode
-			Sources:  cli.EnvVars("RP_API_TOKEN"),
-			Usage:    "API token for authentication (required for stdio mode, optional for http mode)",
-		},
-		&cli.StringFlag{
 			Name:     "project",
 			Required: false,
 			Sources:  cli.EnvVars("RP_PROJECT"),
@@ -74,7 +68,7 @@ func main() {
 			Required: false,
 			Sources:  cli.EnvVars("RP_USER_ID"),
 			Value:    "",
-			Usage:    "Unified user ID for analytics (empty = auto-generate)",
+			Usage:    "Custom user ID for analytics (used for analytics identification)",
 		},
 		&cli.BoolFlag{
 			Name:     "analytics-off",
@@ -82,6 +76,16 @@ func main() {
 			Sources:  cli.EnvVars("RP_MCP_ANALYTICS_OFF"),
 			Usage:    "Disable Google Analytics tracking",
 			Value:    false,
+		},
+	}
+
+	// stdio-specific flags (only included when MCP_MODE is stdio)
+	stdioFlags := []cli.Flag{
+		&cli.StringFlag{
+			Name:     "token",
+			Required: false, // Will be validated as required in runStdioServer
+			Sources:  cli.EnvVars("RP_API_TOKEN"),
+			Usage:    "API token for authentication (required for stdio mode)",
 		},
 	}
 
@@ -122,6 +126,9 @@ func main() {
 	allFlags = append(allFlags, commonFlags...)
 	if mcpMode == "http" {
 		allFlags = append(allFlags, httpFlags...)
+	} else {
+		// stdio mode (default) - add stdio-specific flags
+		allFlags = append(allFlags, stdioFlags...)
 	}
 
 	// Define the CLI command structure
@@ -135,8 +142,13 @@ ENVIRONMENT VARIABLES:
 
 AUTHENTICATION:
    stdio mode: RP_API_TOKEN is REQUIRED (must be set via environment variable or --token flag)
-   http mode:  RP_API_TOKEN is COMPLETELY IGNORED (tokens must be passed per-request via 'Authorization: Bearer <token>' header)
-               Environment variables and command line token arguments are not used in http mode for security reasons`,
+   http mode:  RP_API_TOKEN and --token are COMPLETELY IGNORED
+               Tokens MUST be passed per-request via 'Authorization: Bearer <token>' header
+
+ANALYTICS:
+   stdio mode: RP_API_TOKEN is required for analytics (used for secure user identification)
+   http mode:  Analytics uses RP_USER_ID env var for identification
+               Use --analytics-off or RP_MCP_ANALYTICS_OFF=true to disable analytics`,
 		Flags:  allFlags,
 		Before: initLogger(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
@@ -208,7 +220,8 @@ func handleServerError(err error, analytics *mcpreportportal.Analytics, serverTy
 func buildHTTPServerConfig(cmd *cli.Command) (mcpreportportal.HTTPServerConfig, error) {
 	// Retrieve required parameters from CLI flags
 	host := cmd.String("rp-host")
-	// Note: token is intentionally ignored in HTTP mode - tokens MUST come from HTTP headers only
+	// Note: RP_API_TOKEN and --token flag are not available in HTTP mode
+	// Tokens MUST come from HTTP request headers (Authorization: Bearer <token>)
 	userID := cmd.String("user-id")
 	analyticsAPISecret := mcpreportportal.GetAnalyticArg()
 	analyticsOff := cmd.Bool("analytics-off")
@@ -230,7 +243,7 @@ func buildHTTPServerConfig(cmd *cli.Command) (mcpreportportal.HTTPServerConfig, 
 	return mcpreportportal.HTTPServerConfig{
 		Version:               fmt.Sprintf("%s (%s) %s", version, commit, date),
 		HostURL:               hostUrl,
-		FallbackRPToken:       "", // Always empty in HTTP mode - tokens MUST come from HTTP request headers
+		FallbackRPToken:       "", // Always empty - RP_API_TOKEN is not available in HTTP mode
 		UserID:                userID,
 		GA4Secret:             analyticsAPISecret,
 		AnalyticsOn:           !analyticsOff,
