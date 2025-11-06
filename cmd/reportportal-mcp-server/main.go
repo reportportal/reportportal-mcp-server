@@ -51,9 +51,9 @@ func main() {
 		},
 		&cli.StringFlag{
 			Name:     "token",
-			Required: true,
+			Required: false, // Optional for HTTP mode (can be passed per-request), required for stdio mode
 			Sources:  cli.EnvVars("RP_API_TOKEN"),
-			Usage:    "API token for authentication",
+			Usage:    "API token for authentication (required for stdio mode, optional for http mode)",
 		},
 		&cli.StringFlag{
 			Name:     "project",
@@ -131,7 +131,12 @@ func main() {
 
 ENVIRONMENT VARIABLES:
    MCP_MODE    Server mode: "stdio" (default) or "http"
-               Controls which server type to run and which flags are available`,
+               Controls which server type to run and which flags are available
+
+AUTHENTICATION:
+   stdio mode: RP_API_TOKEN is REQUIRED (must be set via environment variable or --token flag)
+   http mode:  RP_API_TOKEN is COMPLETELY IGNORED (tokens must be passed per-request via 'Authorization: Bearer <token>' header)
+               Environment variables and command line token arguments are not used in http mode for security reasons`,
 		Flags:  allFlags,
 		Before: initLogger(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
@@ -203,7 +208,7 @@ func handleServerError(err error, analytics *mcpreportportal.Analytics, serverTy
 func buildHTTPServerConfig(cmd *cli.Command) (mcpreportportal.HTTPServerConfig, error) {
 	// Retrieve required parameters from CLI flags
 	host := cmd.String("rp-host")
-	token := cmd.String("token")
+	// Note: token is intentionally ignored in HTTP mode - tokens MUST come from HTTP headers only
 	userID := cmd.String("user-id")
 	analyticsAPISecret := mcpreportportal.GetAnalyticArg()
 	analyticsOff := cmd.Bool("analytics-off")
@@ -225,7 +230,7 @@ func buildHTTPServerConfig(cmd *cli.Command) (mcpreportportal.HTTPServerConfig, 
 	return mcpreportportal.HTTPServerConfig{
 		Version:               fmt.Sprintf("%s (%s) %s", version, commit, date),
 		HostURL:               hostUrl,
-		FallbackRPToken:       token,
+		FallbackRPToken:       "", // Always empty in HTTP mode - tokens MUST come from HTTP request headers
 		UserID:                userID,
 		GA4Secret:             analyticsAPISecret,
 		AnalyticsOn:           !analyticsOff,
@@ -266,6 +271,14 @@ func newMCPServer(cmd *cli.Command) (*server.MCPServer, *mcpreportportal.Analyti
 
 // runStdioServer starts the ReportPortal MCP server in stdio mode.
 func runStdioServer(ctx context.Context, cmd *cli.Command) error {
+	// Validate that token is provided for stdio mode (required)
+	token := cmd.String("token")
+	if token == "" {
+		return fmt.Errorf(
+			"RP_API_TOKEN is required for stdio mode (it can be passed via environment variable or --token flag)",
+		)
+	}
+
 	rpProject := cmd.String("project")
 	if rpProject != "" {
 		// Add project to request context default project name from Environment variable

@@ -95,6 +95,8 @@ func NewHTTPServer(config HTTPServerConfig) (*HTTPServer, error) {
 	httpClient := createHTTPClient(config.ConnectionTimeout)
 
 	// Initialize batch-based analytics
+	// Note: In HTTP mode, FallbackRPToken is intentionally empty (tokens come from HTTP headers).
+	// Analytics requires a token for user ID hashing, so it will be disabled in HTTP mode.
 	var analytics *Analytics
 	if config.AnalyticsOn && ValidateRPToken(config.FallbackRPToken) && config.GA4Secret != "" {
 		var err error
@@ -110,6 +112,8 @@ func NewHTTPServer(config HTTPServerConfig) (*HTTPServer, error) {
 				"has_ga4_secret", config.GA4Secret != "",
 				"has_token", config.FallbackRPToken != "")
 		}
+	} else if config.AnalyticsOn && config.FallbackRPToken == "" {
+		slog.Info("Analytics disabled in HTTP mode: tokens come from request headers, not fallback token")
 	}
 
 	httpServer := &HTTPServer{
@@ -132,7 +136,8 @@ func NewHTTPServer(config HTTPServerConfig) (*HTTPServer, error) {
 
 // initializeTools sets up all MCP tools
 func (hs *HTTPServer) initializeTools() error {
-	// Create ReportPortal client with HTTP client
+	// Create ReportPortal client with empty token in HTTP mode
+	// The actual token will be injected per-request via QueryParamsMiddleware from HTTP headers
 	rpClient := gorp.NewClient(hs.config.HostURL, hs.config.FallbackRPToken)
 
 	// Use HTTP client
