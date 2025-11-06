@@ -256,30 +256,47 @@ This creates an executable called `reportportal-mcp-server`.
 
 The server needs to know where your ReportPortal is and how to authenticate. Set these environment variables in your shell:
 
+**For stdio mode (default):**
+
 | Variable | Description | Required |
 |----------|-------------|----------|
 | `RP_HOST` | The URL of your ReportPortal (e.g. https://myreportportal.example.com) | Yes |
 | `RP_PROJECT` | Your default project name in ReportPortal | Optional |
 | `RP_API_TOKEN` | Your ReportPortal API token (for access) | Yes |
-| `MCP_PORT` | Port for the MCP server | `4389` |
 
-For example:
+**For HTTP mode:**
+
+Set `MCP_MODE=http` and configure the following:
+- `RP_HOST`: Required - The URL of your ReportPortal
+- `RP_PROJECT`: Optional - Your default project name
+- `MCP_SERVER_PORT`: Optional - HTTP server port (default: 8080)
+- `MCP_SERVER_HOST`: Optional - HTTP bind host (default: empty)
+- Authentication tokens must be passed per-request via `Authorization: Bearer <token>` header
+- `RP_API_TOKEN` environment variable is **not used** in HTTP mode
+
+**Example for stdio mode:**
 
 ```bash
 export RP_HOST="https://your-reportportal-instance.com"
 export RP_PROJECT="YourProjectInReportPortal"
 export RP_API_TOKEN="your-api-token"
+./reportportal-mcp-server
+```
+
+**Example for HTTP mode:**
+
+```bash
+export MCP_MODE=http
+export RP_HOST="https://your-reportportal-instance.com"
+export RP_PROJECT="YourProjectInReportPortal"
+export MCP_SERVER_PORT=8080
+./reportportal-mcp-server
+# Tokens are passed per-request via HTTP Authorization header
 ```
 
 ### Starting the Server
 
-After configuring the env vars as above, simply run:
-
-```bash
-./reportportal-mcp-server
-```
-
-This will start the MCP server on the configured port.
+The server will start in the mode specified by `MCP_MODE` environment variable (default: stdio).
 
 Once running, the MCP server is ready to accept queries from your AI tool.
 
