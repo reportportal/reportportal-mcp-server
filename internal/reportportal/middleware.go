@@ -3,7 +3,8 @@ package mcpreportportal
 import "net/http"
 
 func QueryParamsMiddleware(rq *http.Request) {
-	// Prefer context token over fallback by adding Authorization from context
+	// In HTTP mode, inject the token from request context (extracted from HTTP headers)
+	// If no token exists in context, the request will proceed without authentication
 	if token, ok := GetTokenFromContext(rq.Context()); ok && token != "" {
 		rq.Header.Set("Authorization", "Bearer "+token)
 	}
