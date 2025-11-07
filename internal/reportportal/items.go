@@ -623,6 +623,35 @@ func (lr *TestItemResources) toolGetTestSuitesByFilter() (tool mcp.Tool, handler
 		})
 }
 
+// getDefectTypesFromJson extracts defect types from the project JSON response.
+// It parses the raw JSON and returns the configuration/subTypes field as a JSON string.
+func getDefectTypesFromJson(rawBody []byte) (string, error) {
+	// Parse the JSON response
+	var projectData map[string]interface{}
+	if err := json.Unmarshal(rawBody, &projectData); err != nil {
+		return "", fmt.Errorf("failed to parse response JSON: %v", err)
+	}
+
+	// Extract configuration/subtypes
+	configuration, ok := projectData["configuration"].(map[string]interface{})
+	if !ok {
+		return "", fmt.Errorf("configuration field not found or invalid in response")
+	}
+
+	subtypes, ok := configuration["subTypes"]
+	if !ok {
+		return "", fmt.Errorf("configuration/subTypes field not found in response")
+	}
+
+	// Serialize only the subtypes
+	subtypesJSON, err := json.Marshal(subtypes)
+	if err != nil {
+		return "", fmt.Errorf("failed to serialize defect types: %v", err)
+	}
+
+	return string(subtypesJSON), nil
+}
+
 // toolGetProjectDefectTypes creates a tool to retrieve all defect types for a specific project.
 func (lr *TestItemResources) toolGetProjectDefectTypes() (mcp.Tool, server.ToolHandlerFunc) {
 	return mcp.NewTool(
@@ -646,8 +675,22 @@ func (lr *TestItemResources) toolGetProjectDefectTypes() (mcp.Tool, server.ToolH
 				return mcp.NewToolResultError(extractResponseError(err, response)), nil
 			}
 
-			// Return the serialized project defect types as a text result
-			return readResponseBody(response)
+			// Read and parse the response to extract configuration/subtypes
+			rawBody, err := readResponseBodyRaw(response)
+			if err != nil {
+				return mcp.NewToolResultError(
+					fmt.Sprintf("failed to read response body: %v", err),
+				), nil
+			}
+
+			// Extract defect types from JSON
+			defectTypesJSON, err := getDefectTypesFromJson(rawBody)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+
+			// Return only the defect types data
+			return mcp.NewToolResultText(defectTypesJSON), nil
 		})
 }
 
