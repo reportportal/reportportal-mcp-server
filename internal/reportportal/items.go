@@ -717,6 +717,12 @@ func (lr *TestItemResources) toolUpdateDefectTypeForTestItems() (mcp.Tool, serve
 				),
 				mcp.Required(),
 			),
+			mcp.WithString(
+				"defect_type_comment", // Parameter for specifying the defect type comment
+				mcp.Description(
+					"The defect type comment provides a detailed description of the root cause of the test failure",
+				),
+			),
 		), lr.analytics.WithAnalytics("update_defect_type_for_test_items", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			project, err := extractProject(ctx, request)
 			if err != nil {
@@ -734,8 +740,13 @@ func (lr *TestItemResources) toolUpdateDefectTypeForTestItems() (mcp.Tool, serve
 				return mcp.NewToolResultError(err.Error()), nil
 			}
 
+			defectTypeComment := request.GetString("defect_type_comment", "")
 			// Build the list of issues
 			issues := make([]openapi.IssueDefinition, 0, len(testItemIdStrs))
+			var commentPtr *string
+			if defectTypeComment != "" {
+				commentPtr = &defectTypeComment
+			}
 			for _, testItemIdStr := range testItemIdStrs {
 				testItemId, err := strconv.ParseInt(testItemIdStr, 10, 64)
 				if err != nil {
@@ -744,7 +755,9 @@ func (lr *TestItemResources) toolUpdateDefectTypeForTestItems() (mcp.Tool, serve
 				issues = append(issues, openapi.IssueDefinition{
 					TestItemId: testItemId,
 					Issue: openapi.Issue{
-						IssueType: defectTypeId,
+						IssueType:    defectTypeId,
+						AutoAnalyzed: openapi.PtrBool(false),
+						Comment:      commentPtr,
 					},
 				})
 			}
