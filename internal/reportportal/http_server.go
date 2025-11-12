@@ -267,16 +267,56 @@ type HTTPServerInfo struct {
 	Analytics             AnalyticsInfo `json:"analytics"`
 }
 
+// corsMiddleware handles CORS headers for SSE streams and API requests
+// Exposes mcp-session-id header so clients can access it
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Set CORS headers
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().
+			Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept, mcp-session-id")
+		w.Header().Set("Access-Control-Expose-Headers", "mcp-session-id")
+		w.Header().Set("Access-Control-Max-Age", "86400") // 24 hours
+
+		// Handle preflight OPTIONS requests
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+// conditionalTimeoutMiddleware applies timeout only to non-SSE requests
+// SSE streams need long-lived connections without request timeout
+func (hs *HTTPServer) conditionalTimeoutMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Skip timeout for SSE stream requests (they need long-lived connections)
+		if hs.isSSEStreamRequest(r) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		// Apply timeout for regular requests
+		middleware.Timeout(hs.config.ConnectionTimeout)(next).ServeHTTP(w, r)
+	})
+}
+
 // setupChiRouter creates and configures the Chi router with all routes and middleware
 func (hs *HTTPServer) setupChiRouter() {
 	r := chi.NewRouter()
+
+	// Add CORS middleware first to ensure it applies to all routes
+	r.Use(corsMiddleware)
 
 	// Add Chi middleware
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
-	r.Use(middleware.Timeout(hs.config.ConnectionTimeout))
+	// Use conditional timeout that skips SSE streams
+	r.Use(hs.conditionalTimeoutMiddleware)
 
 	// Add HTTP concurrency control
 	r.Use(middleware.Throttle(hs.config.MaxConcurrentRequests))
@@ -433,13 +473,39 @@ func (hs *HTTPServer) rootHandler(w http.ResponseWriter, r *http.Request) {
 // mcpMiddleware is middleware specifically for MCP requests
 func (hs *HTTPServer) mcpMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Validate that this is a proper MCP request
-		if !hs.isMCPRequest(r) {
+		// Allow SSE stream requests (GET with Accept: text/event-stream)
+		// and regular MCP JSON-RPC requests (POST with application/json)
+		if !hs.isMCPRequest(r) && !hs.isSSEStreamRequest(r) {
 			http.Error(w, "Invalid MCP request", http.StatusBadRequest)
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// isSSEStreamRequest checks if this is an SSE stream request
+func (hs *HTTPServer) isSSEStreamRequest(r *http.Request) bool {
+	// SSE streams use GET requests with Accept: text/event-stream
+	if r.Method != "GET" {
+		return false
+	}
+
+	accept := r.Header.Get("Accept")
+	// HTTP content negotiation tokens are case-insensitive (RFC 7231)
+	// Split on commas and check each value case-insensitively
+	acceptValues := strings.Split(accept, ",")
+	for _, value := range acceptValues {
+		// Trim whitespace and check case-insensitively
+		trimmed := strings.TrimSpace(value)
+		// Handle media type parameters (e.g., "text/event-stream; charset=utf-8")
+		if idx := strings.Index(trimmed, ";"); idx != -1 {
+			trimmed = trimmed[:idx]
+		}
+		if strings.EqualFold(strings.TrimSpace(trimmed), "text/event-stream") {
+			return true
+		}
+	}
+	return false
 }
 
 // isMCPRequest determines if a request should be handled by MCP server
@@ -451,7 +517,10 @@ func (hs *HTTPServer) isMCPRequest(r *http.Request) bool {
 	}
 
 	contentType := r.Header.Get("Content-Type")
-	if !strings.Contains(contentType, "application/json") {
+	if idx := strings.Index(contentType, ";"); idx != -1 {
+		contentType = contentType[:idx]
+	}
+	if !strings.EqualFold(strings.TrimSpace(contentType), "application/json") {
 		return false
 	}
 

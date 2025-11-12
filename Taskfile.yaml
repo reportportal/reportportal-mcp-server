@@ -15,7 +15,7 @@ vars:
   IMAGE_NAME: "reportportal-mcp-server"
   IMAGE_NAME_DEBUG: "reportportal-mcp-server-debug"
   INSPECTOR: "npx @modelcontextprotocol/inspector"
-  DLV_PORT: "52202"
+  DLV_PORT: '{{.DLV_PORT | default "52202"}}'
   MCP_MODE: '{{.MCP_MODE | default "stdio"}}'
   MCP_SERVER_PORT: '{{.MCP_SERVER_PORT | default "8080"}}'
   MCP_SERVER_HOST: '{{.MCP_SERVER_HOST | default ""}}'
@@ -54,6 +54,27 @@ tasks:
       CGO_ENABLED: 0
     cmd: |
       go build -o bin/reportportal-mcp-server cmd/reportportal-mcp-server/main.go
+
+  app:build-debug:
+    desc: "Builds application with debug symbols for debugging"
+    env:
+      CGO_ENABLED: 0
+    cmd: |
+      go build -gcflags "all=-N -l" -o bin/reportportal-mcp-server-debug cmd/reportportal-mcp-server/main.go
+
+  debug:stop:
+    desc: "Stops any running debug processes on port {{.DLV_PORT}}"
+    cmd: powershell -Command '$conns = Get-NetTCPConnection -LocalPort {{.DLV_PORT}} -ErrorAction SilentlyContinue; if ($conns) { $conns | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }; Write-Host "Stopped processes on port {{.DLV_PORT}}" } else { Write-Host "No process found on port {{.DLV_PORT}}" }'
+
+  debug:
+    desc: "Runs the MCP server locally in debug mode with Delve ({{.MCP_MODE}}). Debugger listens on port {{.DLV_PORT}}. Use DLV_PORT env var to change port."
+    deps: [app:build-debug]
+    cmd: >
+      {{if eq .MCP_MODE "http"}}
+      powershell -Command '$env:PATH += ";$env:USERPROFILE\go\bin"; $dlvPath = if (Get-Command dlv -ErrorAction SilentlyContinue) { "dlv" } else { "$env:USERPROFILE\go\bin\dlv.exe" }; & $dlvPath exec --headless --listen=:{{.DLV_PORT}} --api-version=2 --accept-multiclient -- bin/reportportal-mcp-server-debug --rp-host="$env:RP_HOST" --project="$env:RP_PROJECT" --port={{.MCP_SERVER_PORT}} {{if .MCP_SERVER_HOST}}--host={{.MCP_SERVER_HOST}}{{end}} --log-level=debug'
+      {{else}}
+      powershell -Command '$env:PATH += ";$env:USERPROFILE\go\bin"; $dlvPath = if (Get-Command dlv -ErrorAction SilentlyContinue) { "dlv" } else { "$env:USERPROFILE\go\bin\dlv.exe" }; & $dlvPath exec --headless --listen=:{{.DLV_PORT}} --api-version=2 --accept-multiclient -- bin/reportportal-mcp-server-debug --rp-host="$env:RP_HOST" --project="$env:RP_PROJECT" --token="$env:RP_API_TOKEN" --log-level=debug'
+      {{end}}
 
   docker:build:
     deps: [ app:build ]
