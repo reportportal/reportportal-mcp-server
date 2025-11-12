@@ -1,5 +1,6 @@
 .idea/
 bin/
 .env
+.vscode/
 junit-report.xml
 dist/
