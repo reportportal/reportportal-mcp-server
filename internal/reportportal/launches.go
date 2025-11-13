@@ -283,7 +283,7 @@ func (lr *LaunchResources) toolRunAutoAnalysis() (mcp.Tool, server.ToolHandlerFu
 			),
 			mcp.WithString(
 				"analyzer_mode",
-				mcp.Description("Analyzer mode"),
+				mcp.Description("Analyzer mode, only one of the values is allowed"),
 				mcp.Enum(
 					"all",
 					"launch_name",
@@ -295,15 +295,19 @@ func (lr *LaunchResources) toolRunAutoAnalysis() (mcp.Tool, server.ToolHandlerFu
 				mcp.Required(),
 			),
 			mcp.WithString("analyzer_type",
-				mcp.Description("Analyzer type"),
+				mcp.Description("Analyzer type, only one of the values is allowed"),
 				mcp.Enum("autoAnalyzer", "patternAnalyzer"),
 				mcp.DefaultString("autoAnalyzer"),
 				mcp.Required(),
 			),
-			mcp.WithArray("analyzer_item_modes",
-				mcp.Description("Analyzer item modes"),
-				mcp.Enum("to_investigate", "auto_analyzed", "manually_analyzed"),
-				mcp.DefaultArray([]string{"to_investigate"}),
+			mcp.WithArray(
+				"analyzer_item_modes",
+				mcp.Description("Analyze items modes, one or more of the values are allowed"),
+				mcp.WithStringEnumItems(
+					[]string{"to_investigate", "auto_analyzed", "manually_analyzed"},
+				),
+				mcp.DefaultString("to_investigate"),
+				mcp.Required(),
 			),
 		), lr.analytics.WithAnalytics("run_auto_analysis", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			project, err := extractProject(ctx, request)
