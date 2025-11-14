@@ -294,6 +294,69 @@ export MCP_SERVER_PORT=8080
 # Tokens are passed per-request via HTTP Authorization header
 ```
 
+### HTTP API Endpoints
+
+When running in HTTP mode (`MCP_MODE=http`), the server exposes the following endpoints:
+
+#### MCP Endpoints (for tool calls and MCP protocol)
+
+- **`POST /mcp`** - Main MCP endpoint for JSON-RPC requests
+- **`POST /api/mcp`** - Alternative MCP endpoint (same functionality)
+- **`GET /mcp`** - SSE (Server-Sent Events) stream endpoint for MCP protocol
+- **`GET /api/mcp`** - Alternative SSE stream endpoint
+
+**Important:** POST requests must be sent to `/mcp` or `/api/mcp`, not to the root endpoint `/`.
+
+**Request Format:**
+
+All MCP requests must follow the JSON-RPC 2.0 specification:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "tools/call",
+  "id": 1,
+  "params": {
+    "name": "get_launches",
+    "arguments": {
+      "filter-cnt-name": "test",
+      "page": 1,
+      "page-size": 10
+    }
+  }
+}
+```
+
+**Example Request:**
+
+```bash
+curl -X POST http://localhost:8080/mcp \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer your-reportportal-token" \
+  -d '{
+    "jsonrpc": "2.0",
+    "method": "tools/call",
+    "id": 1,
+    "params": {
+      "name": "get_launches",
+      "arguments": {
+        "page": 1,
+        "page-size": 10
+      }
+    }
+  }'
+```
+
+#### Information Endpoints (GET only)
+
+- **`GET /`** - Root endpoint, returns server information and available endpoints
+- **`GET /health`** - Health check endpoint
+- **`GET /info`** - Server information and configuration
+- **`GET /api/status`** - Server status (same as `/info`)
+- **`GET /metrics`** - Analytics metrics (if analytics enabled)
+
+**Note:** The root endpoint `/` only accepts GET requests. POST requests to `/` will return a 404 error. Use `/mcp` or `/api/mcp` for MCP protocol requests.
+
 ### Starting the Server
 
 The server will start in the mode specified by `MCP_MODE` environment variable (default: stdio).
