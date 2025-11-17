@@ -19,8 +19,8 @@ var promptFiles embed.FS
 func NewServer(
 	version string,
 	hostUrl *url.URL,
-	token, defaultProject string,
-	userID, analyticsAPISecret string,
+	token,
+	userID, project, analyticsAPISecret string,
 	analyticsOn bool,
 ) (*server.MCPServer, *Analytics, error) {
 	s := server.NewMCPServer(
@@ -40,13 +40,14 @@ func NewServer(
 	var analytics *Analytics
 	if analyticsOn {
 		var err error
-		analytics, err = NewAnalytics(userID, analyticsAPISecret)
+		// Pass RP API token for secure hashing as user identifier
+		analytics, err = NewAnalytics(userID, analyticsAPISecret, token)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to initialize analytics: %w", err)
 		}
 	}
 
-	launches := NewLaunchResources(rpClient, defaultProject, analytics)
+	launches := NewLaunchResources(rpClient, analytics, project)
 	s.AddTool(launches.toolGetLaunches())
 	s.AddTool(launches.toolGetLastLaunchByName())
 	s.AddTool(launches.toolForceFinishLaunch())
@@ -56,12 +57,14 @@ func NewServer(
 	s.AddTool(launches.toolRunQualityGate())
 	s.AddResourceTemplate(launches.resourceLaunch())
 
-	testItems := NewTestItemResources(rpClient, defaultProject, analytics)
+	testItems := NewTestItemResources(rpClient, analytics, project)
 	s.AddTool(testItems.toolGetTestItemById())
 	s.AddTool(testItems.toolGetTestItemsByFilter())
 	s.AddTool(testItems.toolGetTestItemLogsByFilter())
 	s.AddTool(testItems.toolGetTestItemAttachment())
 	s.AddTool(testItems.toolGetTestSuitesByFilter())
+	s.AddTool(testItems.toolGetProjectDefectTypes())
+	s.AddTool(testItems.toolUpdateDefectTypeForTestItems())
 	s.AddResourceTemplate(testItems.resourceTestItem())
 
 	prompts, err := readPrompts(promptFiles, "prompts")

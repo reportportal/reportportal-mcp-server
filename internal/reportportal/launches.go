@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"log/slog"
 	"net/url"
 	"strconv"
 	"strings"
@@ -26,13 +24,16 @@ type LaunchResources struct {
 
 func NewLaunchResources(
 	client *gorp.Client,
-	defaultProject string,
 	analytics *Analytics,
+	project string,
 ) *LaunchResources {
 	return &LaunchResources{
-		client:           client,
-		projectParameter: newProjectParameter(defaultProject),
-		analytics:        analytics,
+		client: client,
+		projectParameter: mcp.WithString("project", // Parameter for specifying the project name)
+			mcp.Description("Project name"),
+			mcp.DefaultString(project),
+		),
+		analytics: analytics,
 	}
 }
 
@@ -93,7 +94,7 @@ func (lr *LaunchResources) toolGetLaunches() (tool mcp.Tool, handler server.Tool
 	return mcp.NewTool(
 			"get_launches",
 			options...), lr.analytics.WithAnalytics("get_launches", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			project, err := extractProject(request)
+			project, err := extractProject(ctx, request)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
@@ -149,18 +150,7 @@ func (lr *LaunchResources) toolGetLaunches() (tool mcp.Tool, handler server.Tool
 				return mcp.NewToolResultError(extractResponseError(err, response)), nil
 			}
 
-			defer func() {
-				if closeErr := response.Body.Close(); closeErr != nil {
-					slog.Error("failed to close response body", "error", closeErr)
-				}
-			}()
-			rawBody, err := io.ReadAll(response.Body)
-			if err != nil {
-				return mcp.NewToolResultError(
-					fmt.Sprintf("failed to read response body: %v", err),
-				), nil
-			}
-			return mcp.NewToolResultText(string(rawBody)), nil
+			return readResponseBody(response)
 		})
 }
 
@@ -173,7 +163,7 @@ func (lr *LaunchResources) toolRunQualityGate() (tool mcp.Tool, handler server.T
 				mcp.Description("Launch ID"),
 			),
 		), lr.analytics.WithAnalytics("run_quality_gate", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			project, err := extractProject(request)
+			project, err := extractProject(ctx, request)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
@@ -182,22 +172,18 @@ func (lr *LaunchResources) toolRunQualityGate() (tool mcp.Tool, handler server.T
 				return mcp.NewToolResultError(err.Error()), nil
 			}
 
-			_, rs, err := lr.client.PluginAPI.ExecutePluginCommand(ctx, "startQualityGate", "quality gate", project).
+			_, response, err := lr.client.PluginAPI.ExecutePluginCommand(ctx, "startQualityGate", "quality gate", project).
 				RequestBody(map[string]interface{}{
 					"async":    false, // Run the quality gate synchronously
 					"launchId": launchID,
 				}).
 				Execute()
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return mcp.NewToolResultError(extractResponseError(err, response)), nil
 			}
 
-			// we don't do any special handling of the response, just return it as text
-			resBytes, err := io.ReadAll(rs.Body)
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			return mcp.NewToolResultText(string(resBytes)), nil
+			// Handle response body and return it as a text result
+			return readResponseBody(response)
 		})
 }
 
@@ -211,7 +197,7 @@ func (lr *LaunchResources) toolGetLastLaunchByName() (mcp.Tool, server.ToolHandl
 				mcp.Description("Launch name"),
 			),
 		), lr.analytics.WithAnalytics("get_last_launch_by_name", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			project, err := extractProject(request)
+			project, err := extractProject(ctx, request)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
@@ -265,7 +251,7 @@ func (lr *LaunchResources) toolDeleteLaunch() (mcp.Tool, server.ToolHandlerFunc)
 				mcp.Description("Launch ID"),
 			),
 		), lr.analytics.WithAnalytics("launch_delete", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			project, err := extractProject(request)
+			project, err := extractProject(ctx, request)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
@@ -297,7 +283,7 @@ func (lr *LaunchResources) toolRunAutoAnalysis() (mcp.Tool, server.ToolHandlerFu
 			),
 			mcp.WithString(
 				"analyzer_mode",
-				mcp.Description("Analyzer mode"),
+				mcp.Description("Analyzer mode, only one of the values is allowed"),
 				mcp.Enum(
 					"all",
 					"launch_name",
@@ -309,18 +295,22 @@ func (lr *LaunchResources) toolRunAutoAnalysis() (mcp.Tool, server.ToolHandlerFu
 				mcp.Required(),
 			),
 			mcp.WithString("analyzer_type",
-				mcp.Description("Analyzer type"),
+				mcp.Description("Analyzer type, only one of the values is allowed"),
 				mcp.Enum("autoAnalyzer", "patternAnalyzer"),
 				mcp.DefaultString("autoAnalyzer"),
 				mcp.Required(),
 			),
-			mcp.WithArray("analyzer_item_modes",
-				mcp.Description("Analyzer item modes"),
-				mcp.Enum("to_investigate", "auto_analyzed", "manually_analyzed"),
-				mcp.DefaultArray([]string{"to_investigate"}),
+			mcp.WithArray(
+				"analyzer_item_modes",
+				mcp.Description("Analyze items modes, one or more of the values are allowed"),
+				mcp.WithStringEnumItems(
+					[]string{"to_investigate", "auto_analyzed", "manually_analyzed"},
+				),
+				mcp.DefaultString("to_investigate"),
+				mcp.Required(),
 			),
 		), lr.analytics.WithAnalytics("run_auto_analysis", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			project, err := extractProject(request)
+			project, err := extractProject(ctx, request)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
@@ -378,7 +368,7 @@ func (lr *LaunchResources) toolUniqueErrorAnalysis() (mcp.Tool, server.ToolHandl
 				mcp.DefaultBool(false),
 			),
 		), lr.analytics.WithAnalytics("run_unique_error_analysis", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			project, err := extractProject(request)
+			project, err := extractProject(ctx, request)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
@@ -417,7 +407,7 @@ func (lr *LaunchResources) toolForceFinishLaunch() (mcp.Tool, server.ToolHandler
 				mcp.Description("Launch ID"),
 			),
 		), lr.analytics.WithAnalytics("launch_force_finish", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			project, err := extractProject(request)
+			project, err := extractProject(ctx, request)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}

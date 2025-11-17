@@ -1,8 +1,10 @@
 package mcpreportportal
 
 import (
+	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"net/http"
 	"strconv"
@@ -81,26 +83,35 @@ func applyPaginationOptions[T PaginatedRequest[T]](
 		PageSort(pageSort)
 }
 
-func newProjectParameter(defaultProject string) mcp.ToolOption {
-	return mcp.WithString("project", // Parameter for specifying the project name)
-		mcp.Description("Project name"),
-		mcp.DefaultString(defaultProject),
-		mcp.Required(),
+func extractProject(ctx context.Context, rq mcp.CallToolRequest) (string, error) {
+	// Use project parameter from request
+	if project := strings.TrimSpace(rq.GetString("project", "")); project != "" {
+		return project, nil
+	}
+	// Fallback to project from context (request's HTTP header or environment variable, depends on MCP mode)
+	if project, ok := GetProjectFromContext(ctx); ok {
+		return project, nil
+	}
+	return "", fmt.Errorf(
+		"no project parameter found in request, HTTP header, or environment variable",
 	)
-}
-
-func extractProject(rq mcp.CallToolRequest) (string, error) {
-	return rq.RequireString("project")
 }
 
 func extractResponseError(err error, rs *http.Response) (errText string) {
 	errText = err.Error()
 	if rs != nil && rs.Body != nil {
+		// Check if the original error indicates the body is already closed
+		if isAlreadyClosedError(err) {
+			// Don't attempt to read from an already-closed body
+			return errText + " (response body already processed)"
+		}
+
 		defer func() {
 			if closeErr := rs.Body.Close(); closeErr != nil {
-				// Log the close error or handle it appropriately
-				// You can add logging here if needed
-				errText = errText + " (body close error: " + closeErr.Error() + ")"
+				// Only log close errors if it's not an already-closed body
+				if !isAlreadyClosedError(closeErr) {
+					errText = errText + " (body close error: " + closeErr.Error() + ")"
+				}
 			}
 		}()
 
@@ -223,4 +234,59 @@ func isTextContent(mediaType string) bool {
 	}
 
 	return false
+}
+
+// isAlreadyClosedError checks if the error indicates that the response body is already closed.
+// This helps avoid unnecessary error logging when closing an already-closed body.
+func isAlreadyClosedError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	errStr := err.Error()
+	// Common error messages for already-closed bodies across different HTTP implementations
+	return strings.Contains(errStr, "use of closed network connection") ||
+		strings.Contains(errStr, "http: read on closed response body") ||
+		strings.Contains(errStr, "already closed") ||
+		strings.Contains(errStr, "connection closed")
+}
+
+// readResponseBodyRaw safely reads an HTTP response body and ensures proper cleanup.
+// It returns the raw body bytes along with any error, suitable for custom content type handling.
+func readResponseBodyRaw(response *http.Response) ([]byte, error) {
+	// Ensure response body is always closed
+	if response == nil || response.Body == nil {
+		return nil, fmt.Errorf("empty HTTP response body")
+	}
+	defer func() {
+		if closeErr := response.Body.Close(); closeErr != nil {
+			// Only log if it's not a "already closed" type error
+			// Some HTTP implementations return specific errors for already-closed bodies
+			if !isAlreadyClosedError(closeErr) {
+				slog.Error("failed to close response body", "error", closeErr)
+			}
+		}
+	}()
+
+	// Read the response body
+	rawBody, err := io.ReadAll(response.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %v", err)
+	}
+
+	return rawBody, nil
+}
+
+// readResponseBody safely reads an HTTP response body and ensures proper cleanup.
+// It handles the defer close pattern with graceful error handling and returns an MCP tool result.
+// This is a convenience wrapper around readResponseBodyRaw for MCP tool results.
+func readResponseBody(response *http.Response) (*mcp.CallToolResult, error) {
+	rawBody, err := readResponseBodyRaw(response)
+	if err != nil {
+		return mcp.NewToolResultError(
+			fmt.Sprintf("failed to read response body: %v", err),
+		), nil
+	}
+
+	return mcp.NewToolResultText(string(rawBody)), nil
 }

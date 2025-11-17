@@ -2,9 +2,9 @@ package mcpreportportal
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/url"
 	"strconv"
@@ -12,6 +12,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/reportportal/goRP/v5/pkg/gorp"
+	"github.com/reportportal/goRP/v5/pkg/openapi"
 	"github.com/yosida95/uritemplate/v3"
 )
 
@@ -24,13 +25,16 @@ type TestItemResources struct {
 
 func NewTestItemResources(
 	client *gorp.Client,
-	defaultProject string,
 	analytics *Analytics,
+	project string,
 ) *TestItemResources {
 	return &TestItemResources{
-		client:           client,
-		projectParameter: newProjectParameter(defaultProject),
-		analytics:        analytics,
+		client: client,
+		projectParameter: mcp.WithString("project", // Parameter for specifying the project name)
+			mcp.Description("Project name"),
+			mcp.DefaultString(project),
+		),
+		analytics: analytics,
 	}
 }
 
@@ -119,7 +123,7 @@ func (lr *TestItemResources) toolGetTestItemsByFilter() (tool mcp.Tool, handler 
 			"get_test_items_by_filter",
 			options...), lr.analytics.WithAnalytics("get_test_items_by_filter", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			slog.Debug("START PROCESSING")
-			project, err := extractProject(request)
+			project, err := extractProject(ctx, request)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
@@ -218,21 +222,13 @@ func (lr *TestItemResources) toolGetTestItemsByFilter() (tool mcp.Tool, handler 
 			}
 
 			// Execute the request
-			items, rs, err := apiRequest.Execute()
+			_, response, err := apiRequest.Execute()
 			if err != nil {
-				return mcp.NewToolResultError(extractResponseError(err, rs)), nil
-			}
-
-			// Serialize the launches into JSON format
-			r, err := json.Marshal(items)
-			if err != nil {
-				return mcp.NewToolResultError(
-					fmt.Sprintf("failed to marshal response: %v", err),
-				), nil
+				return mcp.NewToolResultError(extractResponseError(err, response)), nil
 			}
 
 			// Return the serialized launches as a text result
-			return mcp.NewToolResultText(string(r)), nil
+			return readResponseBody(response)
 		})
 }
 
@@ -246,7 +242,7 @@ func (lr *TestItemResources) toolGetTestItemById() (mcp.Tool, server.ToolHandler
 				mcp.Description("Test Item ID"),
 			),
 		), lr.analytics.WithAnalytics("get_test_item_by_id", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			project, err := extractProject(request)
+			project, err := extractProject(ctx, request)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
@@ -257,22 +253,14 @@ func (lr *TestItemResources) toolGetTestItemById() (mcp.Tool, server.ToolHandler
 			}
 
 			// Fetch the testItem with given ID
-			testItem, _, err := lr.client.TestItemAPI.GetTestItem(ctx, testItemID, project).
+			_, response, err := lr.client.TestItemAPI.GetTestItem(ctx, testItemID, project).
 				Execute()
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-
-			// Serialize the first testItem in the result into JSON format
-			r, err := json.Marshal(testItem)
-			if err != nil {
-				return mcp.NewToolResultError(
-					fmt.Sprintf("failed to marshal response: %v", err),
-				), nil
+				return mcp.NewToolResultError(extractResponseError(err, response)), nil
 			}
 
 			// Return the serialized testItem as a text result
-			return mcp.NewToolResultText(string(r)), nil
+			return readResponseBody(response)
 		})
 }
 
@@ -325,7 +313,7 @@ func (lr *TestItemResources) toolGetTestItemAttachment() (mcp.Tool, server.ToolH
 				mcp.Description("Attachment binary content ID"),
 			),
 		), lr.analytics.WithAnalytics("get_test_item_attachment_by_id", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			project, err := extractProject(request)
+			project, err := extractProject(ctx, request)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
@@ -349,16 +337,10 @@ func (lr *TestItemResources) toolGetTestItemAttachment() (mcp.Tool, server.ToolH
 				return mcp.NewToolResultError(extractResponseError(err, response)), nil
 			}
 
-			defer func() {
-				if closeErr := response.Body.Close(); closeErr != nil {
-					slog.Error("failed to close response body", "error", closeErr)
-				}
-			}()
-			rawBody, err := io.ReadAll(response.Body)
+			// Handle response body with cleanup
+			rawBody, err := readResponseBodyRaw(response)
 			if err != nil {
-				return mcp.NewToolResultError(
-					fmt.Sprintf("failed to read response body: %v", err),
-				), nil
+				return mcp.NewToolResultError(extractResponseError(err, response)), nil
 			}
 
 			contentType := response.Header.Get("Content-Type")
@@ -379,7 +361,7 @@ func (lr *TestItemResources) toolGetTestItemAttachment() (mcp.Tool, server.ToolH
 					mcp.BlobResourceContents{
 						URI:      response.Request.URL.String(),
 						MIMEType: contentType,
-						Blob:     string(rawBody),
+						Blob:     base64.StdEncoding.EncodeToString(rawBody),
 					},
 				), nil
 			}
@@ -436,7 +418,7 @@ func (lr *TestItemResources) toolGetTestItemLogsByFilter() (tool mcp.Tool, handl
 			),
 		), lr.analytics.WithAnalytics("get_test_item_logs_by_filter", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			slog.Debug("START PROCESSING")
-			project, err := extractProject(request)
+			project, err := extractProject(ctx, request)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
@@ -500,18 +482,7 @@ func (lr *TestItemResources) toolGetTestItemLogsByFilter() (tool mcp.Tool, handl
 				return mcp.NewToolResultError(extractResponseError(err, response)), nil
 			}
 
-			defer func() {
-				if closeErr := response.Body.Close(); closeErr != nil {
-					slog.Error("failed to close response body", "error", closeErr)
-				}
-			}()
-			rawBody, err := io.ReadAll(response.Body)
-			if err != nil {
-				return mcp.NewToolResultError(
-					fmt.Sprintf("failed to read response body: %v", err),
-				), nil
-			}
-			return mcp.NewToolResultText(string(rawBody)), nil
+			return readResponseBody(response)
 		})
 }
 
@@ -573,7 +544,7 @@ func (lr *TestItemResources) toolGetTestSuitesByFilter() (tool mcp.Tool, handler
 			"get_test_suites_by_filter",
 			options...), lr.analytics.WithAnalytics("get_test_suites_by_filter", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			slog.Debug("START PROCESSING")
-			project, err := extractProject(request)
+			project, err := extractProject(ctx, request)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
@@ -642,20 +613,167 @@ func (lr *TestItemResources) toolGetTestSuitesByFilter() (tool mcp.Tool, handler
 			}
 
 			// Execute the request
-			items, rs, err := apiRequest.Execute()
+			_, response, err := apiRequest.Execute()
 			if err != nil {
-				return mcp.NewToolResultError(extractResponseError(err, rs)), nil
-			}
-
-			// Serialize the test suites into JSON format
-			r, err := json.Marshal(items)
-			if err != nil {
-				return mcp.NewToolResultError(
-					fmt.Sprintf("failed to marshal response: %v", err),
-				), nil
+				return mcp.NewToolResultError(extractResponseError(err, response)), nil
 			}
 
 			// Return the serialized test suites as a text result
-			return mcp.NewToolResultText(string(r)), nil
+			return readResponseBody(response)
+		})
+}
+
+// getDefectTypesFromJson extracts defect types from the project JSON response.
+// It parses the raw JSON and returns the configuration/subTypes field as a JSON string.
+func getDefectTypesFromJson(rawBody []byte) (string, error) {
+	// Parse the JSON response
+	var projectData map[string]interface{}
+	if err := json.Unmarshal(rawBody, &projectData); err != nil {
+		return "", fmt.Errorf("failed to parse response JSON: %v", err)
+	}
+
+	// Extract configuration/subtypes
+	configuration, ok := projectData["configuration"].(map[string]interface{})
+	if !ok {
+		return "", fmt.Errorf("configuration field not found or invalid in response")
+	}
+
+	subtypes, ok := configuration["subTypes"]
+	if !ok {
+		return "", fmt.Errorf("configuration/subTypes field not found in response")
+	}
+
+	// Serialize only the subtypes
+	subtypesJSON, err := json.Marshal(subtypes)
+	if err != nil {
+		return "", fmt.Errorf("failed to serialize defect types: %v", err)
+	}
+
+	return string(subtypesJSON), nil
+}
+
+// toolGetProjectDefectTypes creates a tool to retrieve all defect types for a specific project.
+func (lr *TestItemResources) toolGetProjectDefectTypes() (mcp.Tool, server.ToolHandlerFunc) {
+	return mcp.NewTool(
+			"get_project_defect_types",
+			// Tool metadata
+			mcp.WithDescription(
+				"Get all defect types for a specific project, returns a JSON which contains a list of defect types in the 'configuration/subtypes' array and represents the defect type ID. "+
+					"Example: {\"NO_DEFECT\": { \"locator\": \"nd001\" }} (where NO_DEFECT is the defect type name, nd001 is the defect type unique id)",
+			),
+			lr.projectParameter,
+		), lr.analytics.WithAnalytics("get_project_defect_types", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			project, err := extractProject(ctx, request)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+
+			// Fetch the project with given ID
+			_, response, err := lr.client.ProjectAPI.GetProject(ctx, project).
+				Execute()
+			if err != nil {
+				return mcp.NewToolResultError(extractResponseError(err, response)), nil
+			}
+
+			// Read and parse the response to extract configuration/subtypes
+			rawBody, err := readResponseBodyRaw(response)
+			if err != nil {
+				return mcp.NewToolResultError(
+					fmt.Sprintf("failed to read response body: %v", err),
+				), nil
+			}
+
+			// Extract defect types from JSON
+			defectTypesJSON, err := getDefectTypesFromJson(rawBody)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+
+			// Return only the defect types data
+			return mcp.NewToolResultText(defectTypesJSON), nil
+		})
+}
+
+// toolUpdateDefectTypeForTestItems creates a tool to update the defect type for a list of specific test items.
+func (lr *TestItemResources) toolUpdateDefectTypeForTestItems() (mcp.Tool, server.ToolHandlerFunc) {
+	return mcp.NewTool(
+			"update_defect_type_for_test_items",
+			// Tool metadata
+			mcp.WithDescription(
+				"This tool is used to update the defect type for a specific test items. "+
+					"The defect type has a unique id which can be received from the tool 'get_project_defect_types'. "+
+					"Example: {\"NO_DEFECT\": { \"locator\": \"nd001\" }} (where NO_DEFECT is the defect type name, nd001 is the defect type unique id)",
+			),
+			lr.projectParameter,
+			mcp.WithArray("test_items_ids", // Parameter for specifying the array of test items IDs
+				mcp.Description("Array of test items IDs"),
+				mcp.Required(),
+			),
+			mcp.WithString(
+				"defect_type_id", // Parameter for specifying the defect type ID
+				mcp.Description(
+					"Defect Type ID, all possible values can be received from the tool 'get_project_defect_types'. "+
+						"Example: {\"NO_DEFECT\": { \"locator\": \"nd001\" }} (where NO_DEFECT is the defect type name, nd001 is the defect type unique id)",
+				),
+				mcp.Required(),
+			),
+			mcp.WithString(
+				"defect_type_comment", // Parameter for specifying the defect type comment
+				mcp.Description(
+					"The defect type comment provides a detailed description of the root cause of the test failure",
+				),
+			),
+		), lr.analytics.WithAnalytics("update_defect_type_for_test_items", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			project, err := extractProject(ctx, request)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+
+			// Extract the "defect_type_id" parameter from the request
+			defectTypeId, err := request.RequireString("defect_type_id")
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			// Extract the "test_items_ids" parameter from the request
+			testItemIdStrs, err := request.RequireStringSlice("test_items_ids")
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+
+			defectTypeComment := request.GetString("defect_type_comment", "")
+			// Build the list of issues
+			issues := make([]openapi.IssueDefinition, 0, len(testItemIdStrs))
+			var commentPtr *string
+			if defectTypeComment != "" {
+				commentPtr = &defectTypeComment
+			}
+			for _, testItemIdStr := range testItemIdStrs {
+				testItemId, err := strconv.ParseInt(testItemIdStr, 10, 64)
+				if err != nil {
+					return mcp.NewToolResultError(err.Error()), nil
+				}
+				issues = append(issues, openapi.IssueDefinition{
+					TestItemId: testItemId,
+					Issue: openapi.Issue{
+						IssueType:    defectTypeId,
+						AutoAnalyzed: openapi.PtrBool(false),
+						Comment:      commentPtr,
+					},
+				})
+			}
+
+			apiRequest := lr.client.TestItemAPI.DefineTestItemIssueType(ctx, project).
+				DefineIssueRQ(openapi.DefineIssueRQ{
+					Issues: issues,
+				})
+
+			// Execute the request
+			_, response, err := apiRequest.Execute()
+			if err != nil {
+				return mcp.NewToolResultError(extractResponseError(err, response)), nil
+			}
+
+			// Return the serialized testItem as a text result
+			return readResponseBody(response)
 		})
 }

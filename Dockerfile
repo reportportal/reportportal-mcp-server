@@ -1,8 +1,8 @@
-ARG VERSION="dev"
+ARG APP_VERSION="develop"
 
 FROM golang:1.24.4 AS build
 # allow this step access to build arg
-ARG VERSION
+ARG APP_VERSION
 # Set the working directory
 WORKDIR /build
 
@@ -14,7 +14,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build go mod download
 
 COPY . ./
 # Build the server
-RUN --mount=type=cache,target=/root/.cache/go-build CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=${VERSION} -X main.commit=$(git rev-parse HEAD) -X main.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+RUN --mount=type=cache,target=/root/.cache/go-build CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=${APP_VERSION} -X main.commit=$(git rev-parse HEAD) -X main.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     -o reportportal-mcp-server cmd/reportportal-mcp-server/main.go
 
 # Make a stage to run the app
@@ -24,7 +24,8 @@ WORKDIR /server
 # Copy the binary from the build stage
 COPY --from=build /build/reportportal-mcp-server .
 
-ENTRYPOINT ["./reportportal-mcp-server"]
+# Expose default HTTP port (can be overridden by MCP_SERVER_PORT)
+EXPOSE 8080
 
-# Command to run the server
-CMD ["stdio"]
+# Run the server - will read MCP_MODE environment variable
+ENTRYPOINT ["./reportportal-mcp-server"]

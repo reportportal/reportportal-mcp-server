@@ -2,13 +2,17 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"log/slog"
+	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
+	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
@@ -29,69 +33,141 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// Get MCP mode from environment variable, default to stdio
+	rawMcpMode := strings.ToLower(os.Getenv("MCP_MODE"))
+	slog.Debug("MCP_MODE env variable is set to: " + rawMcpMode)
+	mcpMode := strings.ToLower(rawMcpMode)
+	if mcpMode == "" {
+		mcpMode = "stdio"
+	}
+
+	// Common flags for all modes
+	commonFlags := []cli.Flag{
+		&cli.StringFlag{
+			Name:     "rp-host",
+			Required: true,
+			Sources:  cli.EnvVars("RP_HOST"),
+			Usage:    "ReportPortal host URL",
+		},
+		&cli.StringFlag{
+			Name:     "project",
+			Required: false,
+			Sources:  cli.EnvVars("RP_PROJECT"),
+			Value:    "",
+			Usage:    "ReportPortal project name",
+		},
+		&cli.StringFlag{
+			Name:     "log-level",
+			Required: false,
+			Sources:  cli.EnvVars("LOG_LEVEL"),
+			Value:    slog.LevelInfo.String(),
+			Usage:    "Logging level",
+		},
+		&cli.StringFlag{
+			Name:     "user-id",
+			Required: false,
+			Sources:  cli.EnvVars("RP_USER_ID"),
+			Value:    "",
+			Usage:    "Custom user ID for analytics (used for analytics identification)",
+		},
+		&cli.BoolFlag{
+			Name:     "analytics-off",
+			Required: false,
+			Sources:  cli.EnvVars("RP_MCP_ANALYTICS_OFF"),
+			Usage:    "Disable Google Analytics tracking",
+			Value:    false,
+		},
+	}
+
+	// stdio-specific flags (only included when MCP_MODE is stdio)
+	stdioFlags := []cli.Flag{
+		&cli.StringFlag{
+			Name:     "token",
+			Required: false, // Will be validated as required in runStdioServer
+			Sources:  cli.EnvVars("RP_API_TOKEN"),
+			Usage:    "API token for authentication (required for stdio mode)",
+		},
+	}
+
+	// HTTP-specific flags (only included when MCP_MODE is http)
+	httpFlags := []cli.Flag{
+		&cli.IntFlag{
+			Name:     "port",
+			Required: false,
+			Sources:  cli.EnvVars("MCP_SERVER_PORT"),
+			Usage:    "HTTP server port",
+			Value:    8080,
+		},
+		&cli.StringFlag{
+			Name:     "host",
+			Required: false,
+			Sources:  cli.EnvVars("MCP_SERVER_HOST"),
+			Usage:    "HTTP bind host/interface (e.g., 0.0.0.0, 127.0.0.1, ::)",
+			Value:    "",
+		},
+		&cli.IntFlag{
+			Name:     "max-workers",
+			Required: false,
+			Sources:  cli.EnvVars("RP_MAX_WORKERS"),
+			Usage:    "Maximum number of worker goroutines (0 = auto-detect as CPU count * 2)",
+			Value:    0,
+		},
+		&cli.IntFlag{
+			Name:     "connection-timeout",
+			Required: false,
+			Sources:  cli.EnvVars("RP_CONNECTION_TIMEOUT"),
+			Usage:    "Connection timeout in seconds",
+			Value:    30,
+		},
+	}
+
+	// Build flags based on MCP mode
+	var allFlags []cli.Flag
+	allFlags = append(allFlags, commonFlags...)
+	if mcpMode == "http" {
+		allFlags = append(allFlags, httpFlags...)
+	} else {
+		// stdio mode (default) - add stdio-specific flags
+		allFlags = append(allFlags, stdioFlags...)
+	}
+
 	// Define the CLI command structure
 	cmd := &cli.Command{
-		Version:        fmt.Sprintf("%s (%s) %s", version, commit, date), // Display version info
-		Description:    `ReportPortal MCP Server`,                        // Command description
-		DefaultCommand: "stdio",                                          // Default subcommand
-		// Define required flags for the subcommand
-		Flags: []cli.Flag{
-			&cli.StringFlag{
-				Name:     "host",                 // ReportPortal host URL
-				Required: true,                   // Mark as required
-				Sources:  cli.EnvVars("RP_HOST"), // Allow setting via environment variable
-			},
-			&cli.StringFlag{
-				Name:     "token", // API token for authentication
-				Required: true,
-				Sources:  cli.EnvVars("RP_API_TOKEN"),
-			},
-			&cli.StringFlag{
-				Name:     "project", // ReportPortal project name
-				Required: false,
-				Sources:  cli.EnvVars("RP_PROJECT"),
-			},
-			&cli.StringFlag{
-				Name:     "log-level", // Logging level
-				Required: false,
-				Sources:  cli.EnvVars("LOG_LEVEL"),
-				Value:    slog.LevelInfo.String(),
-			},
-			&cli.StringFlag{
-				Name:     "user-id", // Unified user ID for analytics (both client_id and user_id)
-				Required: false,
-				Sources:  cli.EnvVars("RP_USER_ID"),
-				Value:    "", // Empty means auto-generate persistent ID
-			},
-			&cli.BoolFlag{
-				Name:     "analytics-off", // Disable analytics completely
-				Required: false,
-				Sources:  cli.EnvVars("RP_MCP_ANALYTICS_OFF"),
-				Usage:    "Disable Google Analytics tracking",
-				Value:    false,
-			},
-		},
-		Commands: []*cli.Command{
-			{
-				Name:        "stdio", // Subcommand to start the server in stdio mode
-				Description: "Start ReportPortal MCP Server in stdio mode",
-				Action:      runStdioServer, // Function to execute for this subcommand
-				Before:      initLogger(),
-			},
-			{
-				Name:        "streaming", // Subcommand to start the server in streaming mode
-				Description: "Start ReportPortal MCP Server in streaming mode",
-				Action:      runStreamingServer, // Function to execute for this subcommand
-				Before:      initLogger(),
-				Flags: []cli.Flag{
-					&cli.StringFlag{
-						Name:     "addr",
-						Required: false,
-						Sources:  cli.EnvVars("ADDR"),
-						Value:    ":8080", // Default address to bind the streaming server
-					},
-				},
-			},
+		Version: fmt.Sprintf("%s (%s) %s", version, commit, date),
+		Description: `ReportPortal MCP Server
+
+ENVIRONMENT VARIABLES:
+   MCP_MODE    Server mode: "stdio" (default) or "http"
+               Controls which server type to run and which flags are available
+
+AUTHENTICATION:
+   stdio mode: RP_API_TOKEN is REQUIRED (must be set via environment variable or --token flag)
+   http mode:  RP_API_TOKEN and --token are COMPLETELY IGNORED
+               Tokens MUST be passed per-request via 'Authorization: Bearer <token>' header
+
+ANALYTICS:
+   stdio mode: RP_API_TOKEN is required for analytics (used for secure user identification)
+   http mode:  Analytics uses RP_USER_ID env var for identification
+               Use --analytics-off or RP_MCP_ANALYTICS_OFF=true to disable analytics`,
+		Flags:  allFlags,
+		Before: initLogger(),
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			// Check mcpMode and run appropriate server
+			switch mcpMode {
+			case "http":
+				return runStreamingServer(ctx, cmd)
+			case "stdio":
+				return runStdioServer(ctx, cmd)
+			default:
+				slog.Info(
+					"unknown MCP_MODE, defaulting to stdio",
+					"mode",
+					mcpMode,
+					"supported",
+					"stdio, http",
+				)
+				return runStdioServer(ctx, cmd)
+			}
 		},
 	}
 
@@ -121,12 +197,67 @@ func initLogger() func(ctx context.Context, command *cli.Command) (context.Conte
 	}
 }
 
+// handleServerError processes server errors, distinguishing between graceful shutdowns and actual errors.
+// Returns nil for graceful shutdowns, or the original error for actual problems.
+func handleServerError(err error, analytics *mcpreportportal.Analytics, serverType string) error {
+	// Check for successful completion or expected shutdown errors
+	if err == nil ||
+		errors.Is(err, http.ErrServerClosed) ||
+		errors.Is(err, context.Canceled) ||
+		errors.Is(err, context.DeadlineExceeded) {
+		slog.Info("server shutdown completed", "type", serverType)
+		mcpreportportal.StopAnalytics(analytics, "")
+		return nil
+	}
+
+	slog.Error("server error occurred", "type", serverType, "error", err)
+	mcpreportportal.StopAnalytics(analytics, "server error")
+	return fmt.Errorf("error running %s server: %w", serverType, err)
+}
+
+// buildHTTPServerConfig creates HTTPServerConfig from CLI flags with smart defaults.
+// This replaces the removed GetProductionConfig/GetHighTrafficConfig factory functions.
+func buildHTTPServerConfig(cmd *cli.Command) (mcpreportportal.HTTPServerConfig, error) {
+	// Retrieve required parameters from CLI flags
+	host := cmd.String("rp-host")
+	// Note: RP_API_TOKEN and --token flag are not available in HTTP mode
+	// Tokens MUST come from HTTP request headers (Authorization: Bearer <token>)
+	userID := cmd.String("user-id")
+	analyticsAPISecret := mcpreportportal.GetAnalyticArg()
+	analyticsOff := cmd.Bool("analytics-off")
+
+	// Performance tuning parameters with defaults
+	maxWorkers := cmd.Int("max-workers")
+	connectionTimeoutSec := cmd.Int("connection-timeout")
+
+	// Apply auto-detection for zero values
+	if maxWorkers <= 0 {
+		maxWorkers = runtime.NumCPU() * 2
+	}
+
+	hostUrl, err := url.Parse(host)
+	if err != nil {
+		return mcpreportportal.HTTPServerConfig{}, fmt.Errorf("invalid host URL: %w", err)
+	}
+
+	return mcpreportportal.HTTPServerConfig{
+		Version:               fmt.Sprintf("%s (%s) %s", version, commit, date),
+		HostURL:               hostUrl,
+		FallbackRPToken:       "", // Always empty - RP_API_TOKEN is not available in HTTP mode
+		UserID:                userID,
+		GA4Secret:             analyticsAPISecret,
+		AnalyticsOn:           !analyticsOff,
+		MaxConcurrentRequests: maxWorkers,
+		ConnectionTimeout:     time.Duration(connectionTimeoutSec) * time.Second,
+	}, nil
+}
+
 func newMCPServer(cmd *cli.Command) (*server.MCPServer, *mcpreportportal.Analytics, error) {
 	// Retrieve required parameters from the command flags
 	token := cmd.String("token")                           // API token
-	host := cmd.String("host")                             // ReportPortal host URL
-	project := cmd.String("project")                       // ReportPortal project name
+	host := cmd.String("rp-host")                          // ReportPortal host URL
 	userID := cmd.String("user-id")                        // Unified user ID for analytics
+	project := cmd.String("project")                       // ReportPortal project name
 	analyticsAPISecret := mcpreportportal.GetAnalyticArg() // Analytics API secret
 	analyticsOff := cmd.Bool("analytics-off")              // Disable analytics flag
 
@@ -140,8 +271,8 @@ func newMCPServer(cmd *cli.Command) (*server.MCPServer, *mcpreportportal.Analyti
 		version,
 		hostUrl,
 		token,
-		project,
 		userID,
+		project,
 		analyticsAPISecret,
 		!analyticsOff, // Convert analyticsOff to analyticsOn
 	)
@@ -153,6 +284,19 @@ func newMCPServer(cmd *cli.Command) (*server.MCPServer, *mcpreportportal.Analyti
 
 // runStdioServer starts the ReportPortal MCP server in stdio mode.
 func runStdioServer(ctx context.Context, cmd *cli.Command) error {
+	// Validate that token is provided for stdio mode (required)
+	token := cmd.String("token")
+	if token == "" {
+		return fmt.Errorf(
+			"RP_API_TOKEN is required for stdio mode (it can be passed via environment variable or --token flag)",
+		)
+	}
+
+	rpProject := cmd.String("project")
+	if rpProject != "" {
+		// Add project to request context default project name from Environment variable
+		ctx = mcpreportportal.WithProjectInContext(ctx, rpProject)
+	}
 	mcpServer, analytics, err := newMCPServer(cmd)
 	if err != nil {
 		return fmt.Errorf("failed to create ReportPortal MCP server: %w", err)
@@ -175,28 +319,49 @@ func runStdioServer(ctx context.Context, cmd *cli.Command) error {
 		slog.Info("shutting down server...")
 		mcpreportportal.StopAnalytics(analytics, "")
 	case err := <-errC: // Error occurred while running the server
-		if err != nil {
-			mcpreportportal.StopAnalytics(analytics, "server error")
-			return fmt.Errorf("error running server: %w", err)
-		}
+		return handleServerError(err, analytics, "stdio")
 	}
 
 	return nil
 }
 
-// runStreamingServer starts the ReportPortal MCP server in streaming mode.
+// runStreamingServer starts the ReportPortal MCP server in streaming mode with HTTP token extraction.
 func runStreamingServer(ctx context.Context, cmd *cli.Command) error {
-	mcpServer, analytics, err := newMCPServer(cmd)
+	// Build HTTP server configuration from CLI flags with performance tuning
+	config, err := buildHTTPServerConfig(cmd)
 	if err != nil {
-		return fmt.Errorf("failed to create ReportPortal MCP server: %w", err)
+		return fmt.Errorf("failed to build HTTP server config: %w", err)
 	}
-	streamingServer := server.NewStreamableHTTPServer(mcpServer)
-	addr := cmd.String("addr") // Address to bind the streaming server to
+
+	httpServer, analytics, err := mcpreportportal.CreateHTTPServerWithMiddleware(config)
+	if err != nil {
+		return fmt.Errorf("failed to create HTTP MCP server: %w", err)
+	}
+	// Build address from --port and --host
+	port := cmd.Int("port")
+	host := cmd.String("host")
+	addr := fmt.Sprintf("%s:%d", host, port)
+
+	// Create HTTP server with the Chi router as handler
+	// CRITICAL: Use MCP.Router directly to ensure Chi middleware and endpoints are active
+	server := &http.Server{
+		Addr:              addr,
+		Handler:           httpServer.MCP.Router, // Use Chi router directly with throttling/health/info/metrics
+		ReadHeaderTimeout: 10 * time.Second,      // Prevent Slowloris attacks
+		ReadTimeout:       30 * time.Second,      // Total time for reading request
+		WriteTimeout:      30 * time.Second,      // Total time for writing response
+		IdleTimeout:       120 * time.Second,     // Time to wait for next request
+	}
+
+	// Start the HTTP server
+	if err := httpServer.MCP.Start(); err != nil {
+		return fmt.Errorf("failed to start HTTP server: %w", err)
+	}
 
 	// Start listening for messages in a separate goroutine
 	errC := make(chan error, 1)
 	go func() {
-		errC <- streamingServer.Start(addr)
+		errC <- server.ListenAndServe()
 	}()
 
 	// Log that the server is running
@@ -209,14 +374,14 @@ func runStreamingServer(ctx context.Context, cmd *cli.Command) error {
 		mcpreportportal.StopAnalytics(analytics, "")
 		sCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if err := streamingServer.Shutdown(sCtx); err != nil {
+		if err := server.Shutdown(sCtx); err != nil {
 			slog.Error("error during server shutdown", "error", err)
 		}
-	case err := <-errC: // Error occurred while running the server
-		if err != nil {
-			mcpreportportal.StopAnalytics(analytics, "server error")
-			return fmt.Errorf("error running server: %w", err)
+		if err := httpServer.MCP.Stop(); err != nil {
+			slog.Error("error stopping HTTP server", "error", err)
 		}
+	case err := <-errC: // Error occurred while running the server
+		return handleServerError(err, analytics, "http")
 	}
 
 	return nil

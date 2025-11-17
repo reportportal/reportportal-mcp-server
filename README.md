@@ -19,10 +19,16 @@ For example, instead of logging into the ReportPortal UI, you could ask your AI 
 
 ## Installation
 
-There are two ways to run the latest version of the ReportPortal MCP Server.
-Each of this way is suitable for any LLM provider.
+There are three ways to connect to the ReportPortal MCP Server:
+1. **Via Docker** (recommended for local installation)
+2. **Using pre-built binaries** (for local installation)
+3. **Connecting to a remote MCP server** (when the server is already deployed)
 
-### Via Docker (recommended).
+Each of these methods is suitable for any LLM provider.
+
+### Local installation
+
+#### Via Docker (recommended)
 
 The MCP server is available on the official ReportPortal's [DockerHub](https://hub.docker.com/r/reportportal/mcp-server).
 
@@ -52,7 +58,7 @@ Configuration:
 }
 ```
 
-### Using pre-built binaries.
+#### Using pre-built binaries
 
 The OS pre-built binaries can be downloaded from the official releases on [GitHub](https://github.com/reportportal/reportportal-mcp-server/releases).
 
@@ -71,39 +77,31 @@ Configuration:
 }
 ```
 
-Choose your favourite AI Tool to connect.
+### Connecting to a Remote MCP Server
 
-### Claude Desktop
+If the ReportPortal MCP Server is already **deployed** and accessible via HTTP, you can connect to it remotely without running it locally. This is useful when the server is hosted centrally or in a shared environment.
 
-1. Open Claude Desktop, go to **Settings → Developer → Edit Config**.
-2. Add a new MCP server entry that runs the ReportPortal MCP Server.
+**Remote Server Configuration:**
 ```json
 {
-  "mcpServers": {
-    "reportportal": {
-      // choose the Docker or binary configuration from the section above
+  "reportportal": {
+    "url": "http://your-mcp-server-host:port/mcp/",
+    "headers": {
+      "Authorization": "Bearer your-api-token",
+      "X-Project": "YourProjectInReportPortal"
     }
   }
 }
 ```
-3. Save and restart Claude Desktop.
 
-### Claude Code CLI
+**Configuration Parameters:**
+- `url`: The HTTP endpoint URL of the remote MCP server (must end with `/mcp/`)
+- `headers.Authorization`: Bearer token for authentication (required)
+- `headers.X-Project`: The ReportPortal project name (optional)
 
-1. Open your terminal.
-2. Run the following comman.
-```bash
-claude mcp add-json reportportal '{"command": "docker", "args": ["run", "-i", "--rm", "-e", "RP_API_TOKEN", "-e", "RP_HOST", "-e", "RP_PROJECT", "reportportal/mcp-server"], "env": {"RP_API_TOKEN": "your-api-token", "RP_HOST": "https://your-reportportal-instance.com", "RP_PROJECT": "YourProjectInReportPortal"}}'
-```
+Choose your favourite AI Tool to connect.
 
-**Configuration Options:**
-- Use `-s user` to add the server to your user configuration (available across all projects).
-- Use `-s project` to add the server to project-specific configuration (shared via `.mcp.json`).
-- Default scope is `local` (available only to you in the current project).
-
-Documentation: [Claude Code guide](https://docs.anthropic.com/en/docs/claude-code/mcp).
-
-### Cursor (AI Code Editor)
+#### Cursor (AI Code Editor)
 
 Just click
 
@@ -113,6 +111,8 @@ Or follow the next steps:
 
 1. In Cursor, go to **Settings → Extensions → MCP** and click to add a new global MCP server.
 2. Add a new MCP server entry that runs the ReportPortal MCP Server.
+
+**For local installation (Docker or binary):**
 ```json
 {
   "mcpServers": {
@@ -122,20 +122,55 @@ Or follow the next steps:
   }
 }
 ```
+
+**For remote server:**
+```json
+{
+  "mcpServers": {
+    "reportportal": {
+      "url": "http://your-mcp-server-host:port/mcp/",
+      "headers": {
+        "Authorization": "Bearer your-api-token",
+        "X-Project": "YourProjectInReportPortal"
+      }
+    }
+  }
+}
+```
+
 Documentation: [Cursor MCP](https://docs.cursor.com/en/tools/developers#example).
 
-### GitHub Copilot (In VS Code and JetBrains IDEs)
+#### GitHub Copilot (In VS Code and JetBrains IDEs)
 
-#### VS Code
+##### VS Code
 
 1. Install/update the GitHub Copilot plugin.
 2. Type **>mcp** in the search bar and select **MCP: Open User Configuration**.
 3. Add configuration:
+
+**For local installation (Docker or binary):**
 ```json
 {
   "servers": {
     "reportportal": {
       // choose the Docker or binary configuration from the section above
+    }
+  }
+}
+```
+
+**For remote server:**
+```json
+{
+  "servers": {
+    "reportportal": {
+      "url": "http://your-mcp-server-host:port/mcp/",
+      "requestInit": {
+        "headers": {
+          "Authorization": "Bearer your-api-token",
+          "X-Project": "YourProjectInReportPortal"
+        }
+      }
     }
   }
 }
@@ -143,11 +178,13 @@ Documentation: [Cursor MCP](https://docs.cursor.com/en/tools/developers#example)
 
 Documentation: [VS Code Copilot Guide](https://code.visualstudio.com/docs/copilot/chat/mcp-servers).
 
-#### JetBrains IDEs
+##### JetBrains IDEs
 
 1. Install/update the GitHub Copilot plugin.
 2. Click **GitHub Copilot icon in the status bar → Edit Settings → Model Context Protocol → Configure**.
 3. Add configuration:
+
+**For local installation (Docker or binary):**
 ```json
 {
   "servers": {
@@ -157,9 +194,105 @@ Documentation: [VS Code Copilot Guide](https://code.visualstudio.com/docs/copilo
   }
 }
 ```
+
+**For remote server:**
+```json
+{
+  "servers": {
+    "reportportal": {
+      "url": "http://your-mcp-server-host:port/mcp/",
+      "requestInit": {
+        "headers": {
+          "Authorization": "Bearer your-api-token",
+          "X-Project": "YourProjectInReportPortal"
+        }
+      }
+    }
+  }
+}
+```
+
 4. Press `Ctrl + S` or `Command + S` to save, or close the `mcp.json` file. The configuration should take effect immediately and restart all the MCP servers defined. You can restart the IDE if needed.
 
 Documentation: [JetBrains Copilot Guide](https://plugins.jetbrains.com/plugin/17718-github-copilot).
+
+#### Claude Desktop
+
+1. Open Claude Desktop, go to **Settings → Developer → Edit Config**.
+2. Add a new MCP server entry that runs the ReportPortal MCP Server.
+
+**For local installation (Docker or binary):**
+```json
+{
+  "mcpServers": {
+    "reportportal": {
+      // choose the Docker or binary configuration from the section above
+    }
+  }
+}
+```
+
+**For remote server:**
+
+TBU
+
+3. Save and restart Claude Desktop.
+
+#### Claude Code CLI
+
+1. Open your terminal.
+2. Run one of the following commands.
+
+**For local installation (Docker):**
+```bash
+claude mcp add-json reportportal '{"command": "docker", "args": ["run", "-i", "--rm", "-e", "RP_API_TOKEN", "-e", "RP_HOST", "-e", "RP_PROJECT", "reportportal/mcp-server"], "env": {"RP_API_TOKEN": "your-api-token", "RP_HOST": "https://your-reportportal-instance.com", "RP_PROJECT": "YourProjectInReportPortal"}}'
+```
+
+**For remote server:**
+```bash
+claude mcp add-json reportportal '{"url": "http://your-mcp-server-host:port/mcp/", "headers": {"Authorization": "Bearer your-api-token", "X-Project": "YourProjectInReportPortal"}}'
+```
+
+**Configuration Options:**
+- Use `-s user` to add the server to your user configuration (available across all projects).
+- Use `-s project` to add the server to project-specific configuration (shared via `.mcp.json`).
+- Default scope is `local` (available only to you in the current project).
+
+Documentation: [Claude Code guide](https://docs.anthropic.com/en/docs/claude-code/mcp).
+
+#### Other Coding Agents
+
+The ReportPortal MCP Server is compatible with any MCP-compatible coding agent. While the exact configuration format may vary, most agents support either:
+
+**Local installation (stdio mode):**
+```json
+{
+  "reportportal": {
+    "command": "docker",
+    "args": ["run", "-i", "--rm", "-e", "RP_API_TOKEN", "-e", "RP_HOST", "-e", "RP_PROJECT", "reportportal/mcp-server"],
+    "env": {
+      "RP_API_TOKEN": "your-api-token",
+      "RP_HOST": "https://your-reportportal-instance.com",
+      "RP_PROJECT": "YourProjectInReportPortal"
+    }
+  }
+}
+```
+
+**Remote server (HTTP mode):**
+```json
+{
+  "reportportal": {
+    "url": "http://your-mcp-server-host:port/mcp/",
+    "headers": {
+      "Authorization": "Bearer your-api-token",
+      "X-Project": "YourProjectInReportPortal"
+    }
+  }
+}
+```
+
+Please refer to your coding agent's documentation for the exact configuration format and where to place the configuration file.
 
 Once connected, your AI assistant will list ReportPortal-related "tools" it can invoke. You can then ask your questions in chat, and the assistant will call those tools on your behalf.
 
@@ -205,8 +338,9 @@ The ReportPortal MCP server provides a comprehensive set of capabilities for int
 | Get Test Items by filter  | Lists test items for a specific launch           | `launch-id` (required), `name`, `description`, `status`, `has_retries`, `start_time_from`, `start_time_to`, `attributes`, `parent_id`, `defect_comment`, `auto_analyzed`, `ignored_in_aa`, `pattern_name`, `ticket_id`, `sort`, `page`, `page-size` (all optional)                                                        |
 | Get Logs by filter  | Lists logs for a specific test item or nested step          | `parent-id` (required), `log_level`, `log_content`, `logs_with_attachments`, `status`, `sort`, `page`, `page-size` (all optional)                                                        |
 | Get Attachment by ID        | Retrieves an attachment binary by id        | `attachment_id`                                                                                                |
-| Run Unique Error Analysis  | Runs unique error analysis on a launch           | `launch_id`, `remove_numbers`                                                                                 |
 | Get Test Item by ID        | Retrieves details of a specific test item        | `test_item_id`                                                                                                |
+| Get Project Defect Types        | Retrieves details regarding existing defect types on the specific project        |                                                                                               |
+| Update defect types by item ids        | Retrieves details regarding existing defect types on the specific project        |`test_items_ids` (required), `defect_type_id` (required), `defect_type_comment` (optional)                                                                                               |
 
 ### Available Prompts
 
@@ -257,30 +391,110 @@ This creates an executable called `reportportal-mcp-server`.
 
 The server needs to know where your ReportPortal is and how to authenticate. Set these environment variables in your shell:
 
+**For stdio mode (default):**
+
 | Variable | Description | Required |
 |----------|-------------|----------|
 | `RP_HOST` | The URL of your ReportPortal (e.g. https://myreportportal.example.com) | Yes |
 | `RP_PROJECT` | Your default project name in ReportPortal | Optional |
 | `RP_API_TOKEN` | Your ReportPortal API token (for access) | Yes |
-| `MCP_PORT` | Port for the MCP server | `4389` |
 
-For example:
+**For HTTP mode:**
+
+Set `MCP_MODE=http` and configure the following:
+- `RP_HOST`: Required - The URL of your ReportPortal
+- `RP_PROJECT`: Optional - Your default project name
+- `MCP_SERVER_PORT`: Optional - HTTP server port (default: 8080)
+- `MCP_SERVER_HOST`: Optional - HTTP bind host (default: empty)
+- Authentication tokens must be passed per-request via `Authorization: Bearer <token>` header
+- `RP_API_TOKEN` environment variable is **not used** in HTTP mode
+
+**Example for stdio mode:**
 
 ```bash
 export RP_HOST="https://your-reportportal-instance.com"
 export RP_PROJECT="YourProjectInReportPortal"
 export RP_API_TOKEN="your-api-token"
-```
-
-### Starting the Server
-
-After configuring the env vars as above, simply run:
-
-```bash
 ./reportportal-mcp-server
 ```
 
-This will start the MCP server on the configured port.
+**Example for HTTP mode:**
+
+```bash
+export MCP_MODE=http
+export RP_HOST="https://your-reportportal-instance.com"
+export RP_PROJECT="YourProjectInReportPortal"
+export MCP_SERVER_PORT=8080
+./reportportal-mcp-server
+# Tokens are passed per-request via HTTP Authorization header
+```
+
+### HTTP API Endpoints
+
+When running in HTTP mode (`MCP_MODE=http`), the server exposes the following endpoints:
+
+#### MCP Endpoints (for tool calls and MCP protocol)
+
+- **`POST /mcp`** - Main MCP endpoint for JSON-RPC requests
+- **`POST /api/mcp`** - Alternative MCP endpoint (same functionality)
+- **`GET /mcp`** - SSE (Server-Sent Events) stream endpoint for MCP protocol
+- **`GET /api/mcp`** - Alternative SSE stream endpoint
+
+**Important:** POST requests must be sent to `/mcp` or `/api/mcp`, not to the root endpoint `/`.
+
+**Request Format:**
+
+All MCP requests must follow the JSON-RPC 2.0 specification:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "tools/call",
+  "id": 1,
+  "params": {
+    "name": "get_launches",
+    "arguments": {
+      "filter-cnt-name": "test",
+      "page": 1,
+      "page-size": 10
+    }
+  }
+}
+```
+
+**Example Request:**
+
+```bash
+curl -X POST http://localhost:8080/mcp \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer your-reportportal-token" \
+  -d '{
+    "jsonrpc": "2.0",
+    "method": "tools/call",
+    "id": 1,
+    "params": {
+      "name": "get_launches",
+      "arguments": {
+        "page": 1,
+        "page-size": 10
+      }
+    }
+  }'
+```
+
+#### Information Endpoints (GET only)
+
+- **`GET /`** - Root endpoint, returns server information and available endpoints
+- **`GET /health`** - Health check endpoint
+- **`GET /info`** - Server information and configuration
+- **`GET /api/status`** - Server status (same as `/info`)
+- **`GET /metrics`** - Analytics metrics (if analytics enabled)
+
+**Note:** The root endpoint `/` only accepts GET requests. POST requests to `/` will return a 404 error. Use `/mcp` or `/api/mcp` for MCP protocol requests.
+
+### Starting the Server
+
+The server will start in the mode specified by `MCP_MODE` environment variable (default: stdio).
 
 Once running, the MCP server is ready to accept queries from your AI tool.
 

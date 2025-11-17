@@ -1,0 +1,197 @@
+# CodeRabbit Configuration for ReportPortal MCP Server
+# A Go-based Model Context Protocol server for ReportPortal integration
+
+# =============================================================================
+# GLOBAL SETTINGS
+# =============================================================================
+
+# Language for reviews
+language: "en-US"
+
+# Tone instructions for reviews - professional but constructive
+tone_instructions: "Focus on code quality, security, performance, and Go best practices. Be constructive and educational in feedback."
+
+# Enable early access features for improved functionality
+early_access: false
+
+# =============================================================================
+# REVIEWS CONFIGURATION
+# =============================================================================
+
+reviews:
+  # Use assertive profile for better code quality feedback on this professional project
+  profile: "assertive"
+
+  # Enable high-level summaries for better PR understanding
+  high_level_summary: true
+  high_level_summary_in_walkthrough: true
+  
+  # Auto-generate PR titles when needed
+  auto_title_placeholder: "@coderabbitai"
+  auto_title_instructions: "Generate concise, descriptive titles following conventional commit format when applicable"
+
+  # Review workflow settings
+  review_status: true
+  commit_status: true
+  fail_commit_status: true
+
+  # Enhanced walkthrough features
+  collapse_walkthrough: false
+  changed_files_summary: true
+  sequence_diagrams: true
+  estimate_code_review_effort: true
+  assess_linked_issues: true
+  related_issues: true
+  related_prs: true
+  
+  # Label and reviewer suggestions
+  suggested_labels: true
+  auto_apply_labels: false
+  suggested_reviewers: true
+  auto_assign_reviewers: false
+
+  # Keep the poem feature for team morale
+  poem: true
+
+  # Path filters - focus on source code and important config files
+  path_filters:
+    # Include source code and tests
+    - "cmd/**"
+    - "internal/**"
+    - "**/*.go"
+    - "**/*_test.go"
+    
+    # Include important configuration files
+    - "go.mod"
+    - "go.sum"
+    - "Dockerfile*"
+    - "*.dockerfile"
+    - "Taskfile.yaml"
+    - "*.yaml"
+    - "*.yml"
+    - "*.md"
+    
+    # Exclude build artifacts, binaries, and temporary files
+    - "!bin/**"
+    - "!*.exe"
+    - "!*.test.exe"
+    - "!dist/**"
+    - "!build/**"
+    - "!.git/**"
+    - "!vendor/**"
+    - "!*.log"
+    - "!*.tmp"
+
+  # Path-based instructions for better context-aware reviews
+  path_instructions:
+    - path: "**/*.go"
+      instructions: "Focus on Go best practices, error handling, concurrency safety, performance, and security. Check for proper resource cleanup and context handling."
+    
+    - path: "**/*_test.go"
+      instructions: "Ensure comprehensive test coverage, proper test isolation, meaningful assertions, and good test naming conventions."
+    
+    - path: "internal/reportportal/**"
+      instructions: "Pay special attention to API integration patterns, error handling, data validation, and MCP protocol compliance."
+    
+    - path: "cmd/**"
+      instructions: "Review CLI interface design, configuration handling, and application startup logic for robustness and usability."
+    
+    - path: "**/Dockerfile*"
+      instructions: "Focus on security best practices, image size optimization, proper layering, and multi-stage builds where appropriate."
+
+  # Tool configuration - enable Go and security-focused tools
+  tools:
+    # Go-specific linting
+    golangci-lint:
+      enabled: true
+    
+    # Security scanning
+    gitleaks:
+      enabled: true
+    semgrep:
+      enabled: true
+    
+    # Docker best practices
+    hadolint:
+      enabled: true
+    
+    # YAML validation for config files
+    yamllint:
+      enabled: true
+
+  # Auto-review configuration
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches: ["main", "master", "develop"]
+
+  # Pre-merge checks for quality gates
+  pre_merge_checks:
+    title:
+      mode: "warning"
+      requirements: "Use descriptive titles. Consider conventional commit format for consistency."
+    
+    description:
+      mode: "warning"
+      requirements: "Include description for significant changes. Link to relevant issues when applicable."
+
+# =============================================================================
+# KNOWLEDGE BASE CONFIGURATION
+# =============================================================================
+
+knowledge_base:
+  # Coding guidelines - scan for project-specific standards
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "README.md"
+      - "CONTRIBUTING.md"
+      - "docs/**/*.md"
+
+  # Use repository learnings for this specific project
+  learnings:
+    scope: "local"
+
+  # Include repository issues for context
+  issues:
+    scope: "local"
+
+  # Disable external integrations for this open source project
+  jira:
+    usage: "disabled"
+  
+  linear:
+    usage: "disabled"
+
+  # Include PR history for better context
+  pull_requests:
+    scope: "local"
+
+  # MCP integration (relevant for this project)
+  mcp:
+    usage: "auto"
+    disabled_servers: []
+
+# =============================================================================
+# CODE GENERATION SETTINGS
+# =============================================================================
+
+code_generation:
+  # Docstring generation for Go code
+  docstrings:
+    language: "en-US"
+    path_instructions:
+      - path: "**/*.go"
+        instructions: "Generate Go-style comments. Use proper godoc format with complete sentences. Include examples for public APIs when helpful."
+      
+      - path: "internal/**/*.go"
+        instructions: "Focus on internal API documentation, explaining business logic and integration patterns."
+
+  # Unit test generation guidelines
+  unit_tests:
+    path_instructions:
+      - path: "**/*.go"
+        instructions: "Generate comprehensive Go tests using testify/assert. Include table-driven tests where appropriate. Test error conditions and edge cases."
+      
+      - path: "internal/reportportal/**/*.go"
+        instructions: "Focus on testing API integrations, error handling, and data transformation logic. Mock external dependencies properly."

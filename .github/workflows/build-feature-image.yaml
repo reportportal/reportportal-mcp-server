@@ -1,0 +1,53 @@
+name: Build feature Docker image
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches:
+      - 'develop'
+  workflow_dispatch:
+    inputs:
+      image-tag:
+        description: 'Image tag for the Docker build'
+        required: true
+        default: 'feature'
+
+jobs:
+  variables-setup:
+    name: Setting variables for docker build
+    runs-on: ubuntu-latest
+    if: (!startsWith(github.head_ref, 'rc/') || !startsWith(github.head_ref, 'hotfix/') || !startsWith(github.head_ref, 'master') || !startsWith(github.head_ref, 'main'))
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create variables
+        id: vars
+        run: |
+          if [ -n "${{ github.event.inputs.image-tag }}" ]; then
+            echo "Using provided image tag: ${{ github.event.inputs.image-tag }}"
+            echo "tag=${{ github.event.inputs.image-tag }}" >> $GITHUB_OUTPUT
+          elif [ -n "${{ github.head_ref }}" ]; then
+            echo "tag=$(echo ${{ github.head_ref }}-${{ github.run_number }} | tr '/' '-')" >> $GITHUB_OUTPUT
+          else
+            echo "tag=$(echo ${{ github.ref_name }}-${{ github.run_number }} | tr '/' '-')" >> $GITHUB_OUTPUT
+          fi
+          
+          echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
+    outputs:
+      tag: ${{ steps.vars.outputs.tag }}
+      date: ${{ steps.vars.outputs.date }}
+
+  call-docker-build:
+    name: Call feature Docker build
+    needs: variables-setup
+    uses: reportportal/.github/.github/workflows/build-docker-image.yaml@main
+    with:
+      aws-region: ${{ vars.AWS_REGION }}
+      ecr-repository: 'reportportal/reportportal-mcp-server'
+      image-tag: ${{ needs.variables-setup.outputs.tag }}
+      version: ${{ needs.variables-setup.outputs.tag }}
+      branch: ${{ github.head_ref != '' && github.head_ref || github.ref_name }}
+      date: ${{ needs.variables-setup.outputs.date }}
+      runs-on: ubuntu-latest
+    secrets: inherit
