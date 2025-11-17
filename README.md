@@ -19,10 +19,9 @@ For example, instead of logging into the ReportPortal UI, you could ask your AI 
 
 ## Installation
 
-There are three ways to connect to the ReportPortal MCP Server:
-1. **Via Docker** (recommended for local installation)
-2. **Using pre-built binaries** (for local installation)
-3. **Connecting to a remote MCP server** (when the server is already deployed)
+There are two ways to connect to the ReportPortal MCP Server:
+1. **Locally** - via *Docker* (recommended) or using *pre-built binaries*.
+2. **Connecting to a remote MCP server** (when the server is already deployed)
 
 Each of these methods is suitable for any LLM provider.
 
@@ -101,7 +100,7 @@ If the ReportPortal MCP Server is already **deployed** and accessible via HTTP, 
 
 Choose your favourite AI Tool to connect.
 
-#### Cursor (AI Code Editor)
+### Cursor (AI Code Editor)
 
 Just click
 
@@ -140,9 +139,9 @@ Or follow the next steps:
 
 Documentation: [Cursor MCP](https://docs.cursor.com/en/tools/developers#example).
 
-#### GitHub Copilot (In VS Code and JetBrains IDEs)
+### GitHub Copilot (In VS Code and JetBrains IDEs)
 
-##### VS Code
+#### VS Code
 
 1. Install/update the GitHub Copilot plugin.
 2. Type **>mcp** in the search bar and select **MCP: Open User Configuration**.
@@ -178,7 +177,7 @@ Documentation: [Cursor MCP](https://docs.cursor.com/en/tools/developers#example)
 
 Documentation: [VS Code Copilot Guide](https://code.visualstudio.com/docs/copilot/chat/mcp-servers).
 
-##### JetBrains IDEs
+#### JetBrains IDEs
 
 1. Install/update the GitHub Copilot plugin.
 2. Click **GitHub Copilot icon in the status bar → Edit Settings → Model Context Protocol → Configure**.
@@ -216,7 +215,7 @@ Documentation: [VS Code Copilot Guide](https://code.visualstudio.com/docs/copilo
 
 Documentation: [JetBrains Copilot Guide](https://plugins.jetbrains.com/plugin/17718-github-copilot).
 
-#### Claude Desktop
+### Claude Desktop
 
 1. Open Claude Desktop, go to **Settings → Developer → Edit Config**.
 2. Add a new MCP server entry that runs the ReportPortal MCP Server.
@@ -238,7 +237,7 @@ TBU
 
 3. Save and restart Claude Desktop.
 
-#### Claude Code CLI
+### Claude Code CLI
 
 1. Open your terminal.
 2. Run one of the following commands.
@@ -260,7 +259,7 @@ claude mcp add-json reportportal '{"url": "http://your-mcp-server-host:port/mcp/
 
 Documentation: [Claude Code guide](https://docs.anthropic.com/en/docs/claude-code/mcp).
 
-#### Other Coding Agents
+### Other Coding Agents
 
 The ReportPortal MCP Server is compatible with any MCP-compatible coding agent. While the exact configuration format may vary, most agents support either:
 
