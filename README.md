@@ -381,7 +381,7 @@ git clone https://github.com/reportportal/reportportal-mcp-server.git
 cd reportportal-mcp-server
 
 # Build the binary
-go build -o reportportal-mcp-server ./cmd/reportportal-mcp-server
+go build -o reportportal-mcp-server ./cmd/main.go
 ```
 
 This creates an executable called `reportportal-mcp-server`.

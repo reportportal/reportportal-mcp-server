@@ -15,6 +15,8 @@ vars:
   IMAGE_NAME: "reportportal-mcp-server"
   IMAGE_NAME_DEBUG: "reportportal-mcp-server-debug"
   INSPECTOR: "npx @modelcontextprotocol/inspector"
+  INSPECTOR_IMAGE: "node:20-alpine"
+  INSPECTOR_CMD: "npx -y @modelcontextprotocol/inspector"
   DLV_PORT: '{{.DLV_PORT | default "52202"}}'
   MCP_MODE: '{{.MCP_MODE | default "stdio"}}'
   MCP_SERVER_PORT: '{{.MCP_SERVER_PORT | default "8080"}}'
@@ -53,14 +55,14 @@ tasks:
     env:
       CGO_ENABLED: 0
     cmd: |
-      go build -o bin/reportportal-mcp-server cmd/reportportal-mcp-server/main.go
+      go build -o bin/reportportal-mcp-server cmd/main.go
 
   app:build-debug:
     desc: "Builds application with debug symbols for debugging"
     env:
       CGO_ENABLED: 0
     cmd: |
-      go build -gcflags "all=-N -l" -o bin/reportportal-mcp-server-debug cmd/reportportal-mcp-server/main.go
+      go build -gcflags "all=-N -l" -o bin/reportportal-mcp-server-debug cmd/main.go
 
   debug:stop:
     desc: "Stops any running debug processes on port {{.DLV_PORT}}"
@@ -87,31 +89,33 @@ tasks:
     cmd: "docker build -f debug.dockerfile -t {{.IMAGE_NAME_DEBUG}} ."
 
   docker:run:
-    desc: "Runs docker mcp server in {{.MCP_MODE}} mode"
-    deps: [ docker:build ]
+    desc: "Runs docker mcp server in {{.MCP_MODE}} mode. For HTTP mode, server listens on port {{.MCP_SERVER_PORT}} and can be accessed via host.docker.internal:{{.MCP_SERVER_PORT}} from other containers."
+    deps: [docker:build]
     cmd: >
       {{if eq .MCP_MODE "http"}}
+      powershell -Command 'docker ps --no-trunc | Select-String ":{{.MCP_SERVER_PORT}}->" | ForEach-Object { ($_ -split "\s+")[0] } | ForEach-Object { docker stop $_ }; docker ps -q -f ancestor={{.IMAGE_NAME}} | ForEach-Object { docker stop $_ }';
       docker run -i --rm -p {{.MCP_SERVER_PORT}}:{{.MCP_SERVER_PORT}} -e "RP_API_TOKEN=$RP_API_TOKEN" -e "RP_PROJECT=$RP_PROJECT" -e "RP_HOST=$RP_HOST" {{if .MCP_SERVER_HOST}}-e "MCP_SERVER_HOST={{.MCP_SERVER_HOST}}"{{end}} -e "MCP_SERVER_PORT={{.MCP_SERVER_PORT}}" -e "MCP_MODE={{.MCP_MODE}}" {{.IMAGE_NAME}}
       {{else}}
+      powershell -Command "docker ps -q -f ancestor={{.IMAGE_NAME}} | ForEach-Object { docker stop $_ }";
       docker run -i --rm -e "RP_API_TOKEN=$RP_API_TOKEN" -e "RP_PROJECT=$RP_PROJECT" -e "RP_HOST=$RP_HOST" -e "MCP_MODE={{.MCP_MODE}}" {{.IMAGE_NAME}}
       {{end}}
 
   inspector:
-    desc: "Runs inspector in production mode ({{.MCP_MODE}})"
-    deps: [ docker:build ]
+    desc: "Runs inspector in production mode ({{.MCP_MODE}}). For HTTP mode, inspector runs in Docker and connects to host.docker.internal:{{.MCP_SERVER_PORT}}/mcp. Ensure MCP server is running via 'task docker:run MCP_MODE=http' first."
+    deps: [docker:build]
     cmd: >
       {{if eq .MCP_MODE "http"}}
-      {{.INSPECTOR}} -- docker run -i --rm -p {{.MCP_SERVER_PORT}}:{{.MCP_SERVER_PORT}} -e "RP_API_TOKEN=$RP_API_TOKEN" -e "RP_PROJECT=$RP_PROJECT" -e "RP_HOST=$RP_HOST" {{if .MCP_SERVER_HOST}}-e "MCP_SERVER_HOST={{.MCP_SERVER_HOST}}"{{end}} -e "MCP_SERVER_PORT={{.MCP_SERVER_PORT}}" -e "MCP_MODE={{.MCP_MODE}}" {{.IMAGE_NAME}}
+      docker run -i --rm -p 6274:6274 -p 6277:6277 --add-host=host.docker.internal:host-gateway {{.INSPECTOR_IMAGE}} sh -c "{{.INSPECTOR_CMD}} http://host.docker.internal:{{.MCP_SERVER_PORT}}/mcp"
       {{else}}
       {{.INSPECTOR}} -- docker run -i --rm -e "RP_API_TOKEN=$RP_API_TOKEN" -e "RP_PROJECT=$RP_PROJECT" -e "RP_HOST=$RP_HOST" -e "MCP_MODE={{.MCP_MODE}}" {{.IMAGE_NAME}}
       {{end}}
 
   inspector-debug:
-    desc: "Runs inspector with the MCP server in debug mode ({{.MCP_MODE}})"
+    desc: "Runs inspector with the MCP server in debug mode ({{.MCP_MODE}}). For HTTP mode, inspector runs in Docker and connects to host.docker.internal:{{.MCP_SERVER_PORT}}/mcp. Ensure debug server is running separately first."
     deps: [ docker:build-debug ]
     cmd: >
       {{if eq .MCP_MODE "http"}}
-      {{.INSPECTOR}} -- docker run -p {{.DLV_PORT}}:{{.DLV_PORT}} -p {{.MCP_SERVER_PORT}}:{{.MCP_SERVER_PORT}} -i --rm -e "RP_API_TOKEN=$RP_API_TOKEN" -e "RP_PROJECT=$RP_PROJECT" -e "RP_HOST=$RP_HOST" {{if .MCP_SERVER_HOST}}-e "MCP_SERVER_HOST={{.MCP_SERVER_HOST}}"{{end}} -e "MCP_SERVER_PORT={{.MCP_SERVER_PORT}}" -e "MCP_MODE={{.MCP_MODE}}" {{.IMAGE_NAME_DEBUG}}
+      docker run -i --rm -p 6274:6274 -p 6277:6277 --add-host=host.docker.internal:host-gateway {{.INSPECTOR_IMAGE}} sh -c "{{.INSPECTOR_CMD}} http://host.docker.internal:{{.MCP_SERVER_PORT}}/mcp"
       {{else}}
       {{.INSPECTOR}} -- docker run -p {{.DLV_PORT}}:{{.DLV_PORT}} -i --rm -e "RP_API_TOKEN=$RP_API_TOKEN" -e "RP_PROJECT=$RP_PROJECT" -e "RP_HOST=$RP_HOST" -e "MCP_MODE={{.MCP_MODE}}" {{.IMAGE_NAME_DEBUG}}
       {{end}}

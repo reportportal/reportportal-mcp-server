@@ -1,4 +1,4 @@
-package mcpreportportal
+package mcp_handlers
 
 import (
 	"testing"

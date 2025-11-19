@@ -1,4 +1,4 @@
-package mcpreportportal
+package utils
 
 import (
 	"testing"

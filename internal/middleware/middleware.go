@@ -1,6 +1,10 @@
-package mcpreportportal
+package middleware
 
-import "net/http"
+import (
+	"net/http"
+
+	"github.com/reportportal/reportportal-mcp-server/internal/utils"
+)
 
 func QueryParamsMiddleware(rq *http.Request) {
 	// In HTTP mode, inject the token from request context (extracted from HTTP headers)
@@ -10,7 +14,7 @@ func QueryParamsMiddleware(rq *http.Request) {
 	}
 
 	// Handle query parameters from context
-	paramsFromContext, ok := QueryParamsFromContext(rq.Context())
+	paramsFromContext, ok := utils.QueryParamsFromContext(rq.Context())
 	if ok && paramsFromContext != nil {
 		// If query parameters are present in the context, add them to the request URL
 		query := rq.URL.Query()

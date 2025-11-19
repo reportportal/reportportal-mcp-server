@@ -1,18 +1,21 @@
-package mcpreportportal
+package middleware
 
 import (
 	"context"
 	"log/slog"
 	"net/http"
 	"strings"
+
+	"github.com/reportportal/reportportal-mcp-server/internal/utils"
 )
+
+// contextKey is a type for context keys to avoid collisions
+type contextKey string
 
 // Context keys for passing data through request context
 const (
 	// RPTokenContextKey is used to store RP API token in request context
 	RPTokenContextKey contextKey = "rp_api_token" //nolint:gosec // This is a context key, not a credential
-	// RPProjectContextKey is used to store RP project parameter in request context
-	RPProjectContextKey contextKey = "rp_project" //nolint:gosec // This is a context key, not a credential
 )
 
 // HTTPTokenMiddleware returns an HTTP middleware function that extracts RP API tokens and project parameters
@@ -41,7 +44,7 @@ func HTTPTokenMiddleware(next http.Handler) http.Handler {
 
 		if rpProject != "" {
 			// Add project to request context for use by MCP handlers
-			r = r.WithContext(WithProjectInContext(r.Context(), rpProject))
+			r = r.WithContext(utils.WithProjectInContext(r.Context(), rpProject))
 
 			slog.Debug("Extracted RP project parameter from HTTP request",
 				"source", "http_header",
@@ -70,7 +73,7 @@ func extractRPTokenFromRequest(r *http.Request) string {
 			token := strings.TrimSpace(parts[1])
 
 			// Validate the extracted token before processing
-			if !ValidateRPToken(token) {
+			if !utils.ValidateRPToken(token) {
 				slog.Debug("Invalid RP API token rejected",
 					"source", "Authorization Bearer",
 					"validation", "failed")
@@ -107,18 +110,4 @@ func extractRPProjectFromRequest(r *http.Request) string {
 		return project
 	}
 	return ""
-}
-
-// WithProjectInContext adds RP project parameter to request context
-func WithProjectInContext(ctx context.Context, project string) context.Context {
-	// Trim whitespace from project parameter
-	project = strings.TrimSpace(project)
-	return context.WithValue(ctx, RPProjectContextKey, project)
-}
-
-// GetProjectFromContext extracts RP project parameter from request context
-func GetProjectFromContext(ctx context.Context) (string, bool) {
-	project, ok := ctx.Value(RPProjectContextKey).(string)
-	res := strings.TrimSpace(project)
-	return res, ok && res != ""
 }

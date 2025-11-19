@@ -1,4 +1,4 @@
-package mcpreportportal
+package utils
 
 import (
 	"context"
@@ -10,6 +10,11 @@ import (
 
 // contextKey is a type for context keys to avoid collisions
 type contextKey string
+
+const (
+	// RPProjectContextKey is used to store RP project parameter in request context
+	RPProjectContextKey contextKey = "rp_project" //nolint:gosec // This is a context key, not a credential
+)
 
 var contextKeyQueryParams = contextKey(
 	"queryParams",
@@ -24,6 +29,20 @@ func QueryParamsFromContext(ctx context.Context) (url.Values, bool) {
 	// Retrieve the query parameters from the context
 	queryParams, ok := ctx.Value(contextKeyQueryParams).(url.Values)
 	return queryParams, ok
+}
+
+// WithProjectInContext adds RP project parameter to request context
+func WithProjectInContext(ctx context.Context, project string) context.Context {
+	// Trim whitespace from project parameter
+	project = strings.TrimSpace(project)
+	return context.WithValue(ctx, RPProjectContextKey, project)
+}
+
+// GetProjectFromContext extracts RP project parameter from request context
+func GetProjectFromContext(ctx context.Context) (string, bool) {
+	project, ok := ctx.Value(RPProjectContextKey).(string)
+	res := strings.TrimSpace(project)
+	return res, ok && res != ""
 }
 
 // ValidateRPToken performs validation on RP API tokens

@@ -1,15 +1,18 @@
-package mcpreportportal
+package mcp_handlers
 
 import (
 	"embed"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"net/url"
 	"path/filepath"
 
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/reportportal/goRP/v5/pkg/gorp"
 
+	"github.com/reportportal/reportportal-mcp-server/internal/analytics"
+	"github.com/reportportal/reportportal-mcp-server/internal/middleware"
 	"github.com/reportportal/reportportal-mcp-server/internal/promptreader"
 )
 
@@ -22,7 +25,7 @@ func NewServer(
 	token,
 	userID, project, analyticsAPISecret string,
 	analyticsOn bool,
-) (*server.MCPServer, *Analytics, error) {
+) (*server.MCPServer, *analytics.Analytics, error) {
 	s := server.NewMCPServer(
 		"reportportal-mcp-server",
 		version,
@@ -34,39 +37,32 @@ func NewServer(
 
 	// Create a new ReportPortal client
 	rpClient := gorp.NewClient(hostUrl, token)
-	rpClient.APIClient.GetConfig().Middleware = QueryParamsMiddleware
+	rpClient.APIClient.GetConfig().Middleware = middleware.QueryParamsMiddleware
 
 	// Initialize analytics (disabled if analyticsOff is true)
-	var analytics *Analytics
-	if analyticsOn {
+	// Note: Analytics initialization uses "best-effort" approach - failures are logged
+	// but don't prevent server startup, consistent with HTTP server behavior
+	var analyticsClient *analytics.Analytics
+	if analyticsOn && analyticsAPISecret != "" {
 		var err error
 		// Pass RP API token for secure hashing as user identifier
-		analytics, err = NewAnalytics(userID, analyticsAPISecret, token)
+		analyticsClient, err = analytics.NewAnalytics(userID, analyticsAPISecret, token)
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to initialize analytics: %w", err)
+			slog.Warn("Failed to initialize analytics", "error", err)
+		} else {
+			slog.Info("MCP server initialized with batch-based analytics",
+				"has_ga4_secret", analyticsAPISecret != "",
+				"uses_user_id", userID != "")
 		}
 	}
 
-	launches := NewLaunchResources(rpClient, analytics, project)
-	s.AddTool(launches.toolGetLaunches())
-	s.AddTool(launches.toolGetLastLaunchByName())
-	s.AddTool(launches.toolForceFinishLaunch())
-	s.AddTool(launches.toolDeleteLaunch())
-	s.AddTool(launches.toolRunAutoAnalysis())
-	s.AddTool(launches.toolUniqueErrorAnalysis())
-	s.AddTool(launches.toolRunQualityGate())
-	s.AddResourceTemplate(launches.resourceLaunch())
+	// Register launch tools and resources
+	RegisterLaunchTools(s, rpClient, analyticsClient, project)
 
-	testItems := NewTestItemResources(rpClient, analytics, project)
-	s.AddTool(testItems.toolGetTestItemById())
-	s.AddTool(testItems.toolGetTestItemsByFilter())
-	s.AddTool(testItems.toolGetTestItemLogsByFilter())
-	s.AddTool(testItems.toolGetTestItemAttachment())
-	s.AddTool(testItems.toolGetTestSuitesByFilter())
-	s.AddTool(testItems.toolGetProjectDefectTypes())
-	s.AddTool(testItems.toolUpdateDefectTypeForTestItems())
-	s.AddResourceTemplate(testItems.resourceTestItem())
+	// Register test item tools and resources
+	RegisterTestItemTools(s, rpClient, analyticsClient, project)
 
+	// Register prompts
 	prompts, err := readPrompts(promptFiles, "prompts")
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to load prompts: %w", err)
@@ -76,7 +72,7 @@ func NewServer(
 		s.AddPrompt(prompt.Prompt, prompt.Handler)
 	}
 
-	return s, analytics, nil
+	return s, analyticsClient, nil
 }
 
 // readPrompts reads multiple YAML files containing prompt definitions

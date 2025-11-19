@@ -17,7 +17,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build go mod download
 COPY . ./
 # Build the server
 RUN --mount=type=cache,target=/root/.cache/go-build CGO_ENABLED=0 go build -gcflags "all=-N -l" -ldflags="-X main.version=${VERSION} -X main.commit=$(git rev-parse HEAD) -X main.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    -o reportportal-mcp-server cmd/reportportal-mcp-server/main.go
+    -o reportportal-mcp-server cmd/main.go
 
 # Final runtime image
 FROM gcr.io/distroless/base-debian12

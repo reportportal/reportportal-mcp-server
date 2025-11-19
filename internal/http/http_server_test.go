@@ -1,4 +1,4 @@
-package mcpreportportal
+package http
 
 import (
 	"net/url"
@@ -7,6 +7,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/reportportal/reportportal-mcp-server/internal/analytics"
 )
 
 func TestNewHTTPServer_WithoutRPAPIToken(t *testing.T) {
@@ -333,7 +335,7 @@ func TestHTTPServer_StopIdempotent(t *testing.T) {
 func TestGetHTTPServerInfo(t *testing.T) {
 	tests := []struct {
 		name             string
-		analytics        *Analytics
+		analytics        *analytics.Analytics
 		expectAnalytics  bool
 		expectedType     string
 		expectedInterval string
@@ -345,11 +347,14 @@ func TestGetHTTPServerInfo(t *testing.T) {
 		},
 		{
 			name: "server info with analytics",
-			analytics: &Analytics{
-				config: &AnalyticsConfig{
-					APISecret: "test-secret",
-				},
-			},
+			analytics: func() *analytics.Analytics {
+				// Create a test analytics instance using the factory function
+				analyticsInstance, err := analytics.NewAnalytics("test-user", "test-secret", "")
+				if err != nil {
+					panic(err)
+				}
+				return analyticsInstance
+			}(),
 			expectAnalytics:  true,
 			expectedType:     "batch",
 			expectedInterval: batchSendInterval.String(),

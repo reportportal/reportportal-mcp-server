@@ -1,6 +1,8 @@
-package mcpreportportal
+package utils
 
 import (
+	"context"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -137,9 +139,9 @@ func TestProcessAttributeKeys(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := processAttributeKeys(tt.filterAttributes, tt.filterAttributeKeys)
+			result := ProcessAttributeKeys(tt.filterAttributes, tt.filterAttributeKeys)
 			if result != tt.expected {
-				t.Errorf("processAttributeKeys(%q, %q) = %q, want %q",
+				t.Errorf("ProcessAttributeKeys(%q, %q) = %q, want %q",
 					tt.filterAttributes, tt.filterAttributeKeys, result, tt.expected)
 			}
 		})
@@ -158,7 +160,7 @@ func TestProcessAttributeKeys_Performance(t *testing.T) {
 	largeFilterAttributeKeys := strings.Join(keys, ",")
 
 	// This should not panic or take too long
-	result := processAttributeKeys(filterAttributes, largeFilterAttributeKeys)
+	result := ProcessAttributeKeys(filterAttributes, largeFilterAttributeKeys)
 
 	// Basic validation - should contain the original attributes
 	if !strings.HasPrefix(result, filterAttributes) {
@@ -169,4 +171,24 @@ func TestProcessAttributeKeys_Performance(t *testing.T) {
 	if len(strings.Split(result, ",")) < 1000 {
 		t.Errorf("Result should contain many processed keys")
 	}
+}
+
+// ExtractProjectWithMock is a test helper that works with testutil.MockCallToolRequest
+// This mimics the actual ExtractProject function's priority order
+// It's exported so it can be used by test files in other packages
+func ExtractProjectWithMock(ctx context.Context, rq interface {
+	GetString(key string, defaultValue string) string
+},
+) (string, error) {
+	// Use project parameter from request (highest priority)
+	if project := strings.TrimSpace(rq.GetString("project", "")); project != "" {
+		return project, nil
+	}
+	// Fallback to project from context (request's HTTP header or environment variable, depends on MCP mode)
+	if project, ok := GetProjectFromContext(ctx); ok {
+		return project, nil
+	}
+	return "", fmt.Errorf(
+		"no project parameter found in request, HTTP header, or environment variable",
+	)
 }

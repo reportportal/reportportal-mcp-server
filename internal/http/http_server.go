@@ -1,4 +1,4 @@
-package mcpreportportal
+package http
 
 import (
 	"bytes"
@@ -14,9 +14,18 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
+	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/reportportal/goRP/v5/pkg/gorp"
+
+	"github.com/reportportal/reportportal-mcp-server/internal/analytics"
+	"github.com/reportportal/reportportal-mcp-server/internal/mcp_handlers"
+	"github.com/reportportal/reportportal-mcp-server/internal/middleware"
+)
+
+const (
+	// Batch send interval for analytics data
+	batchSendInterval = 10 * time.Second
 )
 
 // createHTTPClient creates a reusable HTTP client with optimal settings
@@ -53,7 +62,7 @@ type HTTPServerConfig struct {
 // HTTPServer is an enhanced MCP server with Chi router
 type HTTPServer struct {
 	mcpServer        *server.MCPServer
-	analytics        *Analytics
+	analytics        *analytics.Analytics
 	config           HTTPServerConfig
 	Router           chi.Router // Made public for CreateHTTPServerWithMiddleware
 	streamableServer *server.StreamableHTTPServer
@@ -97,10 +106,10 @@ func NewHTTPServer(config HTTPServerConfig) (*HTTPServer, error) {
 	// Initialize batch-based analytics
 	// Note: In HTTP mode, FallbackRPToken is always empty (tokens come from HTTP headers).
 	// Analytics uses UserID for identification in HTTP mode.
-	var analytics *Analytics
+	var analyticsClient *analytics.Analytics
 	if config.AnalyticsOn && config.GA4Secret != "" {
 		var err error
-		analytics, err = NewAnalytics(
+		analyticsClient, err = analytics.NewAnalytics(
 			config.UserID,
 			config.GA4Secret,
 			"", // FallbackRPToken is always empty in HTTP mode
@@ -116,7 +125,7 @@ func NewHTTPServer(config HTTPServerConfig) (*HTTPServer, error) {
 
 	httpServer := &HTTPServer{
 		mcpServer:  mcpServer,
-		analytics:  analytics,
+		analytics:  analyticsClient,
 		config:     config,
 		httpClient: httpClient,
 	}
@@ -140,44 +149,15 @@ func (hs *HTTPServer) initializeTools() error {
 
 	// Use HTTP client
 	rpClient.APIClient.GetConfig().HTTPClient = hs.httpClient
-	rpClient.APIClient.GetConfig().Middleware = QueryParamsMiddleware
+	rpClient.APIClient.GetConfig().Middleware = middleware.QueryParamsMiddleware
 
-	// Add launch management tools with analytics
-	launches := NewLaunchResources(rpClient, hs.analytics, "")
+	// Register launch management tools with analytics
+	mcp_handlers.RegisterLaunchTools(hs.mcpServer, rpClient, hs.analytics, "")
 
-	hs.mcpServer.AddTool(launches.toolGetLaunches())
-	hs.mcpServer.AddTool(launches.toolGetLastLaunchByName())
-	hs.mcpServer.AddTool(launches.toolForceFinishLaunch())
-	hs.mcpServer.AddTool(launches.toolDeleteLaunch())
-	hs.mcpServer.AddTool(launches.toolRunAutoAnalysis())
-	hs.mcpServer.AddTool(launches.toolUniqueErrorAnalysis())
-	hs.mcpServer.AddTool(launches.toolRunQualityGate())
+	// Register test item tools
+	mcp_handlers.RegisterTestItemTools(hs.mcpServer, rpClient, hs.analytics, "")
 
-	hs.mcpServer.AddResourceTemplate(launches.resourceLaunch())
-
-	// Add test item tools
-	testItems := NewTestItemResources(rpClient, hs.analytics, "")
-
-	hs.mcpServer.AddTool(testItems.toolGetTestItemById())
-	hs.mcpServer.AddTool(testItems.toolGetTestItemsByFilter())
-	hs.mcpServer.AddTool(testItems.toolGetTestItemLogsByFilter())
-	hs.mcpServer.AddTool(testItems.toolGetTestItemAttachment())
-	hs.mcpServer.AddTool(testItems.toolGetTestSuitesByFilter())
-	hs.mcpServer.AddTool(testItems.toolGetProjectDefectTypes())
-	hs.mcpServer.AddTool(testItems.toolUpdateDefectTypeForTestItems())
-
-	hs.mcpServer.AddResourceTemplate(testItems.resourceTestItem())
-
-	// Add prompts
-	prompts, err := readPrompts(promptFiles, "prompts")
-	if err != nil {
-		return fmt.Errorf("failed to load prompts: %w", err)
-	}
-
-	for _, prompt := range prompts {
-		hs.mcpServer.AddPrompt(prompt.Prompt, prompt.Handler)
-	}
-
+	// Prompts are registered by mcp_handlers package
 	return nil
 }
 
@@ -228,7 +208,7 @@ func (hs *HTTPServer) Stop() error {
 // CreateHTTPServerWithMiddleware creates a complete HTTP server setup with middleware
 func CreateHTTPServerWithMiddleware(
 	config HTTPServerConfig,
-) (*HTTPServerWithMiddleware, *Analytics, error) {
+) (*HTTPServerWithMiddleware, *analytics.Analytics, error) {
 	// Create the MCP server with Chi router and middleware already configured
 	mcpServer, err := NewHTTPServer(config)
 	if err != nil {
@@ -299,7 +279,7 @@ func (hs *HTTPServer) conditionalTimeoutMiddleware(next http.Handler) http.Handl
 			return
 		}
 		// Apply timeout for regular requests
-		middleware.Timeout(hs.config.ConnectionTimeout)(next).ServeHTTP(w, r)
+		chimiddleware.Timeout(hs.config.ConnectionTimeout)(next).ServeHTTP(w, r)
 	})
 }
 
@@ -311,15 +291,15 @@ func (hs *HTTPServer) setupChiRouter() {
 	r.Use(corsMiddleware)
 
 	// Add Chi middleware
-	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
-	r.Use(middleware.Logger)
-	r.Use(middleware.Recoverer)
+	r.Use(chimiddleware.RequestID)
+	r.Use(chimiddleware.RealIP)
+	r.Use(chimiddleware.Logger)
+	r.Use(chimiddleware.Recoverer)
 	// Use conditional timeout that skips SSE streams
 	r.Use(hs.conditionalTimeoutMiddleware)
 
 	// Add HTTP concurrency control
-	r.Use(middleware.Throttle(hs.config.MaxConcurrentRequests))
+	r.Use(chimiddleware.Throttle(hs.config.MaxConcurrentRequests))
 
 	// Create streamable server for MCP functionality
 	hs.streamableServer = server.NewStreamableHTTPServer(hs.mcpServer)
@@ -359,7 +339,7 @@ func (hs *HTTPServer) setupRoutes() {
 	// MCP endpoints using chi.Group pattern
 	hs.Router.Group(func(mcpRouter chi.Router) {
 		// Add MCP-specific middleware for token extraction and validation
-		mcpRouter.Use(HTTPTokenMiddleware)
+		mcpRouter.Use(middleware.HTTPTokenMiddleware)
 		mcpRouter.Use(hs.mcpMiddleware)
 
 		// Handle all MCP endpoints
@@ -371,12 +351,12 @@ func (hs *HTTPServer) setupRoutes() {
 }
 
 // GetHTTPServerInfo returns information about the HTTP server configuration
-func GetHTTPServerInfo(analytics *Analytics) HTTPServerInfo {
+func GetHTTPServerInfo(analyticsClient *analytics.Analytics) HTTPServerInfo {
 	info := HTTPServerInfo{
 		Type: "http_mcp_server",
 	}
 
-	if analytics != nil {
+	if analyticsClient != nil {
 		info.Analytics = AnalyticsInfo{
 			Enabled:  true,
 			Type:     "batch",
