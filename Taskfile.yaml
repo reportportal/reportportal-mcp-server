@@ -38,6 +38,10 @@ tasks:
     desc: "Runs tests"
     cmd: "go test ./..."
 
+  test:integration:
+    desc: "Runs integration tests"
+    cmd: "go test ./internal/integration/... -v"
+
   test:json-report:
     desc: "Runs tests and outputs results in JSON format"
     cmd: "go test -json ./..."
@@ -115,3 +119,7 @@ tasks:
       {{else}}
       {{.INSPECTOR}} -- docker run -p {{.DLV_PORT}}:{{.DLV_PORT}} -i --rm -e "RP_API_TOKEN=$RP_API_TOKEN" -e "RP_PROJECT=$RP_PROJECT" -e "RP_HOST=$RP_HOST" -e "MCP_MODE={{.MCP_MODE}}" {{.IMAGE_NAME_DEBUG}}
       {{end}}
+
+  verify:testdata:
+    desc: "Verifies all JSON test fixtures in testdata/ (recursively) against running MCP server at http://localhost:{{.MCP_SERVER_PORT}}/mcp (requires server to be running, RP_API_TOKEN and RP_PROJECT env vars)"
+    cmd: go run cmd/verify-testdata/main.go -url "http://localhost:{{.MCP_SERVER_PORT}}/mcp" -dir testdata
