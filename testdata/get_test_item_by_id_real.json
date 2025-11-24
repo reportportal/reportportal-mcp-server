@@ -1,0 +1,75 @@
+{
+  "name": "Get Test Item By ID - Real Example",
+  "description": "Test case for getting a test item by ID from ReportPortal via MCP Server using real API response format",
+  "endpointPath": "/v1/{projectName}/item/{itemId}",
+  "reportPortalMock": {
+    "requestResponsePairs": [
+      {
+        "request": {
+          "method": "GET",
+          "header": [
+            {
+              "key": "Authorization",
+              "value": "Bearer 550e8400-e29b-41d4-a716-446655440000"
+            }
+          ],
+          "url": {
+            "raw": "https://reportportal.epam.com/api/v1/test-project/item/5273849853",
+            "protocol": "https",
+            "host": ["reportportal", "epam", "com"],
+            "path": ["api", "v1", "test-project", "item", "5273849853"]
+          }
+        },
+        "response": {
+          "name": "Get Test Item Success",
+          "code": 200,
+          "header": [
+            {
+              "key": "Content-Type",
+              "value": "application/json"
+            }
+          ],
+          "body": "{\n  \"id\": 5273849853,\n  \"uuid\": \"155798d8-3594-4f1e-a96b-0e3af86330e8\",\n  \"name\": \"History table. Extended functionality. Permissions. Edit defect\",\n  \"codeRef\": \"com.epam.ta.reportportal.demodata.History table. Extended functionality. Permissions. Edit defect\",\n  \"description\": \"This is a `test` level. Here you can handle *the aggregated information* per  `test`.\",\n  \"parameters\": [],\n  \"attributes\": [\n    {\n      \"key\": \"os\",\n      \"value\": \"android\"\n    },\n    {\n      \"key\": \"status\",\n      \"value\": \"interrupted\"\n    },\n    {\n      \"key\": null,\n      \"value\": \"most failed\"\n    },\n    {\n      \"key\": null,\n      \"value\": \"flaky\"\n    }\n  ],\n  \"type\": \"TEST\",\n  \"startTime\": \"2025-10-30T11:08:15.852607Z\",\n  \"endTime\": \"2025-10-30T11:08:16.155991Z\",\n  \"status\": \"PASSED\",\n  \"statistics\": {\n    \"executions\": {\n      \"total\": 1,\n      \"passed\": 1\n    },\n    \"defects\": {}\n  },\n  \"parent\": 5273849852,\n  \"pathNames\": {\n    \"launchPathName\": {\n      \"name\": \"Demo Api Tests\",\n      \"number\": 20\n    },\n    \"itemPaths\": [\n      {\n        \"id\": 5273849852,\n        \"name\": \"Suite with nested steps\"\n      }\n    ]\n  },\n  \"hasChildren\": true,\n  \"hasStats\": true,\n  \"launchId\": 9340675,\n  \"uniqueId\": \"auto:167c4e5c0a63dac8e1fab9a5fa0a7952\",\n  \"testCaseId\": \"com.epam.ta.reportportal.demodata.History table. Extended functionality. Permissions. Edit defect\",\n  \"testCaseHash\": 1559429329,\n  \"patternTemplates\": [],\n  \"path\": \"5273849852.5273849853\"\n}"
+        }
+      }
+    ]
+  },
+  "llmClientMock": {
+    "request": {
+      "method": "POST",
+      "header": [
+        {
+          "key": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "key": "Authorization",
+          "value": "Bearer 550e8400-e29b-41d4-a716-446655440000"
+        },
+        {
+          "key": "X-Project",
+          "value": "test-project"
+        }
+      ],
+      "body": {
+        "mode": "raw",
+        "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"tools/call\",\n  \"id\": 1,\n  \"params\": {\n    \"name\": \"get_test_item_by_id\",\n    \"arguments\": {\n      \"test_item_id\": \"5273849853\"\n    }\n  }\n}"
+      },
+      "url": {
+        "raw": "/mcp",
+        "path": ["mcp"]
+      }
+    },
+    "expectedResponse": {
+      "name": "MCP Get Test Item By ID Response",
+      "code": 200,
+      "header": [
+        {
+          "key": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\n  \\\"id\\\": 5273849853,\\n  \\\"uuid\\\": \\\"155798d8-3594-4f1e-a96b-0e3af86330e8\\\",\\n  \\\"name\\\": \\\"History table. Extended functionality. Permissions. Edit defect\\\",\\n  \\\"codeRef\\\": \\\"com.epam.ta.reportportal.demodata.History table. Extended functionality. Permissions. Edit defect\\\",\\n  \\\"description\\\": \\\"This is a `test` level. Here you can handle *the aggregated information* per  `test`.\\\",\\n  \\\"parameters\\\": [],\\n  \\\"attributes\\\": [\\n    {\\n      \\\"key\\\": \\\"os\\\",\\n      \\\"value\\\": \\\"android\\\"\\n    },\\n    {\\n      \\\"key\\\": \\\"status\\\",\\n      \\\"value\\\": \\\"interrupted\\\"\\n    },\\n    {\\n      \\\"key\\\": null,\\n      \\\"value\\\": \\\"most failed\\\"\\n    },\\n    {\\n      \\\"key\\\": null,\\n      \\\"value\\\": \\\"flaky\\\"\\n    }\\n  ],\\n  \\\"type\\\": \\\"TEST\\\",\\n  \\\"startTime\\\": \\\"2025-10-30T11:08:15.852607Z\\\",\\n  \\\"endTime\\\": \\\"2025-10-30T11:08:16.155991Z\\\",\\n  \\\"status\\\": \\\"PASSED\\\",\\n  \\\"statistics\\\": {\\n    \\\"executions\\\": {\\n      \\\"total\\\": 1,\\n      \\\"passed\\\": 1\\n    },\\n    \\\"defects\\\": {}\\n  },\\n  \\\"parent\\\": 5273849852,\\n  \\\"pathNames\\\": {\\n    \\\"launchPathName\\\": {\\n      \\\"name\\\": \\\"Demo Api Tests\\\",\\n      \\\"number\\\": 20\\n    },\\n    \\\"itemPaths\\\": [\\n      {\\n        \\\"id\\\": 5273849852,\\n        \\\"name\\\": \\\"Suite with nested steps\\\"\\n      }\\n    ]\\n  },\\n  \\\"hasChildren\\\": true,\\n  \\\"hasStats\\\": true,\\n  \\\"launchId\\\": 9340675,\\n  \\\"uniqueId\\\": \\\"auto:167c4e5c0a63dac8e1fab9a5fa0a7952\\\",\\n  \\\"testCaseId\\\": \\\"com.epam.ta.reportportal.demodata.History table. Extended functionality. Permissions. Edit defect\\\",\\n  \\\"testCaseHash\\\": 1559429329,\\n  \\\"patternTemplates\\\": [],\\n  \\\"path\\\": \\\"5273849852.5273849853\\\"\\n}\"}]}}"
+    }
+  }
+}

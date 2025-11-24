@@ -1,0 +1,62 @@
+{
+  "info": {
+    "name": "ReportPortal MCP Server Integration Tests",
+    "description": "Integration tests for ReportPortal MCP Server",
+    "schema": "https://schema.postman.com/collection/json/v2.1.0/draft-07/collection.json",
+    "_postman_id": "test-collection-001"
+  },
+  "item": [
+    {
+      "name": "Get Launches",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"tools/call\",\n  \"id\": 1,\n  \"params\": {\n    \"name\": \"get_launches\",\n    \"arguments\": {\n      \"page\": 1,\n      \"page-size\": 10\n    }\n  }\n}"
+        },
+        "url": {
+          "raw": "{{mcp_server_url}}/mcp",
+          "host": ["{{mcp_server_url}}"],
+          "path": ["mcp"]
+        }
+      },
+      "response": [
+        {
+          "name": "Success",
+          "originalRequest": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": ""
+            },
+            "url": {
+              "raw": "{{mcp_server_url}}/mcp",
+              "host": ["{{mcp_server_url}}"],
+              "path": ["mcp"]
+            }
+          },
+          "status": "OK",
+          "code": 200,
+          "header": [
+            {
+              "key": "Content-Type",
+              "value": "application/json"
+            }
+          ],
+          "body": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"result\": {\n    \"content\": []\n  }\n}"
+        }
+      ]
+    }
+  ]
+}

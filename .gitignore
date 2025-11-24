@@ -13,3 +13,5 @@ helm-charts/**/examples/
 
 # Examples directory
 examples/**
+
+*.exe
