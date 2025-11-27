@@ -1,10 +1,12 @@
-package mcpreportportal
+package utils
 
 import (
 	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/reportportal/reportportal-mcp-server/internal/testutil"
 )
 
 func TestExtractProject(t *testing.T) {
@@ -160,12 +162,10 @@ func TestExtractProject(t *testing.T) {
 			}
 
 			// Create mock request with project parameter
-			request := MockCallToolRequest{
-				project: tt.projectFromRequest,
-			}
+			request := testutil.NewMockCallToolRequest(tt.projectFromRequest)
 
 			// Call extractProject with interface conversion
-			result, err := extractProjectWithMock(ctx, request)
+			result, err := ExtractProjectWithMock(ctx, &request)
 
 			// Verify result
 			if tt.expectError {

@@ -1,4 +1,4 @@
-package mcpreportportal
+package middleware
 
 import (
 	"net/http"
@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/reportportal/reportportal-mcp-server/internal/utils"
 )
 
 func TestQueryParamsMiddleware(t *testing.T) {
@@ -15,7 +17,7 @@ func TestQueryParamsMiddleware(t *testing.T) {
 	params.Add("b", "3")
 
 	req, _ := http.NewRequest("GET", "http://example.com/path?x=9", nil)
-	ctx := WithQueryParams(req.Context(), params)
+	ctx := utils.WithQueryParams(req.Context(), params)
 	req = req.WithContext(ctx)
 
 	QueryParamsMiddleware(req)

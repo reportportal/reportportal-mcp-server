@@ -1,4 +1,4 @@
-package mcpreportportal
+package analytics
 
 import (
 	"bytes"
@@ -13,6 +13,8 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/reportportal/reportportal-mcp-server/internal/middleware"
 )
 
 // Test constants
@@ -574,7 +576,7 @@ func TestGetUserIDFromContext(t *testing.T) {
 			// Create context with or without Bearer token
 			ctx := context.Background()
 			if tt.tokenInContext != "" {
-				ctx = WithTokenInContext(ctx, tt.tokenInContext)
+				ctx = middleware.WithTokenInContext(ctx, tt.tokenInContext)
 			}
 
 			// Get user ID from context
@@ -623,7 +625,7 @@ func TestTrackMCPEventWithTokenFromContext(t *testing.T) {
 
 		// Track event with Bearer token in context
 		bearerToken := testToken1
-		ctx := WithTokenInContext(context.Background(), bearerToken)
+		ctx := middleware.WithTokenInContext(context.Background(), bearerToken)
 
 		analytics.TrackMCPEvent(ctx, "test_tool_1")
 
@@ -659,7 +661,7 @@ func TestTrackMCPEventWithTokenFromContext(t *testing.T) {
 
 		// Track event with different Bearer tokens
 		token1 := testToken1
-		ctx1 := WithTokenInContext(context.Background(), token1)
+		ctx1 := middleware.WithTokenInContext(context.Background(), token1)
 
 		analytics.TrackMCPEvent(ctx1, "test_tool_1")
 
@@ -674,7 +676,7 @@ func TestTrackMCPEventWithTokenFromContext(t *testing.T) {
 
 		// Track with different Bearer token
 		token2 := testToken2
-		ctx2 := WithTokenInContext(context.Background(), token2)
+		ctx2 := middleware.WithTokenInContext(context.Background(), token2)
 
 		analytics.TrackMCPEvent(ctx2, "test_tool_2")
 
@@ -732,8 +734,8 @@ func TestAnalyticsBatchSendingPerUser(t *testing.T) {
 		token1 := testToken1
 		token2 := testToken2
 
-		ctx1 := WithTokenInContext(context.Background(), token1)
-		ctx2 := WithTokenInContext(context.Background(), token2)
+		ctx1 := middleware.WithTokenInContext(context.Background(), token1)
+		ctx2 := middleware.WithTokenInContext(context.Background(), token2)
 
 		// Track multiple events
 		analytics.TrackMCPEvent(ctx1, "tool_a")
@@ -769,8 +771,8 @@ func TestAnalyticsBatchSendingPerUser(t *testing.T) {
 		token1 := testToken1
 		token2 := testToken2
 
-		ctx1 := WithTokenInContext(context.Background(), token1)
-		ctx2 := WithTokenInContext(context.Background(), token2)
+		ctx1 := middleware.WithTokenInContext(context.Background(), token1)
+		ctx2 := middleware.WithTokenInContext(context.Background(), token2)
 
 		// Track multiple events
 		analytics.TrackMCPEvent(ctx1, "tool_a")
@@ -821,7 +823,7 @@ func TestAnalyticsHashingComparison_WithAndWithoutRPToken(t *testing.T) {
 	defer analytics2.Stop()
 
 	// Create context with Bearer token (same for both)
-	ctxWithBearer := WithTokenInContext(context.Background(), bearerToken)
+	ctxWithBearer := middleware.WithTokenInContext(context.Background(), bearerToken)
 
 	// Get user IDs from both analytics instances
 	userID1 := analytics1.getUserIDFromContext(ctxWithBearer)
@@ -902,7 +904,7 @@ func TestSameTokenDifferentSources_ProducesSameHash(t *testing.T) {
 	defer analytics2.Stop()
 
 	// Create context with the SAME token value in Bearer header
-	ctxWithBearer := WithTokenInContext(context.Background(), sameTokenValue)
+	ctxWithBearer := middleware.WithTokenInContext(context.Background(), sameTokenValue)
 
 	// Get user IDs from both scenarios
 	userID1 := analytics1.getUserIDFromContext(context.Background()) // Uses env var
@@ -972,7 +974,7 @@ func TestHTTPTokenMiddlewareIntegrationWithAnalytics(t *testing.T) {
 		})
 
 		// Wrap with HTTPTokenMiddleware
-		middleware := HTTPTokenMiddleware(testHandler)
+		handler := middleware.HTTPTokenMiddleware(testHandler)
 
 		// Request with Bearer token
 		token := testToken1
@@ -980,7 +982,7 @@ func TestHTTPTokenMiddlewareIntegrationWithAnalytics(t *testing.T) {
 		req1.Header.Set("Authorization", "Bearer "+token)
 
 		rr1 := httptest.NewRecorder()
-		middleware.ServeHTTP(rr1, req1)
+		handler.ServeHTTP(rr1, req1)
 
 		assert.Equal(t, http.StatusOK, rr1.Code)
 
@@ -998,7 +1000,7 @@ func TestHTTPTokenMiddlewareIntegrationWithAnalytics(t *testing.T) {
 		req2 := httptest.NewRequest("POST", "/test", nil)
 
 		rr2 := httptest.NewRecorder()
-		middleware.ServeHTTP(rr2, req2)
+		handler.ServeHTTP(rr2, req2)
 
 		assert.Equal(t, http.StatusOK, rr2.Code)
 
@@ -1032,7 +1034,7 @@ func TestHTTPTokenMiddlewareIntegrationWithAnalytics(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 		})
 
-		middleware := HTTPTokenMiddleware(testHandler)
+		handler := middleware.HTTPTokenMiddleware(testHandler)
 
 		// Request with Bearer token (should be ignored)
 		bearerToken := testToken1
@@ -1040,7 +1042,7 @@ func TestHTTPTokenMiddlewareIntegrationWithAnalytics(t *testing.T) {
 		req.Header.Set("Authorization", "Bearer "+bearerToken)
 
 		rr := httptest.NewRecorder()
-		middleware.ServeHTTP(rr, req)
+		handler.ServeHTTP(rr, req)
 
 		assert.Equal(t, http.StatusOK, rr.Code)
 

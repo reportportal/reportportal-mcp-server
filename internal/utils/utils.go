@@ -1,4 +1,4 @@
-package mcpreportportal
+package utils
 
 import (
 	"context"
@@ -15,19 +15,19 @@ import (
 )
 
 const (
-	firstPage                  = 1                       // Default starting page for pagination
-	singleResult               = 1                       // Default number of results per page
-	defaultPageSize            = 50                      // Default number of elements per page
-	defaultSortingForLaunches  = "startTime,number,DESC" // default sorting order for launches
-	defaultSortingForItems     = "startTime,DESC"        // default sorting order for items
-	defaultSortingForSuites    = "startTime,ASC"         // default sorting order for suites
-	defaultSortingForLogs      = "logTime,ASC"           // default sorting order for logs
-	defaultProviderType        = "launch"                // default provider type
-	defaultFilterEqHasChildren = "false"                 // items which don't have children
-	defaultFilterEqHasStats    = "true"
-	defaultFilterInType        = "STEP"
-	defaultFilterInTypeSuites  = "SUITE,TEST"
-	defaultItemLogLevel        = "TRACE" // Default log level for test item logs
+	FirstPage                  = 1                       // Default starting page for pagination
+	SingleResult               = 1                       // Default number of results per page
+	DefaultPageSize            = 50                      // Default number of elements per page
+	DefaultSortingForLaunches  = "startTime,number,DESC" // default sorting order for launches
+	DefaultSortingForItems     = "startTime,DESC"        // default sorting order for items
+	DefaultSortingForSuites    = "startTime,ASC"         // default sorting order for suites
+	DefaultSortingForLogs      = "logTime,ASC"           // default sorting order for logs
+	DefaultProviderType        = "launch"                // default provider type
+	DefaultFilterEqHasChildren = "false"                 // items which don't have children
+	DefaultFilterEqHasStats    = "true"
+	DefaultFilterInType        = "STEP"
+	DefaultFilterInTypeSuites  = "SUITE,TEST"
+	DefaultItemLogLevel        = "TRACE" // Default log level for test item logs
 )
 
 // PaginatedRequest is a generic interface for API requests that support pagination
@@ -37,15 +37,15 @@ type PaginatedRequest[T any] interface {
 	PageSort(string) T
 }
 
-// setPaginationOptions returns the standard pagination parameters for MCP tools
-func setPaginationOptions(sortingParams string) []mcp.ToolOption {
+// SetPaginationOptions returns the standard pagination parameters for MCP tools
+func SetPaginationOptions(sortingParams string) []mcp.ToolOption {
 	return []mcp.ToolOption{
 		mcp.WithNumber("page", // Parameter for specifying the page number
-			mcp.DefaultNumber(firstPage),
+			mcp.DefaultNumber(FirstPage),
 			mcp.Description("Page number"),
 		),
 		mcp.WithNumber("page-size", // Parameter for specifying the page size
-			mcp.DefaultNumber(defaultPageSize),
+			mcp.DefaultNumber(DefaultPageSize),
 			mcp.Description("Page size"),
 		),
 		mcp.WithString("page-sort", // Sorting fields and direction
@@ -55,20 +55,20 @@ func setPaginationOptions(sortingParams string) []mcp.ToolOption {
 	}
 }
 
-// applyPaginationOptions extracts pagination from request and applies it to API request
-func applyPaginationOptions[T PaginatedRequest[T]](
+// ApplyPaginationOptions extracts pagination from request and applies it to API request
+func ApplyPaginationOptions[T PaginatedRequest[T]](
 	apiRequest T,
 	request mcp.CallToolRequest,
 	sortingParams string,
 ) T {
 	// Extract the "page" parameter from the request
-	pageInt := request.GetInt("page", firstPage)
+	pageInt := request.GetInt("page", FirstPage)
 	if pageInt > math.MaxInt32 {
 		pageInt = math.MaxInt32
 	}
 
 	// Extract the "page-size" parameter from the request
-	pageSizeInt := request.GetInt("page-size", defaultPageSize)
+	pageSizeInt := request.GetInt("page-size", DefaultPageSize)
 	if pageSizeInt > math.MaxInt32 {
 		pageSizeInt = math.MaxInt32
 	}
@@ -83,7 +83,8 @@ func applyPaginationOptions[T PaginatedRequest[T]](
 		PageSort(pageSort)
 }
 
-func extractProject(ctx context.Context, rq mcp.CallToolRequest) (string, error) {
+// ExtractProject extracts project name from request or context
+func ExtractProject(ctx context.Context, rq mcp.CallToolRequest) (string, error) {
 	// Use project parameter from request
 	if project := strings.TrimSpace(rq.GetString("project", "")); project != "" {
 		return project, nil
@@ -97,11 +98,12 @@ func extractProject(ctx context.Context, rq mcp.CallToolRequest) (string, error)
 	)
 }
 
-func extractResponseError(err error, rs *http.Response) (errText string) {
+// ExtractResponseError extracts error message from HTTP response
+func ExtractResponseError(err error, rs *http.Response) (errText string) {
 	errText = err.Error()
 	if rs != nil && rs.Body != nil {
 		// Check if the original error indicates the body is already closed
-		if isAlreadyClosedError(err) {
+		if IsAlreadyClosedError(err) {
 			// Don't attempt to read from an already-closed body
 			return errText + " (response body already processed)"
 		}
@@ -109,7 +111,7 @@ func extractResponseError(err error, rs *http.Response) (errText string) {
 		defer func() {
 			if closeErr := rs.Body.Close(); closeErr != nil {
 				// Only log close errors if it's not an already-closed body
-				if !isAlreadyClosedError(closeErr) {
+				if !IsAlreadyClosedError(closeErr) {
 					errText = errText + " (body close error: " + closeErr.Error() + ")"
 				}
 			}
@@ -124,8 +126,8 @@ func extractResponseError(err error, rs *http.Response) (errText string) {
 	return errText
 }
 
-// Helper function to parse timestamp to Unix epoch
-func parseTimestampToEpoch(timestampStr string) (int64, error) {
+// ParseTimestampToEpoch parses timestamp to Unix epoch
+func ParseTimestampToEpoch(timestampStr string) (int64, error) {
 	if timestampStr == "" {
 		return 0, fmt.Errorf("empty timestamp")
 	}
@@ -158,16 +160,16 @@ func parseTimestampToEpoch(timestampStr string) (int64, error) {
 	return 0, fmt.Errorf("unable to parse timestamp: %s", timestampStr)
 }
 
-// processStartTimeFilter processes start time interval filter and returns the formatted filter string
-func processStartTimeFilter(filterStartTimeFrom, filterStartTimeTo string) (string, error) {
+// ProcessStartTimeFilter processes start time interval filter and returns the formatted filter string
+func ProcessStartTimeFilter(filterStartTimeFrom, filterStartTimeTo string) (string, error) {
 	// Process start time interval filter
 	var filterStartTime string
 	if filterStartTimeFrom != "" && filterStartTimeTo != "" {
-		fromEpoch, err := parseTimestampToEpoch(filterStartTimeFrom)
+		fromEpoch, err := ParseTimestampToEpoch(filterStartTimeFrom)
 		if err != nil {
 			return "", fmt.Errorf("invalid from timestamp: %v", err)
 		}
-		toEpoch, err := parseTimestampToEpoch(filterStartTimeTo)
+		toEpoch, err := ParseTimestampToEpoch(filterStartTimeTo)
 		if err != nil {
 			return "", fmt.Errorf("invalid to timestamp: %v", err)
 		}
@@ -183,8 +185,8 @@ func processStartTimeFilter(filterStartTimeFrom, filterStartTimeTo string) (stri
 	return filterStartTime, nil
 }
 
-// processAttributeKeys processes attribute keys by adding ":" suffix where needed and combines with existing attributes
-func processAttributeKeys(filterAttributes, filterAttributeKeys string) string {
+// ProcessAttributeKeys processes attribute keys by adding ":" suffix where needed and combines with existing attributes
+func ProcessAttributeKeys(filterAttributes, filterAttributeKeys string) string {
 	if filterAttributeKeys == "" {
 		return filterAttributes
 	}
@@ -214,7 +216,8 @@ func processAttributeKeys(filterAttributes, filterAttributeKeys string) string {
 	return result
 }
 
-func isTextContent(mediaType string) bool {
+// IsTextContent checks if media type is text content
+func IsTextContent(mediaType string) bool {
 	lowerType := strings.ToLower(mediaType)
 
 	// Text types (most common)
@@ -236,9 +239,9 @@ func isTextContent(mediaType string) bool {
 	return false
 }
 
-// isAlreadyClosedError checks if the error indicates that the response body is already closed.
+// IsAlreadyClosedError checks if the error indicates that the response body is already closed.
 // This helps avoid unnecessary error logging when closing an already-closed body.
-func isAlreadyClosedError(err error) bool {
+func IsAlreadyClosedError(err error) bool {
 	if err == nil {
 		return false
 	}
@@ -251,9 +254,9 @@ func isAlreadyClosedError(err error) bool {
 		strings.Contains(errStr, "connection closed")
 }
 
-// readResponseBodyRaw safely reads an HTTP response body and ensures proper cleanup.
+// ReadResponseBodyRaw safely reads an HTTP response body and ensures proper cleanup.
 // It returns the raw body bytes along with any error, suitable for custom content type handling.
-func readResponseBodyRaw(response *http.Response) ([]byte, error) {
+func ReadResponseBodyRaw(response *http.Response) ([]byte, error) {
 	// Ensure response body is always closed
 	if response == nil || response.Body == nil {
 		return nil, fmt.Errorf("empty HTTP response body")
@@ -262,7 +265,7 @@ func readResponseBodyRaw(response *http.Response) ([]byte, error) {
 		if closeErr := response.Body.Close(); closeErr != nil {
 			// Only log if it's not a "already closed" type error
 			// Some HTTP implementations return specific errors for already-closed bodies
-			if !isAlreadyClosedError(closeErr) {
+			if !IsAlreadyClosedError(closeErr) {
 				slog.Error("failed to close response body", "error", closeErr)
 			}
 		}
@@ -277,11 +280,11 @@ func readResponseBodyRaw(response *http.Response) ([]byte, error) {
 	return rawBody, nil
 }
 
-// readResponseBody safely reads an HTTP response body and ensures proper cleanup.
+// ReadResponseBody safely reads an HTTP response body and ensures proper cleanup.
 // It handles the defer close pattern with graceful error handling and returns an MCP tool result.
-// This is a convenience wrapper around readResponseBodyRaw for MCP tool results.
-func readResponseBody(response *http.Response) (*mcp.CallToolResult, error) {
-	rawBody, err := readResponseBodyRaw(response)
+// This is a convenience wrapper around ReadResponseBodyRaw for MCP tool results.
+func ReadResponseBody(response *http.Response) (*mcp.CallToolResult, error) {
+	rawBody, err := ReadResponseBodyRaw(response)
 	if err != nil {
 		return mcp.NewToolResultError(
 			fmt.Sprintf("failed to read response body: %v", err),

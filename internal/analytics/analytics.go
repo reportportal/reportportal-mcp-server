@@ -1,4 +1,4 @@
-package mcpreportportal
+package analytics
 
 import (
 	"bytes"
@@ -17,6 +17,8 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+
+	"github.com/reportportal/reportportal-mcp-server/internal/middleware"
 )
 
 const (
@@ -109,6 +111,7 @@ type Analytics struct {
 	stopChan   chan struct{}
 	wg         sync.WaitGroup
 	tickerDone chan struct{}
+	stopped    int32 // atomic flag: 0 = running, 1 = stopped
 }
 
 // NewAnalytics creates a new Analytics instance
@@ -198,7 +201,7 @@ func (a *Analytics) getUserIDFromContext(ctx context.Context) string {
 	}
 
 	// If no env var token/user ID was set (anonymous mode), try to get token from context
-	if token, ok := GetTokenFromContext(ctx); ok && token != "" {
+	if token, ok := middleware.GetTokenFromContext(ctx); ok && token != "" {
 		// Hash the Bearer token to get a secure user identifier
 		hashedToken := HashToken(token)
 		slog.Debug("Using Bearer token from request for analytics", "source", "bearer_header")
@@ -363,8 +366,16 @@ func (a *Analytics) startMetricsProcessor() {
 }
 
 // Stop gracefully shuts down the analytics system
+// Stop is idempotent and safe to call multiple times
 func (a *Analytics) Stop() {
 	if a == nil || a.stopChan == nil {
+		return
+	}
+
+	// Use atomic CAS to ensure Stop only executes once
+	// Compare-and-swap: if stopped is 0, set it to 1 and proceed; otherwise return
+	if !atomic.CompareAndSwapInt32(&a.stopped, 0, 1) {
+		// Already stopped, return early
 		return
 	}
 
