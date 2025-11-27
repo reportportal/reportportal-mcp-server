@@ -230,12 +230,11 @@ Documentation: [JetBrains Copilot Guide](https://plugins.jetbrains.com/plugin/17
   }
 }
 ```
+3. Save and restart Claude Desktop.
 
 **For remote server:**
 
 TBU
-
-3. Save and restart Claude Desktop.
 
 ### Claude Code CLI
 
