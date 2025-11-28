@@ -1,0 +1,11 @@
+services:
+  mcp-server:
+    image: reportportal/mcp-server:latest
+    container_name: reportportal-mcp-server
+    restart: always
+    environment:       
+      MCP_MODE: http
+      RP_HOST: https://your-reportportal-instance.com
+      RP_MCP_ANALYTICS_OFF: true
+    ports:
+        - 8085:8080
