@@ -1,0 +1,109 @@
+# Number of replicas for the deployment
+replicaCount: 1
+
+# Container image configuration
+image:
+  repository: reportportal/mcp-server
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+# Image pull secrets for private registries
+imagePullSecrets: []
+
+# Override the name of the chart
+nameOverride: ""
+# Override the full name of the release
+fullnameOverride: ""
+
+# ServiceAccount configuration
+serviceAccount:
+  create: true
+  annotations: {}
+  name: "reportportal-mcp-server"
+
+# Pod annotations
+podAnnotations: {}
+# Pod security context
+podSecurityContext: {}
+# Container security context
+securityContext: {}
+
+# Environment variables for the MCP server
+# MCP mode: "http" for HTTP mode
+mcpMode: "http"
+# ReportPortal host URL
+rpHost: "https://your-reportportal-instance.com"
+# Disable MCP analytics (set to "true" to disable)
+rpMcpAnalyticsOff: "true"
+
+# Extra environment variables (key-value pairs)
+# Example:
+# extraEnv:
+#   - name: DEBUG
+#     value: "true"
+#   - name: LOG_LEVEL
+#     value: "info"
+extraEnv: []
+
+# Init containers (runs before main container)
+# Example:
+# initContainers:
+#   - name: wait-for-db
+#     image: busybox:1.35
+#     command: ['sh', '-c', 'until nc -z db-host 5432; do sleep 1; done']
+initContainers: []
+
+# Sidecar containers (runs alongside main container)
+# Example:
+# sidecarContainers:
+#   - name: log-collector
+#     image: fluent/fluent-bit:latest
+#     volumeMounts:
+#       - name: logs
+#         mountPath: /var/log
+sidecarContainers: []
+
+# Service configuration
+service:
+  type: ClusterIP
+  port: 8080
+  targetPort: 8080
+
+# Ingress configuration
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations: {}
+  hosts:
+    - host: reportportal-mcp-server.local
+      paths:
+        # Path prefix for the ingress (e.g., /, /mcp, /api/mcp, etc.)
+        - path: /
+          pathType: Prefix
+  tls: []
+
+# Resource limits and requests
+resources:
+  requests:
+    memory: "128Mi"
+    cpu: "100m"
+  limits:
+    memory: "256Mi"
+    cpu: "200m"
+
+# Horizontal Pod Autoscaler configuration
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 100
+  targetCPUUtilizationPercentage: 80
+
+# Node selector for pod placement
+nodeSelector: {}
+
+# Tolerations for pod scheduling
+tolerations: []
+
+# Affinity rules for pod scheduling
+affinity: {}
+
