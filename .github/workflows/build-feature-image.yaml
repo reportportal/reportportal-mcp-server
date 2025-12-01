@@ -33,9 +33,11 @@ jobs:
             echo "tag=$(echo ${{ github.ref_name }}-${{ github.run_number }} | tr '/' '-')" >> $GITHUB_OUTPUT
           fi
           
+          echo "platforms=linux/amd64,linux/arm64" >> $GITHUB_OUTPUT
           echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
     outputs:
       tag: ${{ steps.vars.outputs.tag }}
+      platforms: ${{ steps.vars.outputs.platforms }}
       date: ${{ steps.vars.outputs.date }}
 
   call-docker-build:
@@ -49,5 +51,6 @@ jobs:
       version: ${{ needs.variables-setup.outputs.tag }}
       branch: ${{ github.head_ref != '' && github.head_ref || github.ref_name }}
       date: ${{ needs.variables-setup.outputs.date }}
+      build-platforms: ${{ needs.variables-setup.outputs.platforms }}
       runs-on: ubuntu-latest
     secrets: inherit
