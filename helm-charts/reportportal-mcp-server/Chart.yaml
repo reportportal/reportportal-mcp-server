@@ -1,0 +1,7 @@
+apiVersion: v2
+name: reportportal-mcp-server
+description: A Helm chart for ReportPortal MCP Server
+type: application
+version: 0.1.0
+appVersion: "latest"
+

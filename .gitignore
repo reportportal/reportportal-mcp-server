@@ -4,3 +4,12 @@ bin/
 .vscode/
 junit-report.xml
 dist/
+
+# Helm chart test artifacts
+helm-charts/**/charts/
+helm-charts/**/*.tgz
+helm-charts/**/Chart.lock
+helm-charts/**/examples/
+
+# Examples directory
+examples/**

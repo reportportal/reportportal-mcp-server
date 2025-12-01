@@ -1,0 +1,39 @@
+Welcome to ReportPortal MCP Server!
+
+Your ReportPortal MCP Server has been deployed successfully.
+
+1. Get the application URL by running these commands:
+{{- if .Values.ingress.enabled }}
+{{- range $host := .Values.ingress.hosts }}
+  {{- range $path := $host.paths }}
+  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ $host.host }}{{ $path.path }}
+  {{- end }}
+{{- end }}
+
+  If you configured TLS, access the service using HTTPS.
+{{- else }}
+  export SERVICE_PORT=$(kubectl get --namespace {{ .Release.Namespace }} -o jsonpath="{.spec.ports[0].port}" services {{ include "reportportal-mcp-server.fullname" . }})
+  export SERVICE_IP=$(kubectl get --namespace {{ .Release.Namespace }} -o jsonpath="{.status.loadBalancer.ingress[0].ip}" services {{ include "reportportal-mcp-server.fullname" . }})
+  echo "Service URL: http://${SERVICE_IP}:${SERVICE_PORT}"
+{{- end }}
+
+2. View the deployment status:
+  kubectl get deployment {{ include "reportportal-mcp-server.fullname" . }} --namespace {{ .Release.Namespace }}
+
+3. View pod logs:
+  kubectl logs -l app.kubernetes.io/name=reportportal-mcp-server --namespace {{ .Release.Namespace }}
+
+4. Configuration:
+   - MCP Mode: {{ .Values.mcpMode }}
+   - ReportPortal Host: {{ .Values.rpHost }}
+   - Analytics Disabled: {{ .Values.rpMcpAnalyticsOff }}
+
+{{- if .Values.ingress.enabled }}
+{{- if .Values.ingress.tls }}
+5. TLS Configuration:
+   TLS is enabled. Make sure your certificate is properly configured.
+{{- end }}
+{{- end }}
+
+For more information, visit: https://reportportal.io/docs/external-integrations/MCPServer/
+

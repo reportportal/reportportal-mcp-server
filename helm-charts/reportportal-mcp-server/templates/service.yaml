@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "reportportal-mcp-server.fullname" . }}
+  labels:
+    {{- include "reportportal-mcp-server.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "reportportal-mcp-server.selectorLabels" . | nindent 4 }}
+
