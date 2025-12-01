@@ -9,3 +9,7 @@ dist/
 helm-charts/**/charts/
 helm-charts/**/*.tgz
 helm-charts/**/Chart.lock
+helm-charts/**/examples/
+
+# Examples directory
+examples/**
