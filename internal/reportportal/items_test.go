@@ -1,7 +1,11 @@
 package mcpreportportal
 
 import (
+	"net/url"
 	"testing"
+
+	"github.com/reportportal/goRP/v5/pkg/gorp"
+	"github.com/stretchr/testify/require"
 )
 
 func TestGetDefectTypesFromJson(t *testing.T) {
@@ -159,4 +163,25 @@ func contains(s, substr string) bool {
 			}
 			return false
 		}())
+}
+
+// TestUpdateDefectTypeForTestItemsTool verifies the test_items_ids array parameter
+// has the "items" property required for VS Code / GitHub Copilot compatibility.
+// See: https://github.com/reportportal/reportportal-mcp-server/issues/66
+func TestUpdateDefectTypeForTestItemsTool(t *testing.T) {
+	serverURL, _ := url.Parse("http://localhost:8080")
+	tool, _ := NewTestItemResources(
+		gorp.NewClient(serverURL, ""),
+		nil,
+		"",
+	).toolUpdateDefectTypeForTestItems()
+
+	// Verify test_items_ids is an array with items property (critical for VS Code compatibility)
+	propMap, ok := tool.InputSchema.Properties["test_items_ids"].(map[string]interface{})
+	require.True(t, ok, "test_items_ids property should exist and be a map")
+	require.Equal(t, "array", propMap["type"], "test_items_ids should be an array type")
+
+	itemsMap, ok := propMap["items"].(map[string]interface{})
+	require.True(t, ok, "test_items_ids must have items property (issue #66)")
+	require.Equal(t, "string", itemsMap["type"], "items should be of type string")
 }

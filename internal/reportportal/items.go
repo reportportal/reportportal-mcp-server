@@ -707,6 +707,7 @@ func (lr *TestItemResources) toolUpdateDefectTypeForTestItems() (mcp.Tool, serve
 			lr.projectParameter,
 			mcp.WithArray("test_items_ids", // Parameter for specifying the array of test items IDs
 				mcp.Description("Array of test items IDs"),
+				mcp.WithStringItems(),
 				mcp.Required(),
 			),
 			mcp.WithString(
