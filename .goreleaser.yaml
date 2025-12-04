@@ -26,51 +26,8 @@ archives:
       - LICENSE
       - README.md
 
-dockers:
-  - image_templates:
-      - "{{ .Env.REPOSITORY_NAME }}:{{ .Version }}-amd64"
-    dockerfile: release.dockerfile
-    use: buildx
-    build_flag_templates:
-      - "--platform=linux/amd64"
-      - "--label=io.artifacthub.package.readme-url=https://raw.githubusercontent.com/reportportal/reportportal-mcp-server/main/README.md"
-      - "--label=io.artifacthub.package.logo-url=https://avatars.githubusercontent.com/u/17636279"
-      - '--label=io.artifacthub.package.maintainers=[{"name":"Andrei Varabyeu","email":"andrei_varabyeu@epam.com"},{"name":"Aleksandr Paramonov","email":"aleksandr_paramonov@epam.com"}]'
-      - "--label=org.opencontainers.image.description=ReportPortal MCP Server"
-      - "--label=org.opencontainers.image.created={{.Date}}"
-      - "--label=org.opencontainers.image.name={{.ProjectName}}"
-      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
-      - "--label=org.opencontainers.image.version={{.Version}}"
-      - "--label=org.opencontainers.image.source={{.GitURL}}"
-    goos: linux
-    goarch: amd64
-  - image_templates:
-      - "{{ .Env.REPOSITORY_NAME }}:{{ .Version }}-arm64"
-    dockerfile: release.dockerfile
-    use: buildx
-    build_flag_templates:
-      - "--platform=linux/arm64"
-      - "--label=io.artifacthub.package.readme-url=https://raw.githubusercontent.com/reportportal/reportportal-mcp-server/main/README.md"
-      - "--label=io.artifacthub.package.logo-url=https://avatars.githubusercontent.com/u/17636279"
-      - '--label=io.artifacthub.package.maintainers=[{"name":"Andrei Varabyeu","email":"andrei_varabyeu@epam.com"},{"name":"Aleksandr Paramonov","email":"aleksandr_paramonov@epam.com"}]'
-      - "--label=org.opencontainers.image.description=ReportPortal MCP Server"
-      - "--label=org.opencontainers.image.created={{.Date}}"
-      - "--label=org.opencontainers.image.name={{.ProjectName}}"
-      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
-      - "--label=org.opencontainers.image.version={{.Version}}"
-      - "--label=org.opencontainers.image.source={{.GitURL}}"
-    goos: linux
-    goarch: arm64
-
-docker_manifests:
-  - name_template: "{{ .Env.REPOSITORY_NAME }}:{{ .Version }}"
-    image_templates:
-      - "{{ .Env.REPOSITORY_NAME }}:{{ .Version }}-amd64"
-      - "{{ .Env.REPOSITORY_NAME }}:{{ .Version }}-arm64"
-  - name_template: "{{ .Env.REPOSITORY_NAME }}:latest"
-    image_templates:
-      - "{{ .Env.REPOSITORY_NAME }}:{{ .Version }}-amd64"
-      - "{{ .Env.REPOSITORY_NAME }}:{{ .Version }}-arm64"
+# Docker images are built separately using Docker Buildx in the workflow
+# This creates clean multi-arch images without intermediate architecture-specific tags
 
 
 ## Uncomment the following sections if you want to create Homebrew Casks or NFPMS (Deb/RPM packages).
