@@ -70,5 +70,35 @@ jobs:
           version: latest
           args: release --clean
         env:
-          REPOSITORY_NAME: reportportal/mcp-server # Docker repository name
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # GitHub token for authentication
+
+      # Step 7: Generate build timestamp
+      - name: Generate build timestamp
+        id: build_date
+        run: echo "timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_OUTPUT
+
+      # Step 8: Build and push multi-arch Docker image using Buildx
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./release.dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            reportportal/mcp-server:${{ github.event.inputs.version }}
+            reportportal/mcp-server:latest
+          build-args: |
+            VERSION=${{ github.event.inputs.version }}
+            COMMIT=${{ github.sha }}
+            BUILD_DATE=${{ steps.build_date.outputs.timestamp }}
+          labels: |
+            io.artifacthub.package.readme-url=https://raw.githubusercontent.com/reportportal/reportportal-mcp-server/main/README.md
+            io.artifacthub.package.logo-url=https://avatars.githubusercontent.com/u/17636279
+            io.artifacthub.package.maintainers=[{"name":"Andrei Varabyeu","email":"andrei_varabyeu@epam.com"},{"name":"Aleksandr Paramonov","email":"aleksandr_paramonov@epam.com"}]
+            org.opencontainers.image.description=ReportPortal MCP Server
+            org.opencontainers.image.name=reportportal-mcp-server
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ github.event.inputs.version }}
+            org.opencontainers.image.source=https://github.com/reportportal/reportportal-mcp-server
+            org.opencontainers.image.created=${{ steps.build_date.outputs.timestamp }}
