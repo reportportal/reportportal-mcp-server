@@ -6,12 +6,5 @@ services:
     environment:
       MCP_MODE: http
       RP_HOST: ${RP_HOST:-https://your-reportportal-instance.com}
-      RP_MCP_ANALYTICS_OFF: true
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
     ports:
       - 8085:8080
