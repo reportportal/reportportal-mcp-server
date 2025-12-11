@@ -109,6 +109,7 @@ type Analytics struct {
 	stopChan   chan struct{}
 	wg         sync.WaitGroup
 	tickerDone chan struct{}
+	stopOnce   sync.Once // ensures Stop() is only executed once
 }
 
 // NewAnalytics creates a new Analytics instance
@@ -368,18 +369,21 @@ func (a *Analytics) Stop() {
 		return
 	}
 
-	slog.Debug("Stopping analytics metrics processor")
-	close(a.stopChan)
+	// Use sync.Once to ensure Stop() can only be executed once
+	a.stopOnce.Do(func() {
+		slog.Debug("Stopping analytics metrics processor")
+		close(a.stopChan)
 
-	// Wait for ticker goroutine to finish
-	select {
-	case <-a.tickerDone:
-		slog.Debug("Analytics metrics processor stopped gracefully")
-	case <-time.After(5 * time.Second):
-		slog.Warn("Analytics metrics processor stop timeout")
-	}
+		// Wait for ticker goroutine to finish
+		select {
+		case <-a.tickerDone:
+			slog.Debug("Analytics metrics processor stopped gracefully")
+		case <-time.After(5 * time.Second):
+			slog.Warn("Analytics metrics processor stop timeout")
+		}
 
-	a.wg.Wait()
+		a.wg.Wait()
+	})
 }
 
 // incrementMetric atomically increments the counter for a tool and user
