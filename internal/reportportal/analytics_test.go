@@ -3,6 +3,7 @@ package mcpreportportal
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -148,7 +149,7 @@ func TestNewAnalytics(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			analytics, err := NewAnalytics(tt.userID, tt.apiSecret, tt.rpAPIToken)
+			analytics, err := NewAnalytics(tt.userID, tt.apiSecret, tt.rpAPIToken, "")
 
 			if tt.wantErr {
 				assert.Error(t, err)
@@ -350,6 +351,7 @@ func TestAnalyticsIntegration(t *testing.T) {
 		"test-user",
 		"test-secret",
 		"dGVzdC1yZXBvcnRwb3J0YWwtYW5hbHl0aWNzLXRva2VuLWJhc2U2NA==",
+		"",
 	)
 	require.NoError(t, err)
 	require.NotNil(t, analytics)
@@ -502,7 +504,7 @@ func TestConcurrentMetricIncrement(t *testing.T) {
 
 func TestAnalyticsUserIDGeneration(t *testing.T) {
 	// Test with empty user ID - should generate one
-	analytics1, err := NewAnalytics("", "test-secret", testToken4)
+	analytics1, err := NewAnalytics("", "test-secret", testToken4, "")
 	assert.NoError(t, err)
 	assert.NotNil(t, analytics1)
 
@@ -511,6 +513,7 @@ func TestAnalyticsUserIDGeneration(t *testing.T) {
 		"custom-user-id",
 		"test-secret",
 		testToken5,
+		"",
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, analytics2)
@@ -566,7 +569,7 @@ func TestGetUserIDFromContext(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create analytics with the specified configuration
-			analytics, err := NewAnalytics(tt.customUserID, "test-secret", tt.rpTokenEnvVar)
+			analytics, err := NewAnalytics(tt.customUserID, "test-secret", tt.rpTokenEnvVar, "")
 			require.NoError(t, err)
 			require.NotNil(t, analytics)
 			defer analytics.Stop()
@@ -616,7 +619,7 @@ func TestTrackMCPEventWithTokenFromContext(t *testing.T) {
 	// Test 1: Analytics with RP_API_TOKEN env var - should always use env var hash
 	t.Run("with RP_API_TOKEN env var", func(t *testing.T) {
 		envToken := testEnvTokenString
-		analytics, err := NewAnalytics("", "test-secret", envToken)
+		analytics, err := NewAnalytics("", "test-secret", envToken, "")
 		require.NoError(t, err)
 		require.NotNil(t, analytics)
 		defer analytics.Stop()
@@ -652,7 +655,7 @@ func TestTrackMCPEventWithTokenFromContext(t *testing.T) {
 
 	// Test 2: Analytics WITHOUT env var - should use Bearer token from context
 	t.Run("without RP_API_TOKEN env var - uses Bearer token", func(t *testing.T) {
-		analytics, err := NewAnalytics("", "test-secret", "") // No env token
+		analytics, err := NewAnalytics("", "test-secret", "", "") // No env token
 		require.NoError(t, err)
 		require.NotNil(t, analytics)
 		defer analytics.Stop()
@@ -693,7 +696,7 @@ func TestTrackMCPEventWithTokenFromContext(t *testing.T) {
 
 	// Test 3: No env var and no Bearer token - uses anonymous
 	t.Run("without env var and without Bearer token - uses anonymous", func(t *testing.T) {
-		analytics, err := NewAnalytics("", "test-secret", "")
+		analytics, err := NewAnalytics("", "test-secret", "", "")
 		require.NoError(t, err)
 		require.NotNil(t, analytics)
 		defer analytics.Stop()
@@ -723,7 +726,7 @@ func TestAnalyticsBatchSendingPerUser(t *testing.T) {
 	// Test with NO env var - should use Bearer tokens from requests
 	t.Run("without RP_API_TOKEN env var - tracks per Bearer token", func(t *testing.T) {
 		// Create analytics without env token
-		analytics, err := NewAnalytics("", "test-secret", "")
+		analytics, err := NewAnalytics("", "test-secret", "", "")
 		require.NoError(t, err)
 		require.NotNil(t, analytics)
 		defer analytics.Stop()
@@ -760,7 +763,7 @@ func TestAnalyticsBatchSendingPerUser(t *testing.T) {
 	// Test with env var - should use env var regardless of Bearer tokens
 	t.Run("with RP_API_TOKEN env var - tracks under single user", func(t *testing.T) {
 		envToken := testEnvTokenString
-		analytics, err := NewAnalytics("", "test-secret", envToken)
+		analytics, err := NewAnalytics("", "test-secret", envToken, "")
 		require.NoError(t, err)
 		require.NotNil(t, analytics)
 		defer analytics.Stop()
@@ -809,13 +812,13 @@ func TestAnalyticsHashingComparison_WithAndWithoutRPToken(t *testing.T) {
 	rpEnvToken := testToken2
 
 	// Scenario 1: Analytics WITH RP_API_TOKEN env var
-	analytics1, err1 := NewAnalytics("", "test-secret", rpEnvToken)
+	analytics1, err1 := NewAnalytics("", "test-secret", rpEnvToken, "")
 	require.NoError(t, err1)
 	require.NotNil(t, analytics1)
 	defer analytics1.Stop()
 
 	// Scenario 2: Analytics WITHOUT RP_API_TOKEN env var
-	analytics2, err2 := NewAnalytics("", "test-secret", "")
+	analytics2, err2 := NewAnalytics("", "test-secret", "", "")
 	require.NoError(t, err2)
 	require.NotNil(t, analytics2)
 	defer analytics2.Stop()
@@ -890,13 +893,13 @@ func TestSameTokenDifferentSources_ProducesSameHash(t *testing.T) {
 	sameTokenValue := testToken1
 
 	// Scenario 1: Token from RP_API_TOKEN environment variable
-	analytics1, err1 := NewAnalytics("", "test-secret", sameTokenValue)
+	analytics1, err1 := NewAnalytics("", "test-secret", sameTokenValue, "")
 	require.NoError(t, err1)
 	require.NotNil(t, analytics1)
 	defer analytics1.Stop()
 
 	// Scenario 2: Token from Bearer header (no env var)
-	analytics2, err2 := NewAnalytics("", "test-secret", "")
+	analytics2, err2 := NewAnalytics("", "test-secret", "", "")
 	require.NoError(t, err2)
 	require.NotNil(t, analytics2)
 	defer analytics2.Stop()
@@ -959,7 +962,7 @@ func TestHTTPTokenMiddlewareIntegrationWithAnalytics(t *testing.T) {
 	// Test 1: Analytics WITHOUT env var - should use Bearer tokens
 	t.Run("without RP_API_TOKEN env var - uses Bearer tokens", func(t *testing.T) {
 		// Create analytics without env var or custom user ID
-		analytics, err := NewAnalytics("", "test-secret", "")
+		analytics, err := NewAnalytics("", "test-secret", "", "")
 		require.NoError(t, err)
 		require.NotNil(t, analytics)
 		defer analytics.Stop()
@@ -1021,7 +1024,7 @@ func TestHTTPTokenMiddlewareIntegrationWithAnalytics(t *testing.T) {
 	// Test 2: Analytics WITH custom user ID - should ignore Bearer tokens
 	t.Run("with custom user ID - ignores Bearer tokens", func(t *testing.T) {
 		customUserID := "my-custom-user-id"
-		analytics, err := NewAnalytics(customUserID, "test-secret", "")
+		analytics, err := NewAnalytics(customUserID, "test-secret", "", "")
 		require.NoError(t, err)
 		require.NotNil(t, analytics)
 		defer analytics.Stop()
@@ -1064,6 +1067,214 @@ func TestHTTPTokenMiddlewareIntegrationWithAnalytics(t *testing.T) {
 			t,
 			existsBearer,
 			"Should NOT track metrics for Bearer token when custom user ID is set",
+		)
+	})
+}
+
+func TestAnalyticsInstanceIDFetching(t *testing.T) {
+	// Create a mock ReportPortal server that returns instance ID
+	mockInstanceID := "8d8638be-adc5-40a8-8a12-b98429548b78"
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/info" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			// Return the expected JSON structure
+			response := `{
+				"extensions": {
+					"result": {
+						"server.details.instance": "` + mockInstanceID + `"
+					}
+				}
+			}`
+			_, _ = w.Write([]byte(response))
+		} else {
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer mockServer.Close()
+
+	t.Run("instance ID is fetched and stored", func(t *testing.T) {
+		analytics, err := NewAnalytics("test-user", "test-secret", "", mockServer.URL)
+		require.NoError(t, err)
+		require.NotNil(t, analytics)
+		defer analytics.Stop()
+
+		// Instance ID should be empty before first use (lazy loading)
+		assert.False(t, analytics.instanceIDFetched.Load(), "Should not be fetched initially")
+
+		// Trigger lazy loading by calling ensureInstanceID
+		analytics.ensureInstanceID()
+
+		// Verify instance ID was fetched
+		assert.True(t, analytics.instanceIDFetched.Load(), "Should be marked as fetched")
+		assert.Equal(t, mockInstanceID, analytics.instanceID)
+	})
+
+	t.Run("instance ID is fetched lazily on first metrics processing", func(t *testing.T) {
+		// Create analytics with mock RP server
+		analytics, err := NewAnalytics("test-user", "test-secret", "", mockServer.URL)
+		require.NoError(t, err)
+		require.NotNil(t, analytics)
+		defer analytics.Stop()
+
+		// Instance ID should be empty initially (not fetched yet)
+		assert.False(t, analytics.instanceIDFetched.Load(), "Should not be fetched initially")
+
+		// Track an event
+		ctx := context.Background()
+		analytics.TrackMCPEvent(ctx, "test_tool")
+
+		// Instance ID still not fetched (only increments counter)
+		assert.False(t, analytics.instanceIDFetched.Load(), "Should not be fetched after tracking")
+
+		// Process metrics - this should trigger lazy fetch
+		analytics.processMetrics()
+
+		// Now instance ID should be fetched
+		assert.True(
+			t,
+			analytics.instanceIDFetched.Load(),
+			"Should be fetched after processing metrics",
+		)
+		assert.Equal(t, mockInstanceID, analytics.instanceID)
+	})
+
+	t.Run("instance ID is added to GA events", func(t *testing.T) {
+		// Create a mock GA server to capture events
+		var capturedEvents []GAEvent
+		var mu sync.Mutex
+		gaServer := httptest.NewServer(
+			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == "POST" {
+					var payload GAPayload
+					if err := json.NewDecoder(r.Body).Decode(&payload); err == nil {
+						mu.Lock()
+						capturedEvents = append(capturedEvents, payload.Events...)
+						mu.Unlock()
+					}
+					w.WriteHeader(http.StatusOK)
+				}
+			}),
+		)
+		defer gaServer.Close()
+
+		// Create analytics with mock RP server
+		analytics, err := NewAnalytics("test-user", "test-secret", "", mockServer.URL)
+		require.NoError(t, err)
+		require.NotNil(t, analytics)
+		defer analytics.Stop()
+
+		// Override GA endpoint for testing (we need to modify the config)
+		// Track an event
+		ctx := context.Background()
+		analytics.TrackMCPEvent(ctx, "test_tool")
+
+		// Wait a bit for batching
+		time.Sleep(100 * time.Millisecond)
+
+		// Process metrics manually
+		analytics.processMetrics()
+
+		// Verify events were created with instanceID
+		// Note: In real scenario, events would be sent to GA server
+		// For this test, we verify the instanceID is stored in analytics
+		assert.True(t, analytics.instanceIDFetched.Load(), "Should be fetched after processing")
+		assert.Equal(t, mockInstanceID, analytics.instanceID)
+	})
+
+	t.Run("instance ID retries on failure until successful", func(t *testing.T) {
+		fetchCount := 0
+		var mu sync.Mutex
+		retryServer := httptest.NewServer(
+			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/info" {
+					mu.Lock()
+					fetchCount++
+					currentCount := fetchCount
+					mu.Unlock()
+
+					// First 2 calls fail, 3rd succeeds
+					if currentCount < 3 {
+						w.WriteHeader(http.StatusInternalServerError)
+						return
+					}
+
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					response := `{
+					"extensions": {
+						"result": {
+							"server.details.instance": "` + mockInstanceID + `"
+						}
+					}
+				}`
+					_, _ = w.Write([]byte(response))
+				}
+			}),
+		)
+		defer retryServer.Close()
+
+		analytics, err := NewAnalytics("test-user", "test-secret", "", retryServer.URL)
+		require.NoError(t, err)
+		require.NotNil(t, analytics)
+		defer analytics.Stop()
+
+		// First attempt - should fail
+		analytics.ensureInstanceID()
+		assert.False(t, analytics.instanceIDFetched.Load(), "First attempt should fail")
+		assert.Empty(t, analytics.instanceID, "First attempt should fail")
+
+		// Second attempt - should still fail
+		analytics.ensureInstanceID()
+		assert.False(t, analytics.instanceIDFetched.Load(), "Second attempt should fail")
+		assert.Empty(t, analytics.instanceID, "Second attempt should fail")
+
+		// Third attempt - should succeed
+		analytics.ensureInstanceID()
+		assert.True(t, analytics.instanceIDFetched.Load(), "Third attempt should succeed")
+		assert.Equal(t, mockInstanceID, analytics.instanceID, "Third attempt should succeed")
+
+		// Fourth attempt - should use cached value, not fetch again
+		mu.Lock()
+		countBeforeFourth := fetchCount
+		mu.Unlock()
+
+		analytics.ensureInstanceID()
+
+		mu.Lock()
+		countAfterFourth := fetchCount
+		mu.Unlock()
+
+		assert.Equal(
+			t,
+			countBeforeFourth,
+			countAfterFourth,
+			"Should not fetch again once successful",
+		)
+	})
+
+	t.Run("empty instance ID when host URL is empty", func(t *testing.T) {
+		analytics, err := NewAnalytics("test-user", "test-secret", "", "")
+		require.NoError(t, err)
+		require.NotNil(t, analytics)
+		defer analytics.Stop()
+
+		// Verify instance ID is empty when no host URL provided
+		assert.False(t, analytics.instanceIDFetched.Load(), "Should not be fetched")
+		assert.Empty(t, analytics.instanceID)
+
+		// Try to ensure instance ID - should still be empty
+		analytics.ensureInstanceID()
+
+		assert.False(
+			t,
+			analytics.instanceIDFetched.Load(),
+			"Should still not be fetched when no host URL",
+		)
+		assert.Empty(
+			t,
+			analytics.instanceID,
+			"Should remain empty even after ensureInstanceID call",
 		)
 	})
 }

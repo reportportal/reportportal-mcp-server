@@ -72,7 +72,13 @@ type MCPRequestPayload struct {
 }
 
 // NewHTTPServer creates a new enhanced HTTP server with Chi router
-func NewHTTPServer(config HTTPServerConfig) (*HTTPServer, error) {
+func NewHTTPServer(
+	config HTTPServerConfig,
+) (*HTTPServer, error) { // Validate required configuration
+	if config.HostURL == nil {
+		return nil, fmt.Errorf("HostURL is required in HTTP server configuration")
+	}
+
 	// Set defaults
 	if config.MaxConcurrentRequests <= 0 {
 		config.MaxConcurrentRequests = runtime.NumCPU() * 2 // HTTP-level concurrency limit
@@ -103,7 +109,8 @@ func NewHTTPServer(config HTTPServerConfig) (*HTTPServer, error) {
 		analytics, err = NewAnalytics(
 			config.UserID,
 			config.GA4Secret,
-			"", // FallbackRPToken is always empty in HTTP mode
+			"",                      // FallbackRPToken is always empty in HTTP mode
+			config.HostURL.String(), // ReportPortal host URL for instance ID
 		)
 		if err != nil {
 			slog.Warn("Failed to initialize analytics", "error", err)
