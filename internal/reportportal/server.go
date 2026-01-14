@@ -41,7 +41,7 @@ func NewServer(
 	if analyticsOn {
 		var err error
 		// Pass RP API token for secure hashing as user identifier
-		analytics, err = NewAnalytics(userID, analyticsAPISecret, token)
+		analytics, err = NewAnalytics(userID, analyticsAPISecret, token, hostUrl.String())
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to initialize analytics: %w", err)
 		}

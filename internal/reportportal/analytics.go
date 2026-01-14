@@ -11,6 +11,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -34,6 +35,9 @@ const (
 	batchSendInterval = 10 * time.Second
 
 	maxPerRequest = 25
+
+	// Timeout for fetching instance ID from ReportPortal
+	instanceIDFetchTimeout = 5 * time.Second
 
 	// Pre-computed hash for anonymous mode to avoid repeated computation
 	anonymousUserIDHash = "fc8c4264d21cd5dac3de0e2255396f6cd0809d353aa8071873060ba1867ac0b3"
@@ -100,6 +104,12 @@ type Analytics struct {
 	config     *AnalyticsConfig
 	httpClient *http.Client
 
+	// ReportPortal instance ID (fetched lazily on first use, retried until successful)
+	instanceID        string      // ReportPortal instance ID from /api/info endpoint
+	instanceIDFetched atomic.Bool // Atomic flag indicating if instanceID is fetched (for fast-path check)
+	instanceIDLock    sync.Mutex  // Protects instanceID field during fetch
+	rpHostURL         string      // ReportPortal host URL for lazy fetching
+
 	// Metrics system with atomic counters
 	// Map structure: userID -> toolName -> counter
 	metrics     map[string]map[string]*int64 // userID -> (tool name -> counter)
@@ -111,14 +121,125 @@ type Analytics struct {
 	tickerDone chan struct{}
 }
 
+// ensureInstanceID lazily fetches the instance ID if not already set
+// Retries on each call until a non-empty instance ID is retrieved
+// Thread-safe for concurrent calls using atomic bool for fast-path check
+func (a *Analytics) ensureInstanceID() {
+	// Fast path: check atomic flag without any locks
+	if a.instanceIDFetched.Load() {
+		return
+	}
+
+	// Slow path: need to fetch (mutex lock)
+	a.instanceIDLock.Lock()
+	defer a.instanceIDLock.Unlock()
+
+	// Double-check after acquiring lock (another goroutine might have fetched it)
+	if a.instanceIDFetched.Load() {
+		return
+	}
+
+	// Check if host URL is configured
+	if a.rpHostURL == "" {
+		slog.Debug("Cannot fetch instance ID: host URL is empty")
+		return
+	}
+
+	// Attempt to fetch instance ID
+	fetchedID := fetchInstanceID(a.rpHostURL, a.httpClient)
+	if fetchedID != "" {
+		a.instanceID = fetchedID
+		a.instanceIDFetched.Store(true) // Mark as fetched
+		slog.Debug("Successfully fetched and stored instance ID", "instance_id", fetchedID)
+	} else {
+		slog.Debug("Instance ID fetch returned empty, will retry on next tool execution")
+	}
+}
+
+// fetchInstanceID retrieves the ReportPortal instance ID from the /api/info endpoint
+// The endpoint is available without authentication
+func fetchInstanceID(hostURL string, httpClient *http.Client) string {
+	// Build the API info endpoint URL
+	apiURL := fmt.Sprintf("%s/api/info", strings.TrimSuffix(hostURL, "/"))
+
+	ctx, cancel := context.WithTimeout(context.Background(), instanceIDFetchTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
+	if err != nil {
+		slog.Warn("Failed to create request for instance ID", "error", err)
+		return ""
+	}
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		slog.Warn("Failed to fetch instance ID from ReportPortal", "error", err, "url", apiURL)
+		return ""
+	}
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			slog.Warn("Failed to close response body", "error", closeErr)
+		}
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		slog.Warn("Unexpected status code when fetching instance ID",
+			"status", resp.StatusCode,
+			"url", apiURL)
+		return ""
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		slog.Warn("Failed to read instance ID response body", "error", err)
+		return ""
+	}
+
+	// Parse the JSON response
+	var apiInfo map[string]interface{}
+	if err := json.Unmarshal(body, &apiInfo); err != nil {
+		slog.Warn("Failed to parse instance ID response", "error", err)
+		return ""
+	}
+
+	// Navigate to extensions.result['server.details.instance']
+	extensions, ok := apiInfo["extensions"].(map[string]interface{})
+	if !ok {
+		slog.Warn("Instance ID: extensions field not found or invalid type")
+		return ""
+	}
+
+	result, ok := extensions["result"].(map[string]interface{})
+	if !ok {
+		slog.Warn("Instance ID: extensions.result field not found or invalid type")
+		return ""
+	}
+
+	instanceID, ok := result["server.details.instance"].(string)
+	if !ok {
+		slog.Warn("Instance ID: server.details.instance field not found or invalid type")
+		return ""
+	}
+
+	slog.Debug("Successfully fetched ReportPortal instance ID",
+		"instance_id", instanceID)
+	return instanceID
+}
+
 // NewAnalytics creates a new Analytics instance
 // Parameters:
 //   - userID: Custom user identifier (if empty, a generic ID will be generated)
 //   - apiSecret: Google Analytics 4 API secret for authentication (required)
 //   - rpAPIToken: ReportPortal API token for secure hashing (optional, used when available)
+//   - rpHostURL: ReportPortal host URL for fetching instance ID (optional)
 //
 // Returns error if apiSecret is empty
-func NewAnalytics(userID string, apiSecret string, rpAPIToken string) (*Analytics, error) {
+func NewAnalytics(
+	userID string,
+	apiSecret string,
+	rpAPIToken string,
+	rpHostURL string,
+) (*Analytics, error) {
 	// Analytics enablement is now controlled by the caller (CLI flags)
 	slog.Debug("Initializing analytics",
 		"has_ga4_secret", apiSecret != "",
@@ -154,11 +275,15 @@ func NewAnalytics(userID string, apiSecret string, rpAPIToken string) (*Analytic
 		UserID:        analyticsUserID,
 	}
 
+	httpClient := &http.Client{
+		Timeout: 10 * time.Second,
+	}
+
 	analytics := &Analytics{
-		config: config,
-		httpClient: &http.Client{
-			Timeout: 10 * time.Second,
-		},
+		config:     config,
+		httpClient: httpClient,
+		rpHostURL:  rpHostURL,                          // Store for lazy fetching
+		instanceID: "",                                 // Will be fetched lazily on first use
 		metrics:    make(map[string]map[string]*int64), // userID -> toolName -> counter
 		stopChan:   make(chan struct{}),
 		tickerDone: make(chan struct{}),
@@ -497,20 +622,38 @@ func (a *Analytics) sendBatchMetrics(ctx context.Context, userID string, metrics
 		return
 	}
 
+	// Lazily fetch instance ID on first batch send
+	a.ensureInstanceID()
+
 	// Collect all individual events for batch sending
 	var events []GAEvent
+
+	// Get instanceID (protected by mutex to ensure memory visibility)
+	var currentInstanceID string
+	if a.instanceIDFetched.Load() {
+		a.instanceIDLock.Lock()
+		currentInstanceID = a.instanceID
+		a.instanceIDLock.Unlock()
+	}
 
 	// Create individual events for each tool usage (matching analytics-client format)
 	for toolName, count := range metrics {
 		// Create multiple events if count > 1 (each tool usage gets its own event)
 		for i := int64(0); i < count; i++ {
+			params := map[string]interface{}{
+				"custom_user_id": userID,                // The hashed user identifier
+				"event_name":     "mcp_event_triggered", // Event name
+				"tool":           toolName,              // The name of the tool
+			}
+
+			// Add instanceID if available
+			if currentInstanceID != "" {
+				params["instanceID"] = currentInstanceID
+			}
+
 			event := GAEvent{
-				Name: "mcp_event_triggered",
-				Params: map[string]interface{}{
-					"custom_user_id": userID,                // The hashed user identifier
-					"event_name":     "mcp_event_triggered", // Event name
-					"tool":           toolName,              // The name of the tool
-				},
+				Name:   "mcp_event_triggered",
+				Params: params,
 			}
 			events = append(events, event)
 		}
