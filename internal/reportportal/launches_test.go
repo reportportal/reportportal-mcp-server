@@ -68,6 +68,119 @@ func TestListLaunchesTool(t *testing.T) {
 	assert.Equal(t, string(launches), text)
 }
 
+func TestGetLaunchByIdTool(t *testing.T) {
+	ctx := context.Background()
+	testProject := "test-project"
+	launchID := "123"
+
+	// Create a single launch response (GetLaunch returns LaunchResource directly, not wrapped in a page)
+	expectedLaunch := openapi.LaunchResource{
+		Id:        123,
+		Name:      "Test Launch by ID",
+		Uuid:      "014b329b-a882-4c2d-9988-c2f6179a421b",
+		Number:    123,
+		StartTime: time.Now(),
+		Status:    string(gorp.Statuses.Passed),
+	}
+
+	launchJSON, _ := json.Marshal(expectedLaunch)
+
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// GetLaunch uses /api/v1/{projectName}/launch/{launchId}
+		assert.Equal(t, fmt.Sprintf("/api/v1/%s/launch/%s", testProject, launchID), r.URL.Path)
+		assert.Equal(t, http.MethodGet, r.Method)
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(launchJSON)
+	}))
+	defer mockServer.Close()
+
+	srv := mcptest.NewUnstartedServer(t)
+
+	serverURL, _ := url.Parse(mockServer.URL)
+	launchTools := NewLaunchResources(gorp.NewClient(serverURL, ""), nil, "")
+	srv.AddTool(launchTools.toolGetLaunchById())
+
+	err := srv.Start(ctx)
+	require.NoError(t, err)
+	defer srv.Close()
+
+	client := srv.Client()
+
+	var req mcp.CallToolRequest
+	req.Params.Name = "get_launch_by_id"
+	req.Params.Arguments = map[string]any{
+		"project":   testProject,
+		"launch_id": launchID,
+	}
+
+	result, err := client.CallTool(ctx, req)
+	require.NoError(t, err)
+
+	var textContent mcp.TextContent
+	require.IsType(t, textContent, result.Content[0])
+	text := result.Content[0].(mcp.TextContent).Text
+
+	// Verify the response contains the expected launch
+	var responseLaunch openapi.LaunchResource
+	err = json.Unmarshal([]byte(text), &responseLaunch)
+	require.NoError(t, err)
+	assert.Equal(t, expectedLaunch.Id, responseLaunch.Id)
+	assert.Equal(t, expectedLaunch.Name, responseLaunch.Name)
+	assert.Equal(t, expectedLaunch.Number, responseLaunch.Number)
+}
+
+func TestGetLaunchByIdTool_NotFound(t *testing.T) {
+	ctx := context.Background()
+	testProject := "test-project"
+	launchID := "999"
+
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// GetLaunch uses /api/v1/{projectName}/launch/{launchId}
+		assert.Equal(t, fmt.Sprintf("/api/v1/%s/launch/%s", testProject, launchID), r.URL.Path)
+		assert.Equal(t, http.MethodGet, r.Method)
+
+		// Return 404 for launch not found
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write(
+			[]byte(
+				`{"errorCode": 40004, "message": "Launch '999' not found. Did you use correct Launch ID?"}`,
+			),
+		)
+	}))
+	defer mockServer.Close()
+
+	srv := mcptest.NewUnstartedServer(t)
+
+	serverURL, _ := url.Parse(mockServer.URL)
+	launchTools := NewLaunchResources(gorp.NewClient(serverURL, ""), nil, "")
+	srv.AddTool(launchTools.toolGetLaunchById())
+
+	err := srv.Start(ctx)
+	require.NoError(t, err)
+	defer srv.Close()
+
+	client := srv.Client()
+
+	var req mcp.CallToolRequest
+	req.Params.Name = "get_launch_by_id"
+	req.Params.Arguments = map[string]any{
+		"project":   testProject,
+		"launch_id": launchID,
+	}
+
+	result, err := client.CallTool(ctx, req)
+	require.NoError(t, err)
+
+	// Verify that an error is returned for launch not found
+	require.True(t, result.IsError)
+	var textContent mcp.TextContent
+	require.IsType(t, textContent, result.Content[0])
+	text := result.Content[0].(mcp.TextContent).Text
+	assert.Contains(t, text, "not found")
+}
+
 // TestRunAutoAnalysisTool tests the run_auto_analysis tool to ensure:
 //  1. The tool schema correctly includes the "items" property for array parameters
 //     (critical for GitHub Copilot compatibility - fixes "array type must have items" error)

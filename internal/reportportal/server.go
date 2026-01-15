@@ -50,6 +50,7 @@ func NewServer(
 	launches := NewLaunchResources(rpClient, analytics, project)
 	s.AddTool(launches.toolGetLaunches())
 	s.AddTool(launches.toolGetLastLaunchByName())
+	s.AddTool(launches.toolGetLaunchById())
 	s.AddTool(launches.toolForceFinishLaunch())
 	s.AddTool(launches.toolDeleteLaunch())
 	s.AddTool(launches.toolRunAutoAnalysis())
