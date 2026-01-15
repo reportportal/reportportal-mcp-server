@@ -328,6 +328,7 @@ The ReportPortal MCP server provides a comprehensive set of capabilities for int
 |----------------------------|--------------------------------------------------|---------------------------------------------------------------------------------------------------------------|
 | Get Launches by filter            | Lists ReportPortal launches with pagination by filter      |  `name`, `description`, `owner`, `number`, `start_time`, `end_time`, `attributes`, `sort`, `page`, `page-size` (all optional)                                                                     |
 | Get Last Launch by Name    | Retrieves the most recent launch by name         | `name`                                                                                                      |
+| Get Launch by ID           | Retrieves a specific launch by its ID directly   | `project` (optional, string), `launch_id` (required, string)                                                                 |
 | Run Auto Analysis          | Runs auto analysis on a launch                   | `launch_id`, `analyzer_mode`, `analyzer_type`, `analyzer_item_modes`                                          |
 | Run Unique Error Analysis  | Runs unique error analysis on a launch           | `launch_id`, `remove_numbers`                                                                                 |
 | Force Finish Launch        | Forces a launch to finish                        | `launch_id`                                                                                                   |
@@ -340,14 +341,6 @@ The ReportPortal MCP server provides a comprehensive set of capabilities for int
 | Get Project Defect Types        | Retrieves details regarding existing defect types on the specific project        |                                                                                               |
 | Update defect types by item ids        | Retrieves details regarding existing defect types on the specific project        |`test_items_ids` (required), `defect_type_id` (required), `defect_type_comment` (optional)                                                                                               |
 
-### Available Prompts
-
-#### Analyze Launch
-
-Analyzes a ReportPortal launch and provides detailed information about test results, failures, and statistics.
-
-Parameters:
-- `launch_id`: ID of the launch to analyze
 
 You can follow the [prompt text and structure](https://github.com/reportportal/reportportal-mcp-server/blob/main/internal/reportportal/prompts/launch.yaml) as a reference while working on your own prompts.
 
@@ -357,6 +350,7 @@ Here are some real-world examples of what you might ask your AI after setup (the
 
 - **"List the 5 most recent test launches."** – returns a paginated list of recent test runs with names and statuses.
 - **"What tests failed in the latest run?"** – shows failed test items for the most recent launch.
+- **"Show me details of launch with ID 119000."** – retrieves a specific launch directly by its ID without pagination.
 - **"Show me details of launch with number 1234."** – fetches information (ID, name, description, stats) for that specific launch.
 - **"Run an analysis on launch ABC."** – triggers the ReportPortal's auto-analysis to summarize results and failures for launch "ABC".
 - **"Finish the running launch with ID 4321."** – forces a currently running test launch to stop.
