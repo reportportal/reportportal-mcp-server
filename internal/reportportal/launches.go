@@ -242,6 +242,46 @@ func (lr *LaunchResources) toolGetLastLaunchByName() (mcp.Tool, server.ToolHandl
 		})
 }
 
+// toolGetLaunchById creates a tool to retrieve a specific launch by its ID directly.
+func (lr *LaunchResources) toolGetLaunchById() (mcp.Tool, server.ToolHandlerFunc) {
+	return mcp.NewTool("get_launch_by_id",
+			// Tool metadata
+			mcp.WithDescription("Get a specific launch by its ID directly"),
+			lr.projectParameter,
+			mcp.WithString("launch_id", // Parameter for specifying the launch ID
+				mcp.Description("Launch ID"),
+				mcp.Required(),
+			),
+		), lr.analytics.WithAnalytics("get_launch_by_id", func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			project, err := extractProject(ctx, request)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+
+			// Extract the "launch_id" parameter from the request
+			launchID, err := request.RequireInt("launch_id")
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+
+			// Fetch the launch by ID
+			launch, response, err := lr.client.LaunchAPI.GetLaunch(
+				ctx, strconv.Itoa(launchID), project).Execute() //nolint:gosec
+			if err != nil {
+				return mcp.NewToolResultError(extractResponseError(err, response)), nil
+			}
+
+			// Serialize the launch into JSON format
+			r, err := json.Marshal(launch)
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal response: %w", err)
+			}
+
+			// Return the serialized launch as a text result
+			return mcp.NewToolResultText(string(r)), nil
+		})
+}
+
 func (lr *LaunchResources) toolDeleteLaunch() (mcp.Tool, server.ToolHandlerFunc) {
 	return mcp.NewTool("launch_delete",
 			// Tool metadata

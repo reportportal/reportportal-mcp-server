@@ -147,6 +147,7 @@ func (hs *HTTPServer) initializeTools() error {
 
 	hs.mcpServer.AddTool(launches.toolGetLaunches())
 	hs.mcpServer.AddTool(launches.toolGetLastLaunchByName())
+	hs.mcpServer.AddTool(launches.toolGetLaunchById())
 	hs.mcpServer.AddTool(launches.toolForceFinishLaunch())
 	hs.mcpServer.AddTool(launches.toolDeleteLaunch())
 	hs.mcpServer.AddTool(launches.toolRunAutoAnalysis())
