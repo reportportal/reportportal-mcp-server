@@ -340,7 +340,14 @@ The ReportPortal MCP server provides a comprehensive set of capabilities for int
 | Get Test Item by ID        | Retrieves details of a specific test item        | `test_item_id`                                                                                                |
 | Get Project Defect Types        | Retrieves details regarding existing defect types on the specific project        |                                                                                               |
 | Update defect types by item ids        | Retrieves details regarding existing defect types on the specific project        |`test_items_ids` (required), `defect_type_id` (required), `defect_type_comment` (optional)                                                                                               |
+### Available Prompts
 
+#### Analyze Launch
+
+Analyzes a ReportPortal launch and provides detailed information about test results, failures, and statistics.
+
+Parameters:
+- `launch_id`: ID of the launch to analyze
 
 You can follow the [prompt text and structure](https://github.com/reportportal/reportportal-mcp-server/blob/main/internal/reportportal/prompts/launch.yaml) as a reference while working on your own prompts.
 
