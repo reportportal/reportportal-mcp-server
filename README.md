@@ -317,6 +317,7 @@ The ReportPortal MCP server provides a comprehensive set of capabilities for int
 - Get detailed information on each test item
 - View test execution statistics and failures
 - Retrieve test logs and attachments
+- Make a dicision on test result with updating test item defect types
 
 ### Report Generation
 - Analyze launches to get detailed test execution insights
