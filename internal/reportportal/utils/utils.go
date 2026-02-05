@@ -1,11 +1,9 @@
-package mcpreportportal
+package utils
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"log/slog"
-	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -15,19 +13,19 @@ import (
 )
 
 const (
-	firstPage                  = 1                       // Default starting page for pagination
-	singleResult               = 1                       // Default number of results per page
-	defaultPageSize            = 50                      // Default number of elements per page
-	defaultSortingForLaunches  = "startTime,number,DESC" // default sorting order for launches
-	defaultSortingForItems     = "startTime,DESC"        // default sorting order for items
-	defaultSortingForSuites    = "startTime,ASC"         // default sorting order for suites
-	defaultSortingForLogs      = "logTime,ASC"           // default sorting order for logs
-	defaultProviderType        = "launch"                // default provider type
-	defaultFilterEqHasChildren = "false"                 // items which don't have children
-	defaultFilterEqHasStats    = "true"
-	defaultFilterInType        = "STEP"
-	defaultFilterInTypeSuites  = "SUITE,TEST"
-	defaultItemLogLevel        = "TRACE" // Default log level for test item logs
+	FirstPage                  = 1                       // Default starting page for pagination
+	SingleResult               = 1                       // Default number of results per page
+	DefaultPageSize            = 50                      // Default number of elements per page
+	DefaultSortingForLaunches  = "startTime,number,DESC" // default sorting order for launches
+	DefaultSortingForItems     = "startTime,DESC"        // default sorting order for items
+	DefaultSortingForSuites    = "startTime,ASC"         // default sorting order for suites
+	DefaultSortingForLogs      = "logTime,ASC"           // default sorting order for logs
+	DefaultProviderType        = "launch"                // default provider type
+	DefaultFilterEqHasChildren = "false"                 // items which don't have children
+	DefaultFilterEqHasStats    = "true"
+	DefaultFilterInType        = "STEP"
+	DefaultFilterInTypeSuites  = "SUITE,TEST"
+	DefaultItemLogLevel        = "TRACE" // Default log level for test item logs
 )
 
 // PaginatedRequest is a generic interface for API requests that support pagination
@@ -37,15 +35,15 @@ type PaginatedRequest[T any] interface {
 	PageSort(string) T
 }
 
-// setPaginationOptions returns the standard pagination parameters for MCP tools
-func setPaginationOptions(sortingParams string) []mcp.ToolOption {
+// SetPaginationOptions returns the standard pagination parameters for MCP tools.
+func SetPaginationOptions(sortingParams string) []mcp.ToolOption {
 	return []mcp.ToolOption{
 		mcp.WithNumber("page", // Parameter for specifying the page number
-			mcp.DefaultNumber(firstPage),
+			mcp.DefaultNumber(FirstPage),
 			mcp.Description("Page number"),
 		),
 		mcp.WithNumber("page-size", // Parameter for specifying the page size
-			mcp.DefaultNumber(defaultPageSize),
+			mcp.DefaultNumber(DefaultPageSize),
 			mcp.Description("Page size"),
 		),
 		mcp.WithString("page-sort", // Sorting fields and direction
@@ -55,49 +53,7 @@ func setPaginationOptions(sortingParams string) []mcp.ToolOption {
 	}
 }
 
-// applyPaginationOptions extracts pagination from request and applies it to API request
-func applyPaginationOptions[T PaginatedRequest[T]](
-	apiRequest T,
-	request mcp.CallToolRequest,
-	sortingParams string,
-) T {
-	// Extract the "page" parameter from the request
-	pageInt := request.GetInt("page", firstPage)
-	if pageInt > math.MaxInt32 {
-		pageInt = math.MaxInt32
-	}
-
-	// Extract the "page-size" parameter from the request
-	pageSizeInt := request.GetInt("page-size", defaultPageSize)
-	if pageSizeInt > math.MaxInt32 {
-		pageSizeInt = math.MaxInt32
-	}
-
-	// Extract the "page-sort" parameter from the request
-	pageSort := request.GetString("page-sort", sortingParams)
-
-	// Apply pagination directly
-	return apiRequest.
-		PagePage(int32(pageInt)).     //nolint:gosec
-		PageSize(int32(pageSizeInt)). //nolint:gosec
-		PageSort(pageSort)
-}
-
-func extractProject(ctx context.Context, rq mcp.CallToolRequest) (string, error) {
-	// Use project parameter from request
-	if project := strings.TrimSpace(rq.GetString("project", "")); project != "" {
-		return project, nil
-	}
-	// Fallback to project from context (request's HTTP header or environment variable, depends on MCP mode)
-	if project, ok := GetProjectFromContext(ctx); ok {
-		return project, nil
-	}
-	return "", fmt.Errorf(
-		"no project parameter found in request, HTTP header, or environment variable",
-	)
-}
-
-func extractResponseError(err error, rs *http.Response) (errText string) {
+func ExtractResponseError(err error, rs *http.Response) (errText string) {
 	errText = err.Error()
 	if rs != nil && rs.Body != nil {
 		// Check if the original error indicates the body is already closed
@@ -132,12 +88,15 @@ func parseTimestampToEpoch(timestampStr string) (int64, error) {
 	// Try parsing as Unix epoch first (if it's all digits)
 	if epoch, err := strconv.ParseInt(timestampStr, 10, 64); err == nil {
 		// If it's a reasonable Unix timestamp (after 1970 and before year 3000)
-		if epoch > 0 && epoch < 32503680000 { // roughly year 3000
+		if epoch > 0 { // roughly year 3000
 			// If it looks like seconds, convert to milliseconds
 			if epoch < 10000000000 { // less than year 2286 in seconds
 				return epoch * 1000, nil
 			}
-			return epoch, nil
+			// Assume milliseconds for larger values
+			if epoch < 32503680000000 { // roughly year 3000 in milliseconds
+				return epoch, nil
+			}
 		}
 	}
 	// Try parsing as RFC3339 format
@@ -159,7 +118,7 @@ func parseTimestampToEpoch(timestampStr string) (int64, error) {
 }
 
 // processStartTimeFilter processes start time interval filter and returns the formatted filter string
-func processStartTimeFilter(filterStartTimeFrom, filterStartTimeTo string) (string, error) {
+func ProcessStartTimeFilter(filterStartTimeFrom, filterStartTimeTo string) (string, error) {
 	// Process start time interval filter
 	var filterStartTime string
 	if filterStartTimeFrom != "" && filterStartTimeTo != "" {
@@ -183,8 +142,9 @@ func processStartTimeFilter(filterStartTimeFrom, filterStartTimeTo string) (stri
 	return filterStartTime, nil
 }
 
-// processAttributeKeys processes attribute keys by adding ":" suffix where needed and combines with existing attributes
-func processAttributeKeys(filterAttributes, filterAttributeKeys string) string {
+// ProcessAttributeKeys processes attribute keys by adding ":" suffix where needed
+// and combines them with existing attributes.
+func ProcessAttributeKeys(filterAttributes, filterAttributeKeys string) string {
 	if filterAttributeKeys == "" {
 		return filterAttributes
 	}
@@ -214,7 +174,7 @@ func processAttributeKeys(filterAttributes, filterAttributeKeys string) string {
 	return result
 }
 
-func isTextContent(mediaType string) bool {
+func IsTextContent(mediaType string) bool {
 	lowerType := strings.ToLower(mediaType)
 
 	// Text types (most common)
@@ -224,12 +184,12 @@ func isTextContent(mediaType string) bool {
 
 	// Popular application types that are text-based
 	switch lowerType {
-	case "application/json":
-	case "application/xml":
-	case "application/javascript":
-	case "application/xhtml+xml":
-	case "application/yaml":
-	case "application/csv":
+	case "application/json",
+		"application/xml",
+		"application/javascript",
+		"application/xhtml+xml",
+		"application/yaml",
+		"application/csv":
 		return true
 	}
 
@@ -253,7 +213,7 @@ func isAlreadyClosedError(err error) bool {
 
 // readResponseBodyRaw safely reads an HTTP response body and ensures proper cleanup.
 // It returns the raw body bytes along with any error, suitable for custom content type handling.
-func readResponseBodyRaw(response *http.Response) ([]byte, error) {
+func ReadResponseBodyRaw(response *http.Response) ([]byte, error) {
 	// Ensure response body is always closed
 	if response == nil || response.Body == nil {
 		return nil, fmt.Errorf("empty HTTP response body")
@@ -280,8 +240,8 @@ func readResponseBodyRaw(response *http.Response) ([]byte, error) {
 // readResponseBody safely reads an HTTP response body and ensures proper cleanup.
 // It handles the defer close pattern with graceful error handling and returns an MCP tool result.
 // This is a convenience wrapper around readResponseBodyRaw for MCP tool results.
-func readResponseBody(response *http.Response) (*mcp.CallToolResult, error) {
-	rawBody, err := readResponseBodyRaw(response)
+func ReadResponseBody(response *http.Response) (*mcp.CallToolResult, error) {
+	rawBody, err := ReadResponseBodyRaw(response)
 	if err != nil {
 		return mcp.NewToolResultError(
 			fmt.Sprintf("failed to read response body: %v", err),

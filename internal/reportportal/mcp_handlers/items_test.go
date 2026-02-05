@@ -1,4 +1,4 @@
-package mcpreportportal
+package mcphandlers
 
 import (
 	"net/url"
