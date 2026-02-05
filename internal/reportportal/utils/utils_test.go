@@ -1,4 +1,4 @@
-package mcpreportportal
+package utils
 
 import (
 	"strings"
@@ -137,9 +137,9 @@ func TestProcessAttributeKeys(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := processAttributeKeys(tt.filterAttributes, tt.filterAttributeKeys)
+			result := ProcessAttributeKeys(tt.filterAttributes, tt.filterAttributeKeys)
 			if result != tt.expected {
-				t.Errorf("processAttributeKeys(%q, %q) = %q, want %q",
+				t.Errorf("ProcessAttributeKeys(%q, %q) = %q, want %q",
 					tt.filterAttributes, tt.filterAttributeKeys, result, tt.expected)
 			}
 		})
@@ -158,7 +158,7 @@ func TestProcessAttributeKeys_Performance(t *testing.T) {
 	largeFilterAttributeKeys := strings.Join(keys, ",")
 
 	// This should not panic or take too long
-	result := processAttributeKeys(filterAttributes, largeFilterAttributeKeys)
+	result := ProcessAttributeKeys(filterAttributes, largeFilterAttributeKeys)
 
 	// Basic validation - should contain the original attributes
 	if !strings.HasPrefix(result, filterAttributes) {

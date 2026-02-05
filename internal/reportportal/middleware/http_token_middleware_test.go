@@ -1,4 +1,4 @@
-package mcpreportportal
+package middleware
 
 import (
 	"context"
@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/reportportal/reportportal-mcp-server/internal/reportportal/utils"
 )
 
 func TestExtractRPProjectFromRequest(t *testing.T) {
@@ -75,15 +77,15 @@ func TestWithProjectInContext(t *testing.T) {
 	project := "test-project"
 
 	// Test adding project to context
-	ctxWithProject := WithProjectInContext(ctx, project)
+	ctxWithProject := utils.WithProjectInContext(ctx, project)
 
 	// Test retrieving project from context
-	retrievedProject, ok := GetProjectFromContext(ctxWithProject)
+	retrievedProject, ok := utils.GetProjectFromContext(ctxWithProject)
 	assert.True(t, ok)
 	assert.Equal(t, project, retrievedProject)
 
 	// Test that original context doesn't have project
-	_, ok = GetProjectFromContext(ctx)
+	_, ok = utils.GetProjectFromContext(ctx)
 	assert.False(t, ok)
 }
 
@@ -131,10 +133,10 @@ func TestGetProjectFromContext(t *testing.T) {
 			ctx := context.Background()
 
 			if tt.contextValue != nil {
-				ctx = context.WithValue(ctx, RPProjectContextKey, tt.contextValue)
+				ctx = context.WithValue(ctx, utils.RPProjectContextKey, tt.contextValue)
 			}
 
-			project, ok := GetProjectFromContext(ctx)
+			project, ok := utils.GetProjectFromContext(ctx)
 			assert.Equal(t, tt.expectedOk, ok)
 			assert.Equal(t, tt.expectedProject, project)
 		})
@@ -181,7 +183,7 @@ func TestHTTPTokenMiddleware_ProjectExtraction(t *testing.T) {
 			var projectFound bool
 
 			testHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				project, ok := GetProjectFromContext(r.Context())
+				project, ok := utils.GetProjectFromContext(r.Context())
 				capturedProject = project
 				projectFound = ok
 				w.WriteHeader(http.StatusOK)
@@ -224,11 +226,11 @@ func TestHTTPTokenMiddleware_CombinedTokenAndProject(t *testing.T) {
 	var tokenFound, projectFound bool
 
 	testHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		token, ok := GetTokenFromContext(r.Context())
+		token, ok := utils.GetTokenFromContext(r.Context())
 		capturedToken = token
 		tokenFound = ok
 
-		project, ok := GetProjectFromContext(r.Context())
+		project, ok := utils.GetProjectFromContext(r.Context())
 		capturedProject = project
 		projectFound = ok
 
@@ -255,8 +257,8 @@ func TestHTTPTokenMiddleware_NoHeaders(t *testing.T) {
 	var tokenFound, projectFound bool
 
 	testHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, tokenFound = GetTokenFromContext(r.Context())
-		_, projectFound = GetProjectFromContext(r.Context())
+		_, tokenFound = utils.GetTokenFromContext(r.Context())
+		_, projectFound = utils.GetProjectFromContext(r.Context())
 		w.WriteHeader(http.StatusOK)
 	})
 
