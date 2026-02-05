@@ -1,9 +1,10 @@
-package mcpreportportal
+package utils
 
 import (
 	"context"
 	"testing"
 
+	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -159,13 +160,15 @@ func TestExtractProject(t *testing.T) {
 				ctx = WithProjectInContext(ctx, tt.projectFromEnvVar)
 			}
 
-			// Create mock request with project parameter
-			request := MockCallToolRequest{
-				project: tt.projectFromRequest,
+			// Create MCP request with optional project argument
+			request := mcp.CallToolRequest{
+				Params: mcp.CallToolParams{
+					Arguments: map[string]any{"project": tt.projectFromRequest},
+				},
 			}
 
-			// Call extractProject with interface conversion
-			result, err := extractProjectWithMock(ctx, request)
+			// Call ExtractProject (request arg has highest priority)
+			result, err := ExtractProject(ctx, request)
 
 			// Verify result
 			if tt.expectError {

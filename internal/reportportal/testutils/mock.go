@@ -1,18 +1,15 @@
-package mcpreportportal
+package testutils
 
 import (
-	"context"
-	"strings"
-
 	"github.com/stretchr/testify/assert"
 )
 
-// MockCallToolRequest is a mock implementation of mcp.CallToolRequest for testing
+// MockCallToolRequest is a mock implementation of mcp.CallToolRequest for testing.
 type MockCallToolRequest struct {
 	project string
 }
 
-// NewMockCallToolRequest creates a new MockCallToolRequest with the specified project
+// NewMockCallToolRequest creates a new MockCallToolRequest with the specified project.
 func NewMockCallToolRequest(project string) MockCallToolRequest {
 	return MockCallToolRequest{project: project}
 }
@@ -56,18 +53,4 @@ func (m MockCallToolRequest) RequireBool(key string) (bool, error) {
 
 func (m MockCallToolRequest) RequireStringSlice(key string) ([]string, error) {
 	return nil, assert.AnError
-}
-
-// extractProjectWithMock is a test helper that works with MockCallToolRequest
-// This mimics the actual extractProject function's priority order
-func extractProjectWithMock(ctx context.Context, rq MockCallToolRequest) (string, error) {
-	// Use project parameter from request (highest priority)
-	if project := strings.TrimSpace(rq.GetString("project", "")); project != "" {
-		return project, nil
-	}
-	// Fallback to project from context (request's HTTP header or environment variable, depends on MCP mode)
-	if project, ok := GetProjectFromContext(ctx); ok {
-		return project, nil
-	}
-	return "", assert.AnError
 }

@@ -1,4 +1,4 @@
-package mcpreportportal
+package analytics
 
 import (
 	"bytes"
@@ -14,6 +14,9 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/reportportal/reportportal-mcp-server/internal/reportportal/middleware"
+	"github.com/reportportal/reportportal-mcp-server/internal/reportportal/utils"
 )
 
 // Test constants
@@ -159,7 +162,7 @@ func TestNewAnalytics(t *testing.T) {
 				assert.NotNil(t, analytics)
 
 				// Analytics should be created when API secret is provided
-				assert.NotNil(t, analytics.config)
+				assert.NotNil(t, analytics.Config)
 				assert.NotNil(t, analytics.httpClient)
 			}
 		})
@@ -203,7 +206,7 @@ func TestTrackMCPEvent(t *testing.T) {
 		{
 			name: "no API secret",
 			analytics: &Analytics{
-				config: &AnalyticsConfig{
+				Config: &AnalyticsConfig{
 					APISecret: "",
 				},
 				metrics:     make(map[string]map[string]*int64),
@@ -215,7 +218,7 @@ func TestTrackMCPEvent(t *testing.T) {
 		{
 			name: "valid analytics",
 			analytics: &Analytics{
-				config: &AnalyticsConfig{
+				Config: &AnalyticsConfig{
 					APISecret: "test-secret",
 				},
 				metrics:     make(map[string]map[string]*int64),
@@ -261,7 +264,7 @@ func TestWithAnalytics(t *testing.T) {
 
 	// Create analytics with a way to track calls
 	analytics := &Analytics{
-		config: &AnalyticsConfig{
+		Config: &AnalyticsConfig{
 			APISecret: "test-secret",
 		},
 		metrics:     make(map[string]map[string]*int64),
@@ -269,7 +272,7 @@ func TestWithAnalytics(t *testing.T) {
 	}
 
 	// Wrap the handler
-	wrappedHandler := analytics.WithAnalytics("test_tool", handler)
+	wrappedHandler := utils.WithAnalytics(analytics, "test_tool", handler)
 
 	// Call the wrapped handler
 	result, err := wrappedHandler(context.Background(), mcp.CallToolRequest{})
@@ -291,7 +294,7 @@ func TestWithAnalyticsNilAnalytics(t *testing.T) {
 
 	// Test with nil analytics
 	var analytics *Analytics
-	wrappedHandler := analytics.WithAnalytics("test_tool", handler)
+	wrappedHandler := utils.WithAnalytics(analytics, "test_tool", handler)
 
 	// Call the wrapped handler
 	result, err := wrappedHandler(context.Background(), mcp.CallToolRequest{})
@@ -314,14 +317,14 @@ func TestAnalyticsStop(t *testing.T) {
 		{
 			name: "analytics with nil stopChan",
 			analytics: &Analytics{
-				config:   &AnalyticsConfig{},
+				Config:   &AnalyticsConfig{},
 				stopChan: nil,
 			},
 		},
 		{
 			name: "valid analytics",
 			analytics: &Analytics{
-				config:     &AnalyticsConfig{},
+				Config:     &AnalyticsConfig{},
 				stopChan:   make(chan struct{}),
 				tickerDone: make(chan struct{}),
 				wg:         sync.WaitGroup{},
@@ -362,7 +365,7 @@ func TestAnalyticsIntegration(t *testing.T) {
 	}
 
 	// Wrap with analytics
-	wrappedHandler := analytics.WithAnalytics("test_tool", handler)
+	wrappedHandler := utils.WithAnalytics(analytics, "test_tool", handler)
 
 	// Call the handler multiple times
 	for i := 0; i < 3; i++ {
@@ -391,14 +394,14 @@ func TestStopAnalytics(t *testing.T) {
 		{
 			name: "valid analytics with reason",
 			analytics: &Analytics{
-				config: &AnalyticsConfig{APISecret: "test-secret"},
+				Config: &AnalyticsConfig{APISecret: "test-secret"},
 			},
 			reason: "test reason",
 		},
 		{
 			name: "valid analytics without reason",
 			analytics: &Analytics{
-				config: &AnalyticsConfig{APISecret: "test-secret"},
+				Config: &AnalyticsConfig{APISecret: "test-secret"},
 			},
 			reason: "",
 		},
@@ -443,7 +446,7 @@ func TestAnalyticsConfigValidation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			analytics := &Analytics{
-				config:      tt.config,
+				Config:      tt.config,
 				metrics:     make(map[string]map[string]*int64),
 				metricsLock: sync.RWMutex{},
 			}
@@ -472,7 +475,7 @@ func TestAnalyticsConfigValidation(t *testing.T) {
 
 func TestConcurrentMetricIncrement(t *testing.T) {
 	analytics := &Analytics{
-		config: &AnalyticsConfig{
+		Config: &AnalyticsConfig{
 			APISecret: "test-secret",
 			UserID:    "test-user",
 		},
@@ -519,8 +522,8 @@ func TestAnalyticsUserIDGeneration(t *testing.T) {
 	assert.NotNil(t, analytics2)
 
 	// Both should be valid
-	assert.NotNil(t, analytics1.config)
-	assert.NotNil(t, analytics2.config)
+	assert.NotNil(t, analytics1.Config)
+	assert.NotNil(t, analytics2.Config)
 }
 
 func TestGetUserIDFromContext(t *testing.T) {
@@ -577,7 +580,7 @@ func TestGetUserIDFromContext(t *testing.T) {
 			// Create context with or without Bearer token
 			ctx := context.Background()
 			if tt.tokenInContext != "" {
-				ctx = WithTokenInContext(ctx, tt.tokenInContext)
+				ctx = utils.WithTokenInContext(ctx, tt.tokenInContext)
 			}
 
 			// Get user ID from context
@@ -589,19 +592,19 @@ func TestGetUserIDFromContext(t *testing.T) {
 				// Should use RP_API_TOKEN env var hash
 				expectedHash := HashToken(tt.rpTokenEnvVar)
 				assert.Equal(t, expectedHash, userID, "Should use RP_API_TOKEN env var hash")
-				assert.Equal(t, analytics.config.UserID, userID, "Should match config user ID")
+				assert.Equal(t, analytics.Config.UserID, userID, "Should match config user ID")
 			case "custom_user_hash":
 				// Should use custom user ID hash
 				expectedHash := HashToken(tt.customUserID)
 				assert.Equal(t, expectedHash, userID, "Should use custom user ID hash")
-				assert.Equal(t, analytics.config.UserID, userID, "Should match config user ID")
+				assert.Equal(t, analytics.Config.UserID, userID, "Should match config user ID")
 			case "bearer_hash":
 				// Should use Bearer token hash
 				expectedHash := HashToken(tt.tokenInContext)
 				assert.Equal(t, expectedHash, userID, "Should use Bearer token hash")
 				assert.NotEqual(
 					t,
-					analytics.config.UserID,
+					analytics.Config.UserID,
 					userID,
 					"Should not match anonymous config user ID",
 				)
@@ -609,7 +612,7 @@ func TestGetUserIDFromContext(t *testing.T) {
 				// Should use anonymous hash
 				expectedHash := HashToken("anonymous-http-mode")
 				assert.Equal(t, expectedHash, userID, "Should use anonymous hash")
-				assert.Equal(t, analytics.config.UserID, userID, "Should match config user ID")
+				assert.Equal(t, analytics.Config.UserID, userID, "Should match config user ID")
 			}
 		})
 	}
@@ -626,7 +629,7 @@ func TestTrackMCPEventWithTokenFromContext(t *testing.T) {
 
 		// Track event with Bearer token in context
 		bearerToken := testToken1
-		ctx := WithTokenInContext(context.Background(), bearerToken)
+		ctx := utils.WithTokenInContext(context.Background(), bearerToken)
 
 		analytics.TrackMCPEvent(ctx, "test_tool_1")
 
@@ -662,7 +665,7 @@ func TestTrackMCPEventWithTokenFromContext(t *testing.T) {
 
 		// Track event with different Bearer tokens
 		token1 := testToken1
-		ctx1 := WithTokenInContext(context.Background(), token1)
+		ctx1 := utils.WithTokenInContext(context.Background(), token1)
 
 		analytics.TrackMCPEvent(ctx1, "test_tool_1")
 
@@ -677,7 +680,7 @@ func TestTrackMCPEventWithTokenFromContext(t *testing.T) {
 
 		// Track with different Bearer token
 		token2 := testToken2
-		ctx2 := WithTokenInContext(context.Background(), token2)
+		ctx2 := utils.WithTokenInContext(context.Background(), token2)
 
 		analytics.TrackMCPEvent(ctx2, "test_tool_2")
 
@@ -735,8 +738,8 @@ func TestAnalyticsBatchSendingPerUser(t *testing.T) {
 		token1 := testToken1
 		token2 := testToken2
 
-		ctx1 := WithTokenInContext(context.Background(), token1)
-		ctx2 := WithTokenInContext(context.Background(), token2)
+		ctx1 := utils.WithTokenInContext(context.Background(), token1)
+		ctx2 := utils.WithTokenInContext(context.Background(), token2)
 
 		// Track multiple events
 		analytics.TrackMCPEvent(ctx1, "tool_a")
@@ -772,8 +775,8 @@ func TestAnalyticsBatchSendingPerUser(t *testing.T) {
 		token1 := testToken1
 		token2 := testToken2
 
-		ctx1 := WithTokenInContext(context.Background(), token1)
-		ctx2 := WithTokenInContext(context.Background(), token2)
+		ctx1 := utils.WithTokenInContext(context.Background(), token1)
+		ctx2 := utils.WithTokenInContext(context.Background(), token2)
 
 		// Track multiple events
 		analytics.TrackMCPEvent(ctx1, "tool_a")
@@ -824,7 +827,7 @@ func TestAnalyticsHashingComparison_WithAndWithoutRPToken(t *testing.T) {
 	defer analytics2.Stop()
 
 	// Create context with Bearer token (same for both)
-	ctxWithBearer := WithTokenInContext(context.Background(), bearerToken)
+	ctxWithBearer := utils.WithTokenInContext(context.Background(), bearerToken)
 
 	// Get user IDs from both analytics instances
 	userID1 := analytics1.getUserIDFromContext(ctxWithBearer)
@@ -905,7 +908,7 @@ func TestSameTokenDifferentSources_ProducesSameHash(t *testing.T) {
 	defer analytics2.Stop()
 
 	// Create context with the SAME token value in Bearer header
-	ctxWithBearer := WithTokenInContext(context.Background(), sameTokenValue)
+	ctxWithBearer := utils.WithTokenInContext(context.Background(), sameTokenValue)
 
 	// Get user IDs from both scenarios
 	userID1 := analytics1.getUserIDFromContext(context.Background()) // Uses env var
@@ -975,7 +978,7 @@ func TestHTTPTokenMiddlewareIntegrationWithAnalytics(t *testing.T) {
 		})
 
 		// Wrap with HTTPTokenMiddleware
-		middleware := HTTPTokenMiddleware(testHandler)
+		httpMiddleware := middleware.HTTPTokenMiddleware(testHandler)
 
 		// Request with Bearer token
 		token := testToken1
@@ -983,7 +986,7 @@ func TestHTTPTokenMiddlewareIntegrationWithAnalytics(t *testing.T) {
 		req1.Header.Set("Authorization", "Bearer "+token)
 
 		rr1 := httptest.NewRecorder()
-		middleware.ServeHTTP(rr1, req1)
+		httpMiddleware.ServeHTTP(rr1, req1)
 
 		assert.Equal(t, http.StatusOK, rr1.Code)
 
@@ -1001,7 +1004,7 @@ func TestHTTPTokenMiddlewareIntegrationWithAnalytics(t *testing.T) {
 		req2 := httptest.NewRequest("POST", "/test", nil)
 
 		rr2 := httptest.NewRecorder()
-		middleware.ServeHTTP(rr2, req2)
+		httpMiddleware.ServeHTTP(rr2, req2)
 
 		assert.Equal(t, http.StatusOK, rr2.Code)
 
@@ -1035,7 +1038,7 @@ func TestHTTPTokenMiddlewareIntegrationWithAnalytics(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 		})
 
-		middleware := HTTPTokenMiddleware(testHandler)
+		httpMiddleware := middleware.HTTPTokenMiddleware(testHandler)
 
 		// Request with Bearer token (should be ignored)
 		bearerToken := testToken1
@@ -1043,7 +1046,7 @@ func TestHTTPTokenMiddlewareIntegrationWithAnalytics(t *testing.T) {
 		req.Header.Set("Authorization", "Bearer "+bearerToken)
 
 		rr := httptest.NewRecorder()
-		middleware.ServeHTTP(rr, req)
+		httpMiddleware.ServeHTTP(rr, req)
 
 		assert.Equal(t, http.StatusOK, rr.Code)
 

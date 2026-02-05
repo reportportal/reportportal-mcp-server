@@ -20,6 +20,9 @@ import (
 	"github.com/urfave/cli/v3"
 
 	mcpreportportal "github.com/reportportal/reportportal-mcp-server/internal/reportportal"
+	"github.com/reportportal/reportportal-mcp-server/internal/reportportal/analytics"
+	mcphandlers "github.com/reportportal/reportportal-mcp-server/internal/reportportal/mcp_handlers"
+	"github.com/reportportal/reportportal-mcp-server/internal/reportportal/utils"
 )
 
 var (
@@ -199,19 +202,19 @@ func initLogger() func(ctx context.Context, command *cli.Command) (context.Conte
 
 // handleServerError processes server errors, distinguishing between graceful shutdowns and actual errors.
 // Returns nil for graceful shutdowns, or the original error for actual problems.
-func handleServerError(err error, analytics *mcpreportportal.Analytics, serverType string) error {
+func handleServerError(err error, analyticsInstance *analytics.Analytics, serverType string) error {
 	// Check for successful completion or expected shutdown errors
 	if err == nil ||
 		errors.Is(err, http.ErrServerClosed) ||
 		errors.Is(err, context.Canceled) ||
 		errors.Is(err, context.DeadlineExceeded) {
 		slog.Info("server shutdown completed", "type", serverType)
-		mcpreportportal.StopAnalytics(analytics, "")
+		analytics.StopAnalytics(analyticsInstance, "")
 		return nil
 	}
 
 	slog.Error("server error occurred", "type", serverType, "error", err)
-	mcpreportportal.StopAnalytics(analytics, "server error")
+	analytics.StopAnalytics(analyticsInstance, "server error")
 	return fmt.Errorf("error running %s server: %w", serverType, err)
 }
 
@@ -223,7 +226,7 @@ func buildHTTPServerConfig(cmd *cli.Command) (mcpreportportal.HTTPServerConfig, 
 	// Note: RP_API_TOKEN and --token flag are not available in HTTP mode
 	// Tokens MUST come from HTTP request headers (Authorization: Bearer <token>)
 	userID := cmd.String("user-id")
-	analyticsAPISecret := mcpreportportal.GetAnalyticArg()
+	analyticsAPISecret := analytics.GetAnalyticArg()
 	analyticsOff := cmd.Bool("analytics-off")
 
 	// Performance tuning parameters with defaults
@@ -252,14 +255,14 @@ func buildHTTPServerConfig(cmd *cli.Command) (mcpreportportal.HTTPServerConfig, 
 	}, nil
 }
 
-func newMCPServer(cmd *cli.Command) (*server.MCPServer, *mcpreportportal.Analytics, error) {
+func newMCPServer(cmd *cli.Command) (*server.MCPServer, *analytics.Analytics, error) {
 	// Retrieve required parameters from the command flags
-	token := cmd.String("token")                           // API token
-	host := cmd.String("rp-host")                          // ReportPortal host URL
-	userID := cmd.String("user-id")                        // Unified user ID for analytics
-	project := cmd.String("project")                       // ReportPortal project name
-	analyticsAPISecret := mcpreportportal.GetAnalyticArg() // Analytics API secret
-	analyticsOff := cmd.Bool("analytics-off")              // Disable analytics flag
+	token := cmd.String("token")                     // API token
+	host := cmd.String("rp-host")                    // ReportPortal host URL
+	userID := cmd.String("user-id")                  // Unified user ID for analytics
+	project := cmd.String("project")                 // ReportPortal project name
+	analyticsAPISecret := analytics.GetAnalyticArg() // Analytics API secret
+	analyticsOff := cmd.Bool("analytics-off")        // Disable analytics flag
 
 	hostUrl, err := url.Parse(host)
 	if err != nil {
@@ -267,7 +270,7 @@ func newMCPServer(cmd *cli.Command) (*server.MCPServer, *mcpreportportal.Analyti
 	}
 
 	// Create a new stdio server using the ReportPortal client
-	mcpServer, analytics, err := mcpreportportal.NewServer(
+	mcpServer, analyticsInstance, err := mcphandlers.NewServer(
 		version,
 		hostUrl,
 		token,
@@ -279,7 +282,7 @@ func newMCPServer(cmd *cli.Command) (*server.MCPServer, *mcpreportportal.Analyti
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create ReportPortal MCP server: %w", err)
 	}
-	return mcpServer, analytics, nil
+	return mcpServer, analyticsInstance, nil
 }
 
 // runStdioServer starts the ReportPortal MCP server in stdio mode.
@@ -295,9 +298,9 @@ func runStdioServer(ctx context.Context, cmd *cli.Command) error {
 	rpProject := cmd.String("project")
 	if rpProject != "" {
 		// Add project to request context default project name from Environment variable
-		ctx = mcpreportportal.WithProjectInContext(ctx, rpProject)
+		ctx = utils.WithProjectInContext(ctx, rpProject)
 	}
-	mcpServer, analytics, err := newMCPServer(cmd)
+	mcpServer, analyticsInstance, err := newMCPServer(cmd)
 	if err != nil {
 		return fmt.Errorf("failed to create ReportPortal MCP server: %w", err)
 	}
@@ -317,9 +320,9 @@ func runStdioServer(ctx context.Context, cmd *cli.Command) error {
 	select {
 	case <-ctx.Done(): // Context canceled (e.g., SIGTERM received)
 		slog.Info("shutting down server...")
-		mcpreportportal.StopAnalytics(analytics, "")
+		analytics.StopAnalytics(analyticsInstance, "")
 	case err := <-errC: // Error occurred while running the server
-		return handleServerError(err, analytics, "stdio")
+		return handleServerError(err, analyticsInstance, "stdio")
 	}
 
 	return nil
@@ -333,7 +336,7 @@ func runStreamingServer(ctx context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("failed to build HTTP server config: %w", err)
 	}
 
-	httpServer, analytics, err := mcpreportportal.CreateHTTPServerWithMiddleware(config)
+	httpServer, analyticsInstance, err := mcpreportportal.CreateHTTPServerWithMiddleware(config)
 	if err != nil {
 		return fmt.Errorf("failed to create HTTP MCP server: %w", err)
 	}
@@ -371,7 +374,7 @@ func runStreamingServer(ctx context.Context, cmd *cli.Command) error {
 	select {
 	case <-ctx.Done(): // Context canceled (e.g., SIGTERM received)
 		slog.Info("shutting down server...")
-		mcpreportportal.StopAnalytics(analytics, "")
+		analytics.StopAnalytics(analyticsInstance, "")
 		sCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := server.Shutdown(sCtx); err != nil {
@@ -381,7 +384,7 @@ func runStreamingServer(ctx context.Context, cmd *cli.Command) error {
 			slog.Error("error stopping HTTP server", "error", err)
 		}
 	case err := <-errC: // Error occurred while running the server
-		return handleServerError(err, analytics, "http")
+		return handleServerError(err, analyticsInstance, "http")
 	}
 
 	return nil

@@ -1,9 +1,10 @@
-package mcpreportportal
+package mcphandlers
 
 import (
 	"embed"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"net/url"
 	"path/filepath"
 
@@ -11,10 +12,12 @@ import (
 	"github.com/reportportal/goRP/v5/pkg/gorp"
 
 	"github.com/reportportal/reportportal-mcp-server/internal/promptreader"
+	"github.com/reportportal/reportportal-mcp-server/internal/reportportal/analytics"
+	"github.com/reportportal/reportportal-mcp-server/internal/reportportal/middleware"
 )
 
 //go:embed prompts/*.yaml
-var promptFiles embed.FS
+var PromptFiles embed.FS
 
 func NewServer(
 	version string,
@@ -22,7 +25,7 @@ func NewServer(
 	token,
 	userID, project, analyticsAPISecret string,
 	analyticsOn bool,
-) (*server.MCPServer, *Analytics, error) {
+) (*server.MCPServer, *analytics.Analytics, error) {
 	s := server.NewMCPServer(
 		"reportportal-mcp-server",
 		version,
@@ -34,41 +37,32 @@ func NewServer(
 
 	// Create a new ReportPortal client
 	rpClient := gorp.NewClient(hostUrl, token)
-	rpClient.APIClient.GetConfig().Middleware = QueryParamsMiddleware
+	rpClient.APIClient.GetConfig().Middleware = middleware.QueryParamsMiddleware
 
 	// Initialize analytics (disabled if analyticsOff is true)
-	var analytics *Analytics
+	var analyticsInstance *analytics.Analytics
 	if analyticsOn {
 		var err error
+
 		// Pass RP API token for secure hashing as user identifier
-		analytics, err = NewAnalytics(userID, analyticsAPISecret, token, hostUrl.String())
+		analyticsInstance, err = analytics.NewAnalytics(
+			userID,
+			analyticsAPISecret,
+			token,
+			hostUrl.String(),
+		)
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to initialize analytics: %w", err)
+			slog.Warn("Failed to initialize analytics", "error", err)
 		}
 	}
 
-	launches := NewLaunchResources(rpClient, analytics, project)
-	s.AddTool(launches.toolGetLaunches())
-	s.AddTool(launches.toolGetLastLaunchByName())
-	s.AddTool(launches.toolGetLaunchById())
-	s.AddTool(launches.toolForceFinishLaunch())
-	s.AddTool(launches.toolDeleteLaunch())
-	s.AddTool(launches.toolRunAutoAnalysis())
-	s.AddTool(launches.toolUniqueErrorAnalysis())
-	s.AddTool(launches.toolRunQualityGate())
-	s.AddResourceTemplate(launches.resourceLaunch())
+	// Register all launch-related tools and resources
+	RegisterLaunchTools(s, rpClient, project, analyticsInstance)
 
-	testItems := NewTestItemResources(rpClient, analytics, project)
-	s.AddTool(testItems.toolGetTestItemById())
-	s.AddTool(testItems.toolGetTestItemsByFilter())
-	s.AddTool(testItems.toolGetTestItemLogsByFilter())
-	s.AddTool(testItems.toolGetTestItemAttachment())
-	s.AddTool(testItems.toolGetTestSuitesByFilter())
-	s.AddTool(testItems.toolGetProjectDefectTypes())
-	s.AddTool(testItems.toolUpdateDefectTypeForTestItems())
-	s.AddResourceTemplate(testItems.resourceTestItem())
+	// Register all test item-related tools and resources
+	RegisterTestItemTools(s, rpClient, project, analyticsInstance)
 
-	prompts, err := readPrompts(promptFiles, "prompts")
+	prompts, err := ReadPrompts(PromptFiles, "prompts")
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to load prompts: %w", err)
 	}
@@ -77,16 +71,16 @@ func NewServer(
 		s.AddPrompt(prompt.Prompt, prompt.Handler)
 	}
 
-	return s, analytics, nil
+	return s, analyticsInstance, nil
 }
 
 // readPrompts reads multiple YAML files containing prompt definitions
-func readPrompts(files embed.FS, dir string) ([]promptreader.PromptHandlerPair, error) {
+func ReadPrompts(files embed.FS, dir string) ([]promptreader.PromptHandlerPair, error) {
 	entries, err := fs.ReadDir(files, dir)
 	if err != nil {
 		return nil, err
 	}
-	handlers := make([]promptreader.PromptHandlerPair, len(entries))
+	handlers := make([]promptreader.PromptHandlerPair, 0, len(entries))
 	for _, entry := range entries {
 		// The path separator is a forward slash, even on Windows systems
 		// https://pkg.go.dev/embed

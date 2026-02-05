@@ -1,4 +1,4 @@
-package mcpreportportal
+package analytics
 
 import (
 	"bytes"
@@ -16,8 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
+	"github.com/reportportal/reportportal-mcp-server/internal/reportportal/utils"
 )
 
 const (
@@ -32,7 +31,7 @@ const (
 	HashAlgorithm = "SHA256-128bit"
 
 	// Batch send interval for analytics data
-	batchSendInterval = 10 * time.Second
+	BatchSendInterval = 10 * time.Second
 
 	maxPerRequest = 25
 
@@ -101,7 +100,7 @@ type GAPayload struct {
 
 // Analytics handles Google Analytics tracking with batched metrics
 type Analytics struct {
-	config     *AnalyticsConfig
+	Config     *AnalyticsConfig
 	httpClient *http.Client
 
 	// ReportPortal instance ID (fetched lazily on first use, retried until successful)
@@ -281,7 +280,7 @@ func NewAnalytics(
 	}
 
 	analytics := &Analytics{
-		config:     config,
+		Config:     config,
 		httpClient: httpClient,
 		rpHostURL:  rpHostURL,                          // Store for lazy fetching
 		instanceID: "",                                 // Will be fetched lazily on first use
@@ -317,14 +316,14 @@ func (a *Analytics) getUserIDFromContext(ctx context.Context) string {
 	// First check if config UserID is from RP token or custom user ID (not anonymous)
 	// If RP_API_TOKEN env var was set, config.UserID will be its hash
 	// We want to use the env var token if it was provided
-	if a.config.UserID != anonymousUserIDHash {
+	if a.Config.UserID != anonymousUserIDHash {
 		// Config has a real user ID (from RP_API_TOKEN env var or RP_USER_ID)
 		slog.Debug("Using RP_API_TOKEN or RP_USER_ID for analytics", "source", "env_var")
-		return a.config.UserID
+		return a.Config.UserID
 	}
 
 	// If no env var token/user ID was set (anonymous mode), try to get token from context
-	if token, ok := GetTokenFromContext(ctx); ok && token != "" {
+	if token, ok := utils.GetTokenFromContext(ctx); ok && token != "" {
 		// Hash the Bearer token to get a secure user identifier
 		hashedToken := HashToken(token)
 		slog.Debug("Using Bearer token from request for analytics", "source", "bearer_header")
@@ -333,7 +332,7 @@ func (a *Analytics) getUserIDFromContext(ctx context.Context) string {
 
 	// Fall back to anonymous identifier
 	slog.Debug("Using anonymous user ID for analytics", "source", "anonymous")
-	return a.config.UserID
+	return a.Config.UserID
 }
 
 // sendBatchEventsForUser sends multiple events to Google Analytics 4 with a specific user ID
@@ -379,7 +378,7 @@ func (a *Analytics) sendPayload(ctx context.Context, payload GAPayload) error {
 	}
 
 	url := fmt.Sprintf("%s?measurement_id=%s&api_secret=%s",
-		ga4EndpointURL, a.config.MeasurementID, a.config.APISecret)
+		ga4EndpointURL, a.Config.MeasurementID, a.Config.APISecret)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonData))
 	if err != nil {
@@ -433,22 +432,6 @@ func (a *Analytics) sendPayload(ctx context.Context, payload GAPayload) error {
 	return nil
 }
 
-// WithAnalytics wraps a tool handler to add analytics tracking
-func (a *Analytics) WithAnalytics(
-	toolName string,
-	handler server.ToolHandlerFunc,
-) server.ToolHandlerFunc {
-	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		// Track the event before executing the tool (synchronous since it's just incrementing a counter)
-		if a != nil {
-			a.TrackMCPEvent(ctx, toolName)
-		}
-
-		// Execute the original handler
-		return handler(ctx, request)
-	}
-}
-
 func GetAnalyticArg() string {
 	seed := uint32(0x1337)
 	p1Bytes := []byte{107, 110, 74, 83}
@@ -470,10 +453,10 @@ func (a *Analytics) startMetricsProcessor() {
 	a.wg.Add(1)
 	go func() {
 		defer a.wg.Done()
-		ticker := time.NewTicker(batchSendInterval)
+		ticker := time.NewTicker(BatchSendInterval)
 		defer ticker.Stop()
 
-		slog.Debug("Analytics metrics processor started", "interval", batchSendInterval)
+		slog.Debug("Analytics metrics processor started", "interval", BatchSendInterval)
 
 		for {
 			select {

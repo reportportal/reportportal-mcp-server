@@ -10,13 +10,17 @@ import (
 	"net/url"
 	"runtime"
 	"strings"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/reportportal/goRP/v5/pkg/gorp"
+
+	"github.com/reportportal/reportportal-mcp-server/internal/reportportal/analytics"
+	mcphandlers "github.com/reportportal/reportportal-mcp-server/internal/reportportal/mcp_handlers"
+	app_middleware "github.com/reportportal/reportportal-mcp-server/internal/reportportal/middleware"
 )
 
 // createHTTPClient creates a reusable HTTP client with optimal settings
@@ -52,16 +56,15 @@ type HTTPServerConfig struct {
 
 // HTTPServer is an enhanced MCP server with Chi router
 type HTTPServer struct {
-	mcpServer        *server.MCPServer
-	analytics        *Analytics
-	config           HTTPServerConfig
-	Router           chi.Router // Made public for CreateHTTPServerWithMiddleware
-	streamableServer *server.StreamableHTTPServer
-	httpClient       *http.Client // Direct HTTP client instead of ConnectionManager
+	mcpServer         *server.MCPServer
+	AnalyticsInstance *analytics.Analytics
+	config            HTTPServerConfig
+	Router            chi.Router // Made public for CreateHTTPServerWithMiddleware
+	streamableServer  *server.StreamableHTTPServer
+	httpClient        *http.Client // Direct HTTP client instead of ConnectionManager
 
 	// State management
-	running    bool
-	runningMux sync.RWMutex
+	running atomic.Bool
 }
 
 // MCPRequestPayload represents the basic JSON-RPC structure of MCP requests
@@ -103,10 +106,10 @@ func NewHTTPServer(
 	// Initialize batch-based analytics
 	// Note: In HTTP mode, FallbackRPToken is always empty (tokens come from HTTP headers).
 	// Analytics uses UserID for identification in HTTP mode.
-	var analytics *Analytics
+	var analyticsInstance *analytics.Analytics
 	if config.AnalyticsOn && config.GA4Secret != "" {
 		var err error
-		analytics, err = NewAnalytics(
+		analyticsInstance, err = analytics.NewAnalytics(
 			config.UserID,
 			config.GA4Secret,
 			"",                      // FallbackRPToken is always empty in HTTP mode
@@ -122,10 +125,10 @@ func NewHTTPServer(
 	}
 
 	httpServer := &HTTPServer{
-		mcpServer:  mcpServer,
-		analytics:  analytics,
-		config:     config,
-		httpClient: httpClient,
+		mcpServer:         mcpServer,
+		AnalyticsInstance: analyticsInstance,
+		config:            config,
+		httpClient:        httpClient,
 	}
 
 	// Initialize tools and resources
@@ -147,37 +150,21 @@ func (hs *HTTPServer) initializeTools() error {
 
 	// Use HTTP client
 	rpClient.APIClient.GetConfig().HTTPClient = hs.httpClient
-	rpClient.APIClient.GetConfig().Middleware = QueryParamsMiddleware
+	rpClient.APIClient.GetConfig().Middleware = app_middleware.QueryParamsMiddleware
 
-	// Add launch management tools with analytics
-	launches := NewLaunchResources(rpClient, hs.analytics, "")
+	// Register all launch-related tools and resources
+	mcphandlers.RegisterLaunchTools(hs.mcpServer, rpClient, "", hs.AnalyticsInstance)
 
-	hs.mcpServer.AddTool(launches.toolGetLaunches())
-	hs.mcpServer.AddTool(launches.toolGetLastLaunchByName())
-	hs.mcpServer.AddTool(launches.toolGetLaunchById())
-	hs.mcpServer.AddTool(launches.toolForceFinishLaunch())
-	hs.mcpServer.AddTool(launches.toolDeleteLaunch())
-	hs.mcpServer.AddTool(launches.toolRunAutoAnalysis())
-	hs.mcpServer.AddTool(launches.toolUniqueErrorAnalysis())
-	hs.mcpServer.AddTool(launches.toolRunQualityGate())
-
-	hs.mcpServer.AddResourceTemplate(launches.resourceLaunch())
-
-	// Add test item tools
-	testItems := NewTestItemResources(rpClient, hs.analytics, "")
-
-	hs.mcpServer.AddTool(testItems.toolGetTestItemById())
-	hs.mcpServer.AddTool(testItems.toolGetTestItemsByFilter())
-	hs.mcpServer.AddTool(testItems.toolGetTestItemLogsByFilter())
-	hs.mcpServer.AddTool(testItems.toolGetTestItemAttachment())
-	hs.mcpServer.AddTool(testItems.toolGetTestSuitesByFilter())
-	hs.mcpServer.AddTool(testItems.toolGetProjectDefectTypes())
-	hs.mcpServer.AddTool(testItems.toolUpdateDefectTypeForTestItems())
-
-	hs.mcpServer.AddResourceTemplate(testItems.resourceTestItem())
+	// Register all test item-related tools and resources
+	mcphandlers.RegisterTestItemTools(
+		hs.mcpServer,
+		rpClient,
+		"",
+		hs.AnalyticsInstance,
+	)
 
 	// Add prompts
-	prompts, err := readPrompts(promptFiles, "prompts")
+	prompts, err := mcphandlers.ReadPrompts(mcphandlers.PromptFiles, "prompts")
 	if err != nil {
 		return fmt.Errorf("failed to load prompts: %w", err)
 	}
@@ -198,14 +185,10 @@ type HTTPServerWithMiddleware struct {
 
 // Start starts the HTTP server
 func (hs *HTTPServer) Start() error {
-	hs.runningMux.Lock()
-	defer hs.runningMux.Unlock()
-
-	if hs.running {
+	if !hs.running.CompareAndSwap(false, true) {
 		return fmt.Errorf("server is already running")
 	}
 
-	hs.running = true
 	slog.Info("HTTP server started successfully",
 		"connection_timeout", hs.config.ConnectionTimeout)
 
@@ -214,21 +197,17 @@ func (hs *HTTPServer) Start() error {
 
 // Stop gracefully shuts down the HTTP server
 func (hs *HTTPServer) Stop() error {
-	hs.runningMux.Lock()
-	defer hs.runningMux.Unlock()
-
-	if !hs.running {
+	if !hs.running.CompareAndSwap(true, false) {
 		return nil
 	}
 
 	slog.Info("Stopping HTTP server")
 
 	// Stop analytics
-	if hs.analytics != nil {
-		hs.analytics.Stop()
+	if hs.AnalyticsInstance != nil {
+		hs.AnalyticsInstance.Stop()
 	}
 
-	hs.running = false
 	slog.Info("HTTP server stopped successfully")
 	return nil
 }
@@ -236,7 +215,7 @@ func (hs *HTTPServer) Stop() error {
 // CreateHTTPServerWithMiddleware creates a complete HTTP server setup with middleware
 func CreateHTTPServerWithMiddleware(
 	config HTTPServerConfig,
-) (*HTTPServerWithMiddleware, *Analytics, error) {
+) (*HTTPServerWithMiddleware, *analytics.Analytics, error) {
 	// Create the MCP server with Chi router and middleware already configured
 	mcpServer, err := NewHTTPServer(config)
 	if err != nil {
@@ -256,10 +235,10 @@ func CreateHTTPServerWithMiddleware(
 		"router", "chi",
 		"middleware", "HTTPTokenMiddleware+Throttle+Timeout",
 		"analytics_type", "batch",
-		"analytics_enabled", mcpServer.analytics != nil,
+		"analytics_enabled", mcpServer.AnalyticsInstance != nil,
 	)
 
-	return wrapper, mcpServer.analytics, nil
+	return wrapper, mcpServer.AnalyticsInstance, nil
 }
 
 // HTTPServerInfo provides typed information about HTTP server configuration
@@ -354,7 +333,7 @@ func (hs *HTTPServer) setupRoutes() {
 	hs.Router.Get("/info", hs.serverInfoHandler)
 
 	// Metrics endpoint (if analytics enabled)
-	if hs.analytics != nil {
+	if hs.AnalyticsInstance != nil {
 		hs.Router.Get("/metrics", hs.metricsHandler)
 	}
 
@@ -367,7 +346,7 @@ func (hs *HTTPServer) setupRoutes() {
 	// MCP endpoints using chi.Group pattern
 	hs.Router.Group(func(mcpRouter chi.Router) {
 		// Add MCP-specific middleware for token extraction and validation
-		mcpRouter.Use(HTTPTokenMiddleware)
+		mcpRouter.Use(app_middleware.HTTPTokenMiddleware)
 		mcpRouter.Use(hs.mcpMiddleware)
 
 		// Handle all MCP endpoints
@@ -379,16 +358,16 @@ func (hs *HTTPServer) setupRoutes() {
 }
 
 // GetHTTPServerInfo returns information about the HTTP server configuration
-func GetHTTPServerInfo(analytics *Analytics) HTTPServerInfo {
+func GetHTTPServerInfo(analyticsInstance *analytics.Analytics) HTTPServerInfo {
 	info := HTTPServerInfo{
 		Type: "http_mcp_server",
 	}
 
-	if analytics != nil {
+	if analyticsInstance != nil {
 		info.Analytics = AnalyticsInfo{
 			Enabled:  true,
 			Type:     "batch",
-			Interval: batchSendInterval.String(),
+			Interval: analytics.BatchSendInterval.String(),
 		}
 	} else {
 		info.Analytics = AnalyticsInfo{
@@ -407,21 +386,22 @@ func (hs *HTTPServer) healthHandler(w http.ResponseWriter, r *http.Request) {
 		"version":   hs.config.Version,
 	}
 
-	if hs.running {
+	w.Header().Set("Content-Type", "application/json")
+
+	if hs.running.Load() {
 		health["server_status"] = "running"
 	} else {
 		health["server_status"] = "stopped"
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}
 
-	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(health)
 }
 
 // serverInfoHandler returns comprehensive server information (merged /info and /status)
 func (hs *HTTPServer) serverInfoHandler(w http.ResponseWriter, r *http.Request) {
 	// Merge info and status data into comprehensive response
-	info := GetHTTPServerInfo(hs.analytics)
+	info := GetHTTPServerInfo(hs.AnalyticsInstance)
 
 	// Server configuration
 	info.Version = hs.config.Version
@@ -430,8 +410,8 @@ func (hs *HTTPServer) serverInfoHandler(w http.ResponseWriter, r *http.Request) 
 	info.ConcurrencyModel = "chi_throttle"
 
 	// Runtime status
-	info.ServerRunning = hs.running
-	info.Analytics.Enabled = hs.analytics != nil
+	info.ServerRunning = hs.running.Load()
+	info.Analytics.Enabled = hs.AnalyticsInstance != nil
 	info.Timestamp = time.Now().UTC()
 
 	w.Header().Set("Content-Type", "application/json")
@@ -440,7 +420,7 @@ func (hs *HTTPServer) serverInfoHandler(w http.ResponseWriter, r *http.Request) 
 
 // metricsHandler returns analytics metrics (if available)
 func (hs *HTTPServer) metricsHandler(w http.ResponseWriter, r *http.Request) {
-	if hs.analytics == nil {
+	if hs.AnalyticsInstance == nil {
 		http.Error(w, "Analytics not enabled", http.StatusNotFound)
 		return
 	}
@@ -449,7 +429,7 @@ func (hs *HTTPServer) metricsHandler(w http.ResponseWriter, r *http.Request) {
 	metrics := AnalyticsInfo{
 		Enabled:  true,
 		Type:     "batch",
-		Interval: batchSendInterval.String(),
+		Interval: analytics.BatchSendInterval.String(),
 	}
 
 	w.Header().Set("Content-Type", "application/json")
