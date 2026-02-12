@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -694,4 +695,22 @@ func StopAnalytics(analytics *Analytics, reason string) {
 		}
 		analytics.Stop()
 	}
+}
+
+// handleServerError processes server errors, distinguishing between graceful shutdowns and actual errors.
+// Returns nil for graceful shutdowns, or the original error for actual problems.
+func HandleServerError(err error, analyticsInstance *Analytics, serverType string) error {
+	// Check for successful completion or expected shutdown errors
+	if err == nil ||
+		errors.Is(err, http.ErrServerClosed) ||
+		errors.Is(err, context.Canceled) ||
+		errors.Is(err, context.DeadlineExceeded) {
+		slog.Info("server shutdown completed", "type", serverType)
+		StopAnalytics(analyticsInstance, "")
+		return nil
+	}
+
+	slog.Error("server error occurred", "type", serverType, "error", err)
+	StopAnalytics(analyticsInstance, "server error")
+	return fmt.Errorf("error running %s server: %w", serverType, err)
 }

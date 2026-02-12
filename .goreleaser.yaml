@@ -14,7 +14,7 @@ builds:
       - amd64
       - arm64
     ldflags:
-      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}}
+      - -s -w -X github.com/reportportal/reportportal-mcp-server/internal/config.Version={{.Version}} -X github.com/reportportal/reportportal-mcp-server/internal/config.Commit={{.Commit}} -X github.com/reportportal/reportportal-mcp-server/internal/config.Date={{.Date}}
 
 
 archives:
