@@ -2,6 +2,7 @@ package mcpreportportal
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -17,7 +18,9 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/reportportal/goRP/v5/pkg/gorp"
+	"github.com/urfave/cli/v3"
 
+	"github.com/reportportal/reportportal-mcp-server/internal/config"
 	"github.com/reportportal/reportportal-mcp-server/internal/reportportal/analytics"
 	mcphandlers "github.com/reportportal/reportportal-mcp-server/internal/reportportal/mcp_handlers"
 	app_middleware "github.com/reportportal/reportportal-mcp-server/internal/reportportal/middleware"
@@ -592,4 +595,113 @@ func (hs *HTTPServer) validateBatchRequest(batch []interface{}) bool {
 	}
 
 	return true
+}
+
+// RunStreamingServer starts the ReportPortal MCP server in streaming mode with HTTP token extraction.
+func RunStreamingServer(ctx context.Context, cmd *cli.Command) error {
+	// Build HTTP server configuration from CLI flags with performance tuning
+	serverConfig, err := buildHTTPServerConfig(cmd)
+	if err != nil {
+		return fmt.Errorf("failed to build HTTP server config: %w", err)
+	}
+
+	serverHandler, analyticsInstance, err := CreateHTTPServerWithMiddleware(serverConfig)
+	if err != nil {
+		return fmt.Errorf("failed to create HTTP MCP server: %w", err)
+	}
+	// Build address from --port and --host
+	port := cmd.Int("port")
+	host := cmd.String("host")
+	addr := fmt.Sprintf("%s:%d", host, port)
+
+	// Create HTTP server with the Chi router as handler
+	// CRITICAL: Use MCP.Router directly to ensure Chi middleware and endpoints are active
+	httpServer := &http.Server{
+		Addr:              addr,
+		Handler:           serverHandler.MCP.Router, // Use Chi router directly with throttling/health/info/metrics
+		ReadHeaderTimeout: 10 * time.Second,         // Prevent Slowloris attacks
+		ReadTimeout:       30 * time.Second,         // Total time for reading request
+		WriteTimeout:      0,                        // Total time for writing response
+		IdleTimeout:       120 * time.Second,        // Time to wait for next request
+	}
+
+	// Start the HTTP server
+	if err := serverHandler.MCP.Start(); err != nil {
+		return fmt.Errorf("failed to start HTTP server: %w", err)
+	}
+
+	// Start listening for messages in a separate goroutine
+	errC := make(chan error, 1)
+	go func() {
+		errC <- httpServer.ListenAndServe()
+	}()
+
+	// Log that the server is running
+	slog.Info("ReportPortal MCP Server running in streaming mode", "addr", addr)
+
+	// Wait for a shutdown signal or an error from the server
+	select {
+	case <-ctx.Done(): // Context canceled (e.g., SIGTERM received)
+		slog.Info("shutting down server...")
+		analytics.StopAnalytics(analyticsInstance, "")
+		sCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := httpServer.Shutdown(sCtx); err != nil {
+			slog.Error("error during server shutdown", "error", err)
+		}
+		if err := serverHandler.MCP.Stop(); err != nil {
+			slog.Error("error stopping HTTP server", "error", err)
+		}
+	case err := <-errC: // Error occurred while running the server
+		return analytics.HandleServerError(err, analyticsInstance, "http")
+	}
+
+	return nil
+}
+
+// buildHTTPServerConfig creates HTTPServerConfig from CLI flags with smart defaults.
+// This replaces the removed GetProductionConfig/GetHighTrafficConfig factory functions.
+func buildHTTPServerConfig(cmd *cli.Command) (HTTPServerConfig, error) {
+	// Retrieve required parameters from CLI flags
+	host := cmd.String("rp-host")
+	// Note: RP_API_TOKEN and --token flag are not available in HTTP mode
+	// Tokens MUST come from HTTP request headers (Authorization: Bearer <token>)
+	userID := cmd.String("user-id")
+	analyticsAPISecret := analytics.GetAnalyticArg()
+	analyticsOff := cmd.Bool("analytics-off")
+
+	// Performance tuning parameters with defaults
+	maxWorkers := cmd.Int("max-workers")
+	connectionTimeoutSec := cmd.Int("connection-timeout")
+
+	// Apply auto-detection for zero values
+	if maxWorkers <= 0 {
+		maxWorkers = runtime.NumCPU() * 2
+	}
+
+	hostUrl, err := url.Parse(host)
+	if err != nil {
+		return HTTPServerConfig{}, fmt.Errorf("invalid host URL: %w", err)
+	}
+	if hostUrl.Scheme == "" || hostUrl.Host == "" {
+		return HTTPServerConfig{}, fmt.Errorf(
+			"host URL must include scheme and host (e.g., https://reportportal.example.com)",
+		)
+	}
+
+	return HTTPServerConfig{
+		Version: fmt.Sprintf(
+			"%s (%s) %s",
+			config.Version,
+			config.Commit,
+			config.Date,
+		),
+		HostURL:               hostUrl,
+		FallbackRPToken:       "", // Always empty - RP_API_TOKEN is not available in HTTP mode
+		UserID:                userID,
+		GA4Secret:             analyticsAPISecret,
+		AnalyticsOn:           !analyticsOff,
+		MaxConcurrentRequests: maxWorkers,
+		ConnectionTimeout:     time.Duration(connectionTimeoutSec) * time.Second,
+	}, nil
 }

@@ -1,19 +1,25 @@
 package mcphandlers
 
 import (
+	"context"
 	"embed"
 	"fmt"
+	"io"
 	"io/fs"
 	"log/slog"
 	"net/url"
+	"os"
 	"path/filepath"
 
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/reportportal/goRP/v5/pkg/gorp"
+	"github.com/urfave/cli/v3"
 
+	"github.com/reportportal/reportportal-mcp-server/internal/config"
 	"github.com/reportportal/reportportal-mcp-server/internal/promptreader"
 	"github.com/reportportal/reportportal-mcp-server/internal/reportportal/analytics"
 	"github.com/reportportal/reportportal-mcp-server/internal/reportportal/middleware"
+	"github.com/reportportal/reportportal-mcp-server/internal/reportportal/utils"
 )
 
 //go:embed prompts/*.yaml
@@ -97,4 +103,89 @@ func ReadPrompts(files embed.FS, dir string) ([]promptreader.PromptHandlerPair, 
 
 	}
 	return handlers, nil
+}
+
+func newMCPServer(cmd *cli.Command) (*server.MCPServer, *analytics.Analytics, error) {
+	// Retrieve required parameters from the command flags
+	token := cmd.String("token")                     // API token
+	host := cmd.String("rp-host")                    // ReportPortal host URL
+	userID := cmd.String("user-id")                  // Unified user ID for analytics
+	project := cmd.String("project")                 // ReportPortal project name
+	analyticsAPISecret := analytics.GetAnalyticArg() // Analytics API secret
+	analyticsOff := cmd.Bool("analytics-off")        // Disable analytics flag
+
+	hostUrl, err := url.Parse(host)
+	if err != nil {
+		return nil, nil, fmt.Errorf("invalid host URL: %w", err)
+	}
+	if hostUrl.Scheme == "" || hostUrl.Host == "" {
+		return nil, nil, fmt.Errorf(
+			"invalid host URL %q: scheme and host are required (e.g., https://reportportal.example.com)",
+			host,
+		)
+	}
+
+	// Create a new stdio server using the ReportPortal client
+	mcpServer, analyticsInstance, err := NewServer(
+		fmt.Sprintf(
+			"%s (%s) %s",
+			config.Version,
+			config.Commit,
+			config.Date,
+		),
+		hostUrl,
+		token,
+		userID,
+		project,
+		analyticsAPISecret,
+		!analyticsOff, // Convert analyticsOff to analyticsOn
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create ReportPortal MCP server: %w", err)
+	}
+	return mcpServer, analyticsInstance, nil
+}
+
+// runStdioServer starts the ReportPortal MCP server in stdio mode.
+func RunStdioServer(ctx context.Context, cmd *cli.Command) error {
+	// Validate that token is provided for stdio mode (required)
+	token := cmd.String("token")
+	if token == "" {
+		return fmt.Errorf(
+			"RP_API_TOKEN is required for stdio mode (it can be passed via environment variable or --token flag)",
+		)
+	}
+
+	rpProject := cmd.String("project")
+	if rpProject != "" {
+		// Add project to request context default project name from Environment variable
+		ctx = utils.WithProjectInContext(ctx, rpProject)
+	}
+	mcpServer, analyticsInstance, err := newMCPServer(cmd)
+	if err != nil {
+		return err
+	}
+	stdioServer := server.NewStdioServer(mcpServer)
+
+	// Start listening for messages in a separate goroutine
+	errC := make(chan error, 1)
+	go func() {
+		in, out := io.Reader(os.Stdin), io.Writer(os.Stdout) // Use standard input/output
+		errC <- stdioServer.Listen(ctx, in, out)             // Start the server
+	}()
+
+	// Log that the server is running
+	slog.Info("ReportPortal MCP Server running on stdio")
+
+	// Wait for a shutdown signal or an error from the server
+	select {
+	case <-ctx.Done(): // Context canceled (e.g., SIGTERM received)
+		slog.Info("shutting down server...")
+		analytics.StopAnalytics(analyticsInstance, "")
+		// TODO: after migration to Official Go MCP SDK add context with timeout for graceful shutdown(5 seconds)
+	case err := <-errC: // Error occurred while running the server
+		return analytics.HandleServerError(err, analyticsInstance, "stdio")
+	}
+
+	return nil
 }
