@@ -6,56 +6,43 @@ import (
 	"math"
 	"strings"
 
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// ApplyPaginationOptions extracts pagination from request and applies it to API request
+// ApplyPaginationOptions applies pagination to an API request from typed values.
+// Zero values for page and pageSize fall back to defaults.
 func ApplyPaginationOptions[T PaginatedRequest[T]](
 	apiRequest T,
-	request mcp.CallToolRequest,
-	sortingParams string,
+	page, pageSize uint,
+	pageSort, defaultSort string,
 ) T {
-	// Extract the "page" parameter from the request
-	pageInt := request.GetInt("page", FirstPage)
-	if pageInt < FirstPage {
-		pageInt = FirstPage
-	} else if pageInt > math.MaxInt32 {
-		pageInt = math.MaxInt32
+	if page < FirstPage {
+		page = FirstPage
+	} else if page > math.MaxInt32 {
+		page = math.MaxInt32
 	}
 
-	// Extract the "page-size" parameter from the request
-	pageSizeInt := request.GetInt("page-size", DefaultPageSize)
-	if pageSizeInt <= 0 {
-		pageSizeInt = DefaultPageSize
-	} else if pageSizeInt > math.MaxInt32 {
-		pageSizeInt = math.MaxInt32
+	if pageSize <= 0 {
+		pageSize = DefaultPageSize
+	} else if pageSize > math.MaxInt32 {
+		pageSize = math.MaxInt32
 	}
 
-	// Extract the "page-sort" parameter from the request
-	pageSort := request.GetString("page-sort", sortingParams)
+	if pageSort == "" {
+		pageSort = defaultSort
+	}
 
-	// Apply pagination directly
 	return apiRequest.
-		PagePage(int32(pageInt)).     //nolint:gosec
-		PageSize(int32(pageSizeInt)). //nolint:gosec
+		PagePage(int32(page)).     //nolint:gosec
+		PageSize(int32(pageSize)). //nolint:gosec
 		PageSort(pageSort)
 }
 
-func NewProjectParameter(defaultProject string) mcp.ToolOption {
-	return mcp.WithString("project", // Parameter for specifying the project name)
-		mcp.Description("Project name"),
-		mcp.DefaultString(defaultProject),
-		mcp.Required(),
-	)
-}
-
-func ExtractProject(ctx context.Context, rq mcp.CallToolRequest) (string, error) {
-	// Use project parameter from request
-	if project := strings.TrimSpace(rq.GetString("project", "")); project != "" {
+// ExtractProject extracts the project from a typed argument string or context fallback.
+func ExtractProject(ctx context.Context, projectArg string) (string, error) {
+	if project := strings.TrimSpace(projectArg); project != "" {
 		return project, nil
 	}
-	// Fallback to project from context (request's HTTP header or environment variable, depends on MCP mode)
 	if project, ok := GetProjectFromContext(ctx); ok {
 		return project, nil
 	}
@@ -69,19 +56,19 @@ type EventTracker interface {
 	TrackMCPEvent(ctx context.Context, toolName string)
 }
 
-// WithAnalytics wraps a tool handler to add analytics tracking
-func WithAnalytics(
+// WithAnalytics is a generic version of WithAnalytics for typed input structs.
+func WithAnalytics[In any](
 	tracker EventTracker,
 	toolName string,
-	handler server.ToolHandlerFunc,
-) server.ToolHandlerFunc {
-	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	handler func(context.Context, *mcp.CallToolRequest, In) (*mcp.CallToolResult, any, error),
+) func(context.Context, *mcp.CallToolRequest, In) (*mcp.CallToolResult, any, error) {
+	return func(ctx context.Context, req *mcp.CallToolRequest, args In) (*mcp.CallToolResult, any, error) {
 		// Track the event before executing the tool (synchronous since it's just incrementing a counter)
 		if tracker != nil {
 			tracker.TrackMCPEvent(ctx, toolName)
 		}
 
 		// Execute the original handler
-		return handler(ctx, request)
+		return handler(ctx, req, args)
 	}
 }

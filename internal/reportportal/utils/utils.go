@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -9,7 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/google/jsonschema-go/jsonschema"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 const (
@@ -35,21 +37,34 @@ type PaginatedRequest[T any] interface {
 	PageSort(string) T
 }
 
-// SetPaginationOptions returns the standard pagination parameters for MCP tools.
-func SetPaginationOptions(sortingParams string) []mcp.ToolOption {
-	return []mcp.ToolOption{
-		mcp.WithNumber("page", // Parameter for specifying the page number
-			mcp.DefaultNumber(FirstPage),
-			mcp.Description("Page number"),
-		),
-		mcp.WithNumber("page-size", // Parameter for specifying the page size
-			mcp.DefaultNumber(DefaultPageSize),
-			mcp.Description("Page size"),
-		),
-		mcp.WithString("page-sort", // Sorting fields and direction
-			mcp.DefaultString(sortingParams),
-			mcp.Description("Sorting fields and direction"),
-		),
+// SetPaginationProperties returns the standard pagination properties for JSON Schema.
+func SetPaginationProperties(sortingParams string) map[string]*jsonschema.Schema {
+	// Helper to create JSON default values
+	intDefault := func(v int) json.RawMessage {
+		b, _ := json.Marshal(v)
+		return b
+	}
+	stringDefault := func(v string) json.RawMessage {
+		b, _ := json.Marshal(v)
+		return b
+	}
+
+	return map[string]*jsonschema.Schema{
+		"page": {
+			Type:        "integer",
+			Description: "Page number",
+			Default:     intDefault(FirstPage),
+		},
+		"page-size": {
+			Type:        "integer",
+			Description: "Page size",
+			Default:     intDefault(DefaultPageSize),
+		},
+		"page-sort": {
+			Type:        "string",
+			Description: "Sorting fields and direction",
+			Default:     stringDefault(sortingParams),
+		},
 	}
 }
 
@@ -237,16 +252,87 @@ func ReadResponseBodyRaw(response *http.Response) ([]byte, error) {
 	return rawBody, nil
 }
 
-// readResponseBody safely reads an HTTP response body and ensures proper cleanup.
-// It handles the defer close pattern with graceful error handling and returns an MCP tool result.
-// This is a convenience wrapper around readResponseBodyRaw for MCP tool results.
-func ReadResponseBody(response *http.Response) (*mcp.CallToolResult, error) {
+// ReadResponseBody safely reads an HTTP response body and returns the result as an MCP tool result.
+//
+// IMPORTANT CONTRACT: This function encodes all read/processing failures in the returned
+// mcp.CallToolResult structure and does NOT return them via the error return value.
+//
+// Return values:
+//   - *mcp.CallToolResult: Always non-nil. On success, contains the response body as text content.
+//     On failure, IsError is set to true and Content contains the error message.
+//   - any: Always nil (reserved for future use).
+//   - error: Always nil. Failures are reported via CallToolResult.IsError and CallToolResult.Content.
+//
+// Callers should check result.IsError to determine success/failure, NOT the error return value.
+func ReadResponseBody(response *http.Response) (*mcp.CallToolResult, any, error) {
 	rawBody, err := ReadResponseBodyRaw(response)
 	if err != nil {
-		return mcp.NewToolResultError(
-			fmt.Sprintf("failed to read response body: %v", err),
-		), nil
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{Text: fmt.Sprintf("failed to read response body: %v", err)},
+			},
+			IsError: true,
+		}, nil, nil
 	}
 
-	return mcp.NewToolResultText(string(rawBody)), nil
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{&mcp.TextContent{Text: string(rawBody)}},
+	}, nil, nil
+}
+
+// ParseReportPortalURI parses a ReportPortal URI of the form "reportportal://{part0}/{expectedSegment}/{part2}"
+// and extracts the first and third path segments, validating the structure.
+//
+// Parameters:
+//   - uri: The full URI to parse (e.g., "reportportal://myproject/testitem/123")
+//   - expectedSegment: The expected middle segment (e.g., "testitem", "launch")
+//
+// Returns:
+//   - part0: The first path segment (typically the project name)
+//   - part2: The third path segment (typically an ID)
+//   - err: Error if the URI format is invalid
+func ParseReportPortalURI(uri, expectedSegment string) (part0, part2 string, err error) {
+	// Expected format: reportportal://{part0}/{expectedSegment}/{part2}
+	if len(uri) < 15 || uri[:15] != "reportportal://" {
+		return "", "", fmt.Errorf("invalid URI format: %s", uri)
+	}
+
+	// Remove the scheme
+	path := uri[15:]
+
+	// Split the path into parts
+	parts := []string{}
+	start := 0
+	for i := 0; i < len(path); i++ {
+		if path[i] == '/' {
+			if i > start {
+				parts = append(parts, path[start:i])
+			}
+			start = i + 1
+		}
+	}
+	if start < len(path) {
+		parts = append(parts, path[start:])
+	}
+
+	// Validate format: {part0}/{expectedSegment}/{part2}
+	if len(parts) != 3 || parts[1] != expectedSegment {
+		return "", "", fmt.Errorf(
+			"invalid URI format, expected reportportal://{part0}/%s/{part2}: %s",
+			expectedSegment,
+			uri,
+		)
+	}
+
+	part0 = parts[0]
+	part2 = parts[2]
+
+	if part0 == "" {
+		return "", "", fmt.Errorf("missing first segment in URI: %s", uri)
+	}
+	if part2 == "" {
+		return "", "", fmt.Errorf("missing third segment in URI: %s", uri)
+	}
+
+	return part0, part2, nil
 }

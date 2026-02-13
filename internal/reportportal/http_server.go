@@ -1,11 +1,9 @@
 package mcpreportportal
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -16,7 +14,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
-	"github.com/mark3labs/mcp-go/server"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/reportportal/goRP/v5/pkg/gorp"
 	"github.com/urfave/cli/v3"
 
@@ -59,11 +57,11 @@ type HTTPServerConfig struct {
 
 // HTTPServer is an enhanced MCP server with Chi router
 type HTTPServer struct {
-	mcpServer         *server.MCPServer
+	mcpServer         *mcp.Server
 	AnalyticsInstance *analytics.Analytics
 	config            HTTPServerConfig
-	Router            chi.Router // Made public for CreateHTTPServerWithMiddleware
-	streamableServer  *server.StreamableHTTPServer
+	Router            chi.Router   // Made public for CreateHTTPServerWithMiddleware
+	mcpHTTPHandler    http.Handler // Official SDK HTTP handler
 	httpClient        *http.Client // Direct HTTP client instead of ConnectionManager
 
 	// State management
@@ -94,13 +92,14 @@ func NewHTTPServer(
 	}
 
 	// Create base MCP server
-	mcpServer := server.NewMCPServer(
-		"reportportal-mcp-server",
-		config.Version,
-		server.WithRecovery(),
-		server.WithLogging(),
-		server.WithResourceCapabilities(true, true),
-		server.WithToolCapabilities(true),
+	mcpServer := mcp.NewServer(
+		&mcp.Implementation{
+			Name:    "reportportal-mcp-server",
+			Version: config.Version,
+		},
+		&mcp.ServerOptions{
+			// Add server options as needed
+		},
 	)
 
 	// Create HTTP client
@@ -179,9 +178,8 @@ func (hs *HTTPServer) initializeTools() error {
 	return nil
 }
 
-// HTTPServerWithMiddleware wraps StreamableHTTPServer with token middleware
+// HTTPServerWithMiddleware wraps HTTP server with token middleware
 type HTTPServerWithMiddleware struct {
-	*server.StreamableHTTPServer
 	Handler http.Handler
 	MCP     *HTTPServer // Keep reference to underlying MCP server for lifecycle management
 }
@@ -228,9 +226,8 @@ func CreateHTTPServerWithMiddleware(
 	// Use the Chi router as the handler (middleware already applied in setupRoutes)
 	// The router includes HTTPTokenMiddleware for MCP routes and all other endpoints
 	wrapper := &HTTPServerWithMiddleware{
-		StreamableHTTPServer: mcpServer.streamableServer, // Use the existing streamable server
-		Handler:              mcpServer.Router,           // Use Chi router with all middleware
-		MCP:                  mcpServer,
+		Handler: mcpServer.Router, // Use Chi router with all middleware
+		MCP:     mcpServer,
 	}
 
 	slog.Info(
@@ -263,7 +260,7 @@ func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Set CORS headers
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
 		w.Header().
 			Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept, mcp-session-id")
 		w.Header().Set("Access-Control-Expose-Headers", "mcp-session-id")
@@ -311,8 +308,14 @@ func (hs *HTTPServer) setupChiRouter() {
 	// Add HTTP concurrency control
 	r.Use(middleware.Throttle(hs.config.MaxConcurrentRequests))
 
-	// Create streamable server for MCP functionality
-	hs.streamableServer = server.NewStreamableHTTPServer(hs.mcpServer)
+	// Create MCP HTTP handler using official SDK's StreamableHTTPHandler
+	// This properly dispatches to all registered tools, prompts, and resources
+	hs.mcpHTTPHandler = mcp.NewStreamableHTTPHandler(
+		func(r *http.Request) *mcp.Server {
+			return hs.mcpServer
+		},
+		nil, // Use default options
+	)
 
 	hs.Router = r
 
@@ -353,10 +356,10 @@ func (hs *HTTPServer) setupRoutes() {
 		mcpRouter.Use(hs.mcpMiddleware)
 
 		// Handle all MCP endpoints
-		mcpRouter.Handle("/mcp", hs.streamableServer)
-		mcpRouter.Handle("/api/mcp", hs.streamableServer)
-		mcpRouter.Handle("/mcp/*", hs.streamableServer)
-		mcpRouter.Handle("/api/mcp/*", hs.streamableServer)
+		mcpRouter.Handle("/mcp", hs.mcpHTTPHandler)
+		mcpRouter.Handle("/api/mcp", hs.mcpHTTPHandler)
+		mcpRouter.Handle("/mcp/*", hs.mcpHTTPHandler)
+		mcpRouter.Handle("/api/mcp/*", hs.mcpHTTPHandler)
 	})
 }
 
@@ -464,8 +467,9 @@ func (hs *HTTPServer) rootHandler(w http.ResponseWriter, r *http.Request) {
 // mcpMiddleware is middleware specifically for MCP requests
 func (hs *HTTPServer) mcpMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Allow SSE stream requests (GET with Accept: text/event-stream)
-		// and regular MCP JSON-RPC requests (POST with application/json)
+		// Allow SSE stream requests (GET with Accept: text/event-stream),
+		// regular MCP JSON-RPC requests (POST with application/json),
+		// and MCP DELETE session-termination requests
 		if !hs.isMCPRequest(r) && !hs.isSSEStreamRequest(r) {
 			http.Error(w, "Invalid MCP request", http.StatusBadRequest)
 			return
@@ -500,101 +504,23 @@ func (hs *HTTPServer) isSSEStreamRequest(r *http.Request) bool {
 }
 
 // isMCPRequest determines if a request should be handled by MCP server
-// Uses strict detection to prevent misrouting non-MCP requests
+// Performs basic method and content-type checks without body validation
 func (hs *HTTPServer) isMCPRequest(r *http.Request) bool {
-	// MCP requests must be POST requests with JSON content type
-	if r.Method != "POST" {
-		return false
+	// MCP POST requests must have JSON content type
+	if r.Method == "POST" {
+		contentType := r.Header.Get("Content-Type")
+		if idx := strings.Index(contentType, ";"); idx != -1 {
+			contentType = contentType[:idx]
+		}
+		return strings.EqualFold(strings.TrimSpace(contentType), "application/json")
 	}
 
-	contentType := r.Header.Get("Content-Type")
-	if idx := strings.Index(contentType, ";"); idx != -1 {
-		contentType = contentType[:idx]
-	}
-	if !strings.EqualFold(strings.TrimSpace(contentType), "application/json") {
-		return false
+	// MCP DELETE requests for session termination
+	if r.Method == "DELETE" {
+		return true
 	}
 
-	return hs.validateMCPPayload(r)
-}
-
-// validateMCPPayload checks if the request body contains valid JSON-RPC structure
-// Supports both single requests and batch requests (arrays)
-func (hs *HTTPServer) validateMCPPayload(r *http.Request) bool {
-	// Read the request body
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		return false
-	}
-
-	// Restore the request body so it can be read again by the MCP handler
-	r.Body = io.NopCloser(bytes.NewBuffer(body))
-
-	// Check if it's valid JSON first
-	var rawJSON interface{}
-	if err := json.Unmarshal(body, &rawJSON); err != nil {
-		return false
-	}
-
-	// Handle batch requests (arrays)
-	if batchData, ok := rawJSON.([]interface{}); ok {
-		return hs.validateBatchRequest(batchData)
-	}
-
-	// Handle single request (object)
-	if objData, ok := rawJSON.(map[string]interface{}); ok {
-		return hs.validateSingleRequest(objData)
-	}
-
-	// Invalid JSON-RPC structure (neither object nor array)
 	return false
-}
-
-// validateSingleRequest validates a single JSON-RPC request object
-func (hs *HTTPServer) validateSingleRequest(data map[string]interface{}) bool {
-	// Check for required JSON-RPC 2.0 fields
-	jsonrpc, hasJSONRPC := data["jsonrpc"]
-	method, hasMethod := data["method"]
-
-	if !hasJSONRPC || !hasMethod {
-		return false
-	}
-
-	// Validate JSON-RPC version
-	jsonrpcStr, ok := jsonrpc.(string)
-	if !ok || jsonrpcStr != "2.0" {
-		return false
-	}
-
-	// Validate method field
-	methodStr, ok := method.(string)
-	if !ok || methodStr == "" {
-		return false
-	}
-
-	return true
-}
-
-// validateBatchRequest validates a JSON-RPC batch request (array of requests)
-func (hs *HTTPServer) validateBatchRequest(batch []interface{}) bool {
-	// Batch requests cannot be empty
-	if len(batch) == 0 {
-		return false
-	}
-
-	// Validate each request in the batch
-	for _, item := range batch {
-		requestObj, ok := item.(map[string]interface{})
-		if !ok {
-			return false // Each item in batch must be an object
-		}
-
-		if !hs.validateSingleRequest(requestObj) {
-			return false // All requests in batch must be valid
-		}
-	}
-
-	return true
 }
 
 // RunStreamingServer starts the ReportPortal MCP server in streaming mode with HTTP token extraction.

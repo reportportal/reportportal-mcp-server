@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/mcptest"
+	"github.com/google/jsonschema-go/jsonschema"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/reportportal/goRP/v5/pkg/gorp"
 	"github.com/reportportal/goRP/v5/pkg/openapi"
 	"github.com/stretchr/testify/assert"
@@ -27,67 +27,65 @@ func TestLaunchByIdTemplate(t *testing.T) {
 	require.Equal(t, vals.Get("launch").String(), "123")
 }
 
+// TestListLaunchesTool tests the get_launches tool handler directly
 func TestListLaunchesTool(t *testing.T) {
 	ctx := context.Background()
 	testProject := "test-project"
-	launches, _ := json.Marshal(testLaunches())
+	expectedLaunches := testLaunches()
+	launchesJSON, _ := json.Marshal(expectedLaunches)
+
+	// Mock ReportPortal API server
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, fmt.Sprintf("/api/v1/%s/launch", testProject), r.URL.Path)
 		assert.Equal(t, http.MethodGet, r.Method)
 
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write(launches)
+		_, _ = w.Write(launchesJSON)
 	}))
 	defer mockServer.Close()
 
-	srv := mcptest.NewUnstartedServer(t)
-
+	// Create launch resources with mocked RP client
 	serverURL, _ := url.Parse(mockServer.URL)
 	launchTools := NewLaunchResources(gorp.NewClient(serverURL, ""), nil, "")
-	srv.AddTool(launchTools.toolGetLaunches())
 
-	err := srv.Start(ctx)
+	// Get the tool and handler
+	_, handler := launchTools.toolGetLaunches()
+
+	// Call the handler directly
+	result, _, err := handler(ctx, &mcp.CallToolRequest{}, GetLaunchesArgs{Project: testProject})
 	require.NoError(t, err)
-	defer srv.Close()
+	require.NotNil(t, result)
+	require.False(t, result.IsError)
+	require.Len(t, result.Content, 1)
 
-	client := srv.Client()
-
-	var req mcp.CallToolRequest
-	req.Params.Name = "get_launches"
-	req.Params.Arguments = map[string]any{
-		"project": testProject,
-	}
-
-	result, err := client.CallTool(ctx, req)
-	require.NoError(t, err)
-
-	var textContent mcp.TextContent
-	require.IsType(t, textContent, result.Content[0])
-	text := result.Content[0].(mcp.TextContent).Text
-
-	assert.Equal(t, string(launches), text)
+	// Verify the response
+	textContent, ok := result.Content[0].(*mcp.TextContent)
+	require.True(t, ok, "expected TextContent")
+	assert.Equal(t, string(launchesJSON), textContent.Text)
 }
 
+// TestGetLaunchByIdTool tests the get_launch_by_id tool handler directly
 func TestGetLaunchByIdTool(t *testing.T) {
 	ctx := context.Background()
 	testProject := "test-project"
-	launchID := "123"
+	launchID := uint32(123)
 
-	// Create a single launch response (GetLaunch returns LaunchResource directly, not wrapped in a page)
+	// Create expected launch response
 	expectedLaunch := openapi.LaunchResource{
-		Id:        123,
+		Id:        int64(launchID),
 		Name:      "Test Launch by ID",
 		Uuid:      "014b329b-a882-4c2d-9988-c2f6179a421b",
-		Number:    123,
+		Number:    int64(launchID),
 		StartTime: time.Now(),
 		Status:    string(gorp.Statuses.Passed),
 	}
 
 	launchJSON, _ := json.Marshal(expectedLaunch)
 
+	// Mock ReportPortal API server
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// GetLaunch uses /api/v1/{projectName}/launch/{launchId}
-		assert.Equal(t, fmt.Sprintf("/api/v1/%s/launch/%s", testProject, launchID), r.URL.Path)
+		assert.Equal(t, fmt.Sprintf("/api/v1/%s/launch/%d", testProject, launchID), r.URL.Path)
 		assert.Equal(t, http.MethodGet, r.Method)
 
 		w.Header().Set("Content-Type", "application/json")
@@ -95,49 +93,47 @@ func TestGetLaunchByIdTool(t *testing.T) {
 	}))
 	defer mockServer.Close()
 
-	srv := mcptest.NewUnstartedServer(t)
-
+	// Create launch resources with mocked RP client
 	serverURL, _ := url.Parse(mockServer.URL)
 	launchTools := NewLaunchResources(gorp.NewClient(serverURL, ""), nil, "")
-	srv.AddTool(launchTools.toolGetLaunchById())
 
-	err := srv.Start(ctx)
+	// Get the tool and handler
+	_, handler := launchTools.toolGetLaunchById()
+
+	// Call the handler directly
+	result, _, err := handler(
+		ctx,
+		&mcp.CallToolRequest{},
+		LaunchIDArgs{Project: testProject, LaunchID: launchID},
+	)
 	require.NoError(t, err)
-	defer srv.Close()
+	require.NotNil(t, result)
+	require.False(t, result.IsError)
+	require.Len(t, result.Content, 1)
 
-	client := srv.Client()
-
-	var req mcp.CallToolRequest
-	req.Params.Name = "get_launch_by_id"
-	req.Params.Arguments = map[string]any{
-		"project":   testProject,
-		"launch_id": launchID,
-	}
-
-	result, err := client.CallTool(ctx, req)
-	require.NoError(t, err)
-
-	var textContent mcp.TextContent
-	require.IsType(t, textContent, result.Content[0])
-	text := result.Content[0].(mcp.TextContent).Text
+	// Verify the response
+	textContent, ok := result.Content[0].(*mcp.TextContent)
+	require.True(t, ok, "expected TextContent")
 
 	// Verify the response contains the expected launch
 	var responseLaunch openapi.LaunchResource
-	err = json.Unmarshal([]byte(text), &responseLaunch)
+	err = json.Unmarshal([]byte(textContent.Text), &responseLaunch)
 	require.NoError(t, err)
 	assert.Equal(t, expectedLaunch.Id, responseLaunch.Id)
 	assert.Equal(t, expectedLaunch.Name, responseLaunch.Name)
 	assert.Equal(t, expectedLaunch.Number, responseLaunch.Number)
 }
 
+// TestGetLaunchByIdTool_NotFound tests error handling when a launch is not found
 func TestGetLaunchByIdTool_NotFound(t *testing.T) {
 	ctx := context.Background()
 	testProject := "test-project"
-	launchID := "999"
+	launchID := uint32(999)
 
+	// Mock ReportPortal API server returning 404
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// GetLaunch uses /api/v1/{projectName}/launch/{launchId}
-		assert.Equal(t, fmt.Sprintf("/api/v1/%s/launch/%s", testProject, launchID), r.URL.Path)
+		assert.Equal(t, fmt.Sprintf("/api/v1/%s/launch/%d", testProject, launchID), r.URL.Path)
 		assert.Equal(t, http.MethodGet, r.Method)
 
 		// Return 404 for launch not found
@@ -151,34 +147,23 @@ func TestGetLaunchByIdTool_NotFound(t *testing.T) {
 	}))
 	defer mockServer.Close()
 
-	srv := mcptest.NewUnstartedServer(t)
-
+	// Create launch resources with mocked RP client
 	serverURL, _ := url.Parse(mockServer.URL)
 	launchTools := NewLaunchResources(gorp.NewClient(serverURL, ""), nil, "")
-	srv.AddTool(launchTools.toolGetLaunchById())
 
-	err := srv.Start(ctx)
-	require.NoError(t, err)
-	defer srv.Close()
+	// Get the tool and handler
+	_, handler := launchTools.toolGetLaunchById()
 
-	client := srv.Client()
+	// Call the handler directly - should return an error
+	_, _, err := handler(
+		ctx,
+		&mcp.CallToolRequest{},
+		LaunchIDArgs{Project: testProject, LaunchID: launchID},
+	)
 
-	var req mcp.CallToolRequest
-	req.Params.Name = "get_launch_by_id"
-	req.Params.Arguments = map[string]any{
-		"project":   testProject,
-		"launch_id": launchID,
-	}
-
-	result, err := client.CallTool(ctx, req)
-	require.NoError(t, err)
-
-	// Verify that an error is returned for launch not found
-	require.True(t, result.IsError)
-	var textContent mcp.TextContent
-	require.IsType(t, textContent, result.Content[0])
-	text := result.Content[0].(mcp.TextContent).Text
-	assert.Contains(t, text, "not found")
+	// Verify that an error is returned
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found")
 }
 
 // TestRunAutoAnalysisTool tests the run_auto_analysis tool to ensure:
@@ -214,91 +199,63 @@ func TestRunAutoAnalysisTool(t *testing.T) {
 	}))
 	defer mockServer.Close()
 
-	srv := mcptest.NewUnstartedServer(t)
-
+	// Create launch resources with mocked RP client
 	serverURL, _ := url.Parse(mockServer.URL)
 	launchTools := NewLaunchResources(gorp.NewClient(serverURL, ""), nil, "")
+
+	// Get the tool and handler
 	tool, handler := launchTools.toolRunAutoAnalysis()
-	srv.AddTool(tool, handler)
 
 	// Verify the tool schema includes items property for array parameter
 	// This is critical for GitHub Copilot compatibility
-	toolSchema := tool.InputSchema
-	require.NotNil(t, toolSchema)
-	require.NotNil(t, toolSchema.Properties)
+	inputSchema, ok := tool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok, "InputSchema should be a *jsonschema.Schema")
+	require.NotNil(t, inputSchema)
+	require.NotNil(t, inputSchema.Properties)
 
-	analyzerItemModesProp, exists := toolSchema.Properties["analyzer_item_modes"]
+	analyzerItemModesProp, exists := inputSchema.Properties["analyzer_item_modes"]
 	require.True(t, exists, "analyzer_item_modes parameter should exist in schema")
 
-	// Verify it's an array type with items property (critical for GitHub Copilot compatibility)
-	// Properties are stored as map[string]any, so we need to check the JSON schema structure
-	propMap, ok := analyzerItemModesProp.(map[string]interface{})
-	require.True(t, ok, "analyzer_item_modes property should be a map")
-	require.Equal(t, "array", propMap["type"], "analyzer_item_modes should be an array type")
+	// Verify it's an array type with items property
+	require.Equal(
+		t,
+		"array",
+		analyzerItemModesProp.Type,
+		"analyzer_item_modes should be an array type",
+	)
 	require.NotNil(
 		t,
-		propMap["items"],
+		analyzerItemModesProp.Items,
 		"analyzer_item_modes must have items property for GitHub Copilot compatibility",
 	)
 
 	// Verify items have enum values
-	itemsMap, ok := propMap["items"].(map[string]interface{})
-	require.True(t, ok, "items should be a map")
-	require.NotNil(t, itemsMap["enum"], "items should have enum values")
-
-	// Enum can be stored as []interface{} or []string, handle both cases
-	enumValue := itemsMap["enum"]
-	var enumValues []interface{}
-	switch v := enumValue.(type) {
-	case []interface{}:
-		enumValues = v
-	case []string:
-		enumValues = make([]interface{}, len(v))
-		for i, s := range v {
-			enumValues[i] = s
-		}
-	default:
-		require.Fail(t, "enum should be an array", "got type: %T", enumValue)
-	}
-
-	expectedEnumValues := []string{"to_investigate", "auto_analyzed", "manually_analyzed"}
-	actualEnumValues := make([]string, len(enumValues))
-	for i, v := range enumValues {
-		actualEnumValues[i] = v.(string)
-	}
+	require.NotNil(t, analyzerItemModesProp.Items.Enum, "items should have enum values")
+	expectedEnumValues := []any{"to_investigate", "auto_analyzed", "manually_analyzed"}
 	assert.Equal(
 		t,
 		expectedEnumValues,
-		actualEnumValues,
+		analyzerItemModesProp.Items.Enum,
 		"enum values should match expected values",
 	)
 
-	err := srv.Start(ctx)
-	require.NoError(t, err)
-	defer srv.Close()
-
-	client := srv.Client()
-
-	// Test with valid enum values
-	var req mcp.CallToolRequest
-	req.Params.Name = "run_auto_analysis"
-	req.Params.Arguments = map[string]any{
-		"project":             testProject,
-		"launch_id":           launchID,
-		"analyzer_mode":       "current_launch",
-		"analyzer_type":       "autoAnalyzer",
-		"analyzer_item_modes": []string{"to_investigate", "auto_analyzed"},
-	}
-
-	result, err := client.CallTool(ctx, req)
+	// Call the handler directly
+	result, _, err := handler(ctx, &mcp.CallToolRequest{}, RunAutoAnalysisArgs{
+		Project:           testProject,
+		LaunchID:          uint32(launchID),
+		AnalyzerMode:      "current_launch",
+		AnalyzerType:      "autoAnalyzer",
+		AnalyzerItemModes: []string{"to_investigate", "auto_analyzed"},
+	})
 	require.NoError(t, err)
 	require.NotNil(t, result)
+	require.False(t, result.IsError)
 	require.Len(t, result.Content, 1)
 
-	var textContent mcp.TextContent
-	require.IsType(t, textContent, result.Content[0])
-	text := result.Content[0].(mcp.TextContent).Text
-	assert.Equal(t, expectedMessage, text)
+	// Verify the response
+	textContent, ok := result.Content[0].(*mcp.TextContent)
+	require.True(t, ok, "expected TextContent")
+	assert.Equal(t, expectedMessage, textContent.Text)
 
 	// Verify the API was called with correct parameters
 	require.NotNil(t, capturedRequest)

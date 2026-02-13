@@ -4,14 +4,12 @@ import (
 	"context"
 	"embed"
 	"fmt"
-	"io"
 	"io/fs"
 	"log/slog"
 	"net/url"
-	"os"
 	"path/filepath"
 
-	"github.com/mark3labs/mcp-go/server"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/reportportal/goRP/v5/pkg/gorp"
 	"github.com/urfave/cli/v3"
 
@@ -31,14 +29,15 @@ func NewServer(
 	token,
 	userID, project, analyticsAPISecret string,
 	analyticsOn bool,
-) (*server.MCPServer, *analytics.Analytics, error) {
-	s := server.NewMCPServer(
-		"reportportal-mcp-server",
-		version,
-		server.WithRecovery(),
-		server.WithLogging(),
-		server.WithResourceCapabilities(true, true),
-		server.WithToolCapabilities(true),
+) (*mcp.Server, *analytics.Analytics, error) {
+	s := mcp.NewServer(
+		&mcp.Implementation{
+			Name:    "reportportal-mcp-server",
+			Version: version,
+		},
+		&mcp.ServerOptions{
+			// Add server options as needed
+		},
 	)
 
 	// Create a new ReportPortal client
@@ -95,7 +94,7 @@ func ReadPrompts(files embed.FS, dir string) ([]promptreader.PromptHandlerPair, 
 		if err != nil {
 			return nil, err
 		}
-		prompts, err := promptreader.LoadPromptsFromYAML(data)
+		prompts, err := promptreader.ReadPrompts(data)
 		if err != nil {
 			return nil, fmt.Errorf("error loading prompts from YAML: %w", err)
 		}
@@ -105,7 +104,7 @@ func ReadPrompts(files embed.FS, dir string) ([]promptreader.PromptHandlerPair, 
 	return handlers, nil
 }
 
-func newMCPServer(cmd *cli.Command) (*server.MCPServer, *analytics.Analytics, error) {
+func newMCPServer(cmd *cli.Command) (*mcp.Server, *analytics.Analytics, error) {
 	// Retrieve required parameters from the command flags
 	token := cmd.String("token")                     // API token
 	host := cmd.String("rp-host")                    // ReportPortal host URL
@@ -165,27 +164,17 @@ func RunStdioServer(ctx context.Context, cmd *cli.Command) error {
 	if err != nil {
 		return err
 	}
-	stdioServer := server.NewStdioServer(mcpServer)
-
-	// Start listening for messages in a separate goroutine
-	errC := make(chan error, 1)
-	go func() {
-		in, out := io.Reader(os.Stdin), io.Writer(os.Stdout) // Use standard input/output
-		errC <- stdioServer.Listen(ctx, in, out)             // Start the server
-	}()
 
 	// Log that the server is running
 	slog.Info("ReportPortal MCP Server running on stdio")
 
-	// Wait for a shutdown signal or an error from the server
-	select {
-	case <-ctx.Done(): // Context canceled (e.g., SIGTERM received)
-		slog.Info("shutting down server...")
-		analytics.StopAnalytics(analyticsInstance, "")
-		// TODO: after migration to Official Go MCP SDK add context with timeout for graceful shutdown(5 seconds)
-	case err := <-errC: // Error occurred while running the server
+	// Use the official SDK's StdioTransport
+	t := &mcp.StdioTransport{}
+	err = mcpServer.Run(ctx, t)
+	if err != nil {
 		return analytics.HandleServerError(err, analyticsInstance, "stdio")
 	}
 
+	analytics.StopAnalytics(analyticsInstance, "")
 	return nil
 }
