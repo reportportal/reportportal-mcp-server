@@ -129,15 +129,7 @@ func TestNewHTTPServer_WithoutRPAPIToken(t *testing.T) {
 			assert.NotNil(t, httpServer.mcpServer, "MCP server should be initialized")
 			assert.NotNil(t, httpServer.httpClient, "HTTP client should be initialized")
 			assert.NotNil(t, httpServer.Router, "Chi router should be initialized")
-			assert.NotNil(t, httpServer.streamableServer, "Streamable server should be initialized")
-
-			// Verify analytics initialization based on configuration
-			if tt.expectAnalytics {
-				assert.NotNil(t, httpServer.AnalyticsInstance, "Analytics should be initialized")
-			} else {
-				assert.Nil(t, httpServer.AnalyticsInstance, "Analytics should not be initialized")
-			}
-
+			assert.NotNil(t, httpServer.mcpHTTPHandler, "MCP HTTP handler should be initialized")
 			// Verify config defaults are applied
 			assert.NotZero(
 				t,

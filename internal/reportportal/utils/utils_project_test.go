@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -160,17 +159,8 @@ func TestExtractProject(t *testing.T) {
 				ctx = WithProjectInContext(ctx, tt.projectFromEnvVar)
 			}
 
-			// Create MCP request with optional project argument
-			request := mcp.CallToolRequest{
-				Params: mcp.CallToolParams{
-					Arguments: map[string]any{"project": tt.projectFromRequest},
-				},
-			}
-
 			// Call ExtractProject (request arg has highest priority)
-			result, err := ExtractProject(ctx, request)
-
-			// Verify result
+			result, err := ExtractProject(ctx, tt.projectFromRequest)
 			if tt.expectError {
 				assert.Error(t, err)
 			} else {

@@ -4,6 +4,7 @@ import (
 	"net/url"
 	"testing"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/reportportal/goRP/v5/pkg/gorp"
 	"github.com/stretchr/testify/require"
 )
@@ -177,11 +178,12 @@ func TestUpdateDefectTypeForTestItemsTool(t *testing.T) {
 	).toolUpdateDefectTypeForTestItems()
 
 	// Verify test_items_ids is an array with items property (critical for VS Code compatibility)
-	propMap, ok := tool.InputSchema.Properties["test_items_ids"].(map[string]interface{})
-	require.True(t, ok, "test_items_ids property should exist and be a map")
-	require.Equal(t, "array", propMap["type"], "test_items_ids should be an array type")
+	schema, ok := tool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok, "InputSchema should be a *jsonschema.Schema")
 
-	itemsMap, ok := propMap["items"].(map[string]interface{})
-	require.True(t, ok, "test_items_ids must have items property (issue #66)")
-	require.Equal(t, "string", itemsMap["type"], "items should be of type string")
+	testItemsIDsProp, ok := schema.Properties["test_items_ids"]
+	require.True(t, ok, "test_items_ids property should exist")
+	require.Equal(t, "array", testItemsIDsProp.Type, "test_items_ids should be an array type")
+	require.NotNil(t, testItemsIDsProp.Items, "test_items_ids must have items property (issue #66)")
+	require.Equal(t, "string", testItemsIDsProp.Items.Type, "items should be of type string")
 }

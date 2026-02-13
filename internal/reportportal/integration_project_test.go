@@ -6,7 +6,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/reportportal/reportportal-mcp-server/internal/reportportal/middleware"
@@ -87,13 +86,6 @@ func TestIntegration_ProjectExtractionFlow(t *testing.T) {
 				req.Header.Set(key, value)
 			}
 
-			// Create MCP request with optional project argument
-			mcpRequest := mcp.CallToolRequest{
-				Params: mcp.CallToolParams{
-					Arguments: map[string]any{"project": tt.requestProject},
-				},
-			}
-
 			// Apply middleware to get context with project
 			var ctx context.Context
 			middleware := middleware.HTTPTokenMiddleware(
@@ -107,8 +99,7 @@ func TestIntegration_ProjectExtractionFlow(t *testing.T) {
 			middleware.ServeHTTP(rr, req)
 
 			// Test extractProject with the context from middleware
-			result, err := utils.ExtractProject(ctx, mcpRequest)
-
+			result, err := utils.ExtractProject(ctx, tt.requestProject)
 			if tt.expectError {
 				assert.Error(t, err)
 			} else {
@@ -132,14 +123,8 @@ func TestIntegration_CompleteHTTPFlow(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Simulate MCP tool request with explicit project parameter
 		// This should take precedence over the HTTP header
-		mcpRequest := mcp.CallToolRequest{
-			Params: mcp.CallToolParams{
-				Arguments: map[string]any{"project": "request-project"},
-			},
-		}
-
 		// Extract project using our shared helper
-		project, err := utils.ExtractProject(r.Context(), mcpRequest)
+		project, err := utils.ExtractProject(r.Context(), "request-project")
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			return

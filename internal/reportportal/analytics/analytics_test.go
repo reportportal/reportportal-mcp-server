@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -255,11 +255,17 @@ func TestTrackMCPEvent(t *testing.T) {
 
 func TestWithAnalytics(t *testing.T) {
 	var handlerCalled bool
+	var receivedReq *mcp.CallToolRequest
+	var receivedArgs map[string]any
 
 	// Create a test handler
-	handler := func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	handler := func(ctx context.Context, req *mcp.CallToolRequest, args map[string]any) (*mcp.CallToolResult, any, error) {
 		handlerCalled = true
-		return mcp.NewToolResultText("success"), nil
+		receivedReq = req
+		receivedArgs = args
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: "success"}},
+		}, nil, nil
 	}
 
 	// Create analytics with a way to track calls
@@ -275,21 +281,31 @@ func TestWithAnalytics(t *testing.T) {
 	wrappedHandler := utils.WithAnalytics(analytics, "test_tool", handler)
 
 	// Call the wrapped handler
-	result, err := wrappedHandler(context.Background(), mcp.CallToolRequest{})
+	originalReq := &mcp.CallToolRequest{}
+	originalArgs := map[string]any{"key": "value"}
+	result, _, err := wrappedHandler(context.Background(), originalReq, originalArgs)
 
 	// Verify handler was called
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
 	assert.True(t, handlerCalled, "Original handler should be called")
+	assert.Equal(t, originalReq, receivedReq, "Handler should receive the exact request passed in")
+	assert.Equal(t, originalArgs, receivedArgs, "Handler should receive the exact args passed in")
 }
 
 func TestWithAnalyticsNilAnalytics(t *testing.T) {
 	var handlerCalled bool
+	var receivedReq *mcp.CallToolRequest
+	var receivedArgs map[string]any
 
 	// Create a test handler
-	handler := func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	handler := func(ctx context.Context, req *mcp.CallToolRequest, args map[string]any) (*mcp.CallToolResult, any, error) {
 		handlerCalled = true
-		return mcp.NewToolResultText("success"), nil
+		receivedReq = req
+		receivedArgs = args
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: "success"}},
+		}, nil, nil
 	}
 
 	// Test with nil analytics
@@ -297,12 +313,16 @@ func TestWithAnalyticsNilAnalytics(t *testing.T) {
 	wrappedHandler := utils.WithAnalytics(analytics, "test_tool", handler)
 
 	// Call the wrapped handler
-	result, err := wrappedHandler(context.Background(), mcp.CallToolRequest{})
+	originalReq := &mcp.CallToolRequest{}
+	originalArgs := map[string]any{"key": "value"}
+	result, _, err := wrappedHandler(context.Background(), originalReq, originalArgs)
 
 	// Verify handler was still called
 	assert.NoError(t, err)
 	assert.NotNil(t, result)
 	assert.True(t, handlerCalled, "Original handler should be called even with nil analytics")
+	assert.Equal(t, originalReq, receivedReq, "Handler should receive the exact request passed in")
+	assert.Equal(t, originalArgs, receivedArgs, "Handler should receive the exact args passed in")
 }
 
 func TestAnalyticsStop(t *testing.T) {
@@ -360,17 +380,37 @@ func TestAnalyticsIntegration(t *testing.T) {
 	require.NotNil(t, analytics)
 
 	// Create a mock tool handler
-	handler := func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		return mcp.NewToolResultText("mock result"), nil
+	var receivedReq *mcp.CallToolRequest
+	var receivedArgs map[string]any
+	handler := func(ctx context.Context, req *mcp.CallToolRequest, args map[string]any) (*mcp.CallToolResult, any, error) {
+		receivedReq = req
+		receivedArgs = args
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: "mock result"}},
+		}, nil, nil
 	}
 
 	// Wrap with analytics
 	wrappedHandler := utils.WithAnalytics(analytics, "test_tool", handler)
 
 	// Call the handler multiple times
+	originalReq := &mcp.CallToolRequest{}
+	originalArgs := map[string]any{"key": "value"}
 	for i := 0; i < 3; i++ {
-		_, err := wrappedHandler(context.Background(), mcp.CallToolRequest{})
+		_, _, err := wrappedHandler(context.Background(), originalReq, originalArgs)
 		assert.NoError(t, err)
+		assert.Equal(
+			t,
+			originalReq,
+			receivedReq,
+			"Handler should receive the exact request passed in",
+		)
+		assert.Equal(
+			t,
+			originalArgs,
+			receivedArgs,
+			"Handler should receive the exact args passed in",
+		)
 	}
 
 	// Give some time for async processing
