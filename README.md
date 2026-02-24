@@ -17,6 +17,42 @@ For example, instead of logging into the ReportPortal UI, you could ask your AI 
 - **Integration Flexibility**: Works with any MCP-compatible AI tool. You simply point the tool at this server and it can run ReportPortal queries under the hood.
 - **No Custom Scripts Needed**: Common queries (listing runs, getting failures, analysis) are built-in as simple "commands" you invoke via chat.
 
+## Prerequisites
+
+Before setting up the MCP server, you need the following information from your ReportPortal instance:
+
+### ReportPortal Host URL (`RP_HOST`)
+
+The URL of your ReportPortal instance:
+- Example: `https://reportportal.example.com`
+- For local: `http://localhost:8080`
+
+### Project Name (`RP_PROJECT`) — Optional
+
+This value is optional. When set, it defines the default project used for all requests; individual tools can still override it per request. To find your project name:
+1. Log into ReportPortal
+2. Check the URL: `https://your-rp-instance.com/ui/#PROJECT_NAME/...`
+3. Or find it in the top-left dropdown menu
+
+### API Token (`RP_API_TOKEN`)
+
+You can get an API token from your ReportPortal Profile or generate a new one.
+**Security Note:** Never commit tokens to version control or share them publicly.
+
+### Server Mode (`MCP_MODE`)
+
+`MCP_MODE` is a system environment variable that controls the transport mode of the MCP server:
+
+| Value | Description |
+|-------|-------------|
+| `stdio` | **(default)** Standard input/output – used for local AI tool integrations (Claude Desktop, Cursor, VS Code Copilot, etc.) |
+| `http` | HTTP/SSE streaming – exposes an HTTP endpoint for remote or multi-client access |
+
+This variable is only needed when you want to run the server in HTTP mode. For local AI tool integrations the default `stdio` mode is used and no extra configuration is required.
+
+> **Important:** `http` mode is intended for server deployments. The MCP server must be **deployed and running** with `MCP_MODE=http` before any AI tool can connect to it remotely. See the [For developers](#for-developers) section for deployment instructions.
+
+<a name="installation"></a>
 ## Installation
 
 There are two ways to connect to the ReportPortal MCP Server:
@@ -26,6 +62,8 @@ There are two ways to connect to the ReportPortal MCP Server:
 Each of these methods is suitable for any LLM provider.
 
 ### Local installation
+
+The configurations below use the default `stdio` mode (`MCP_MODE=stdio`), which is the correct choice for all local AI tool integrations. To run the server in HTTP mode instead, add `MCP_MODE=http` to the `env` block (see the [For developers](#for-developers) section for details).
 
 #### Via Docker (recommended)
 
@@ -80,13 +118,16 @@ Configuration:
 
 If the ReportPortal MCP Server is already **deployed** and accessible via HTTP, you can connect to it remotely without running it locally. This is useful when the server is hosted centrally or in a shared environment.
 
+> **Note:** The remote server must be **deployed and running** in HTTP mode (system environment variable `MCP_MODE=http`) before any AI tool can connect to it. See the [For developers](#for-developers) section for deployment and configuration details.
+
 **Remote Server Configuration:**
+
 ```json
 {
   "reportportal": {
-    "url": "http://your-mcp-server-host:port/mcp/",
+    "url": "http://your-mcp-server-host:port/mcp",
     "headers": {
-      "Authorization": "Bearer your-api-token",
+      "Authorization": "Bearer ${RP_API_TOKEN}",
       "X-Project": "YourProjectInReportPortal"
     }
   }
@@ -94,9 +135,11 @@ If the ReportPortal MCP Server is already **deployed** and accessible via HTTP, 
 ```
 
 **Configuration Parameters:**
-- `url`: The HTTP endpoint URL of the remote MCP server (must end with `/mcp/`)
+- `url`: The HTTP endpoint URL of the remote MCP server (use `/mcp` or `/api/mcp`)
 - `headers.Authorization`: Bearer token for authentication (required)
 - `headers.X-Project`: The ReportPortal project name (optional)
+
+## AI Tool Setup
 
 Choose your favourite AI Tool to connect.
 
@@ -108,28 +151,34 @@ Just click
 
 Or follow the next steps:
 
-1. In Cursor, go to **Settings → Extensions → MCP** and click to add a new global MCP server.
-2. Add a new MCP server entry that runs the ReportPortal MCP Server.
+1. In Cursor, go to **Settings** then **Tools & MCP** and click **Add Custom MCP**.
+2. That will open file `mcp.json` where you need to add a new MCP server entry that runs the ReportPortal MCP Server:
 
 **For local installation (Docker or binary):**
+
+> Choose your preferred configuration from the [Installation section](#installation) and paste it inside the `reportportal` block.
+
 ```json
 {
   "mcpServers": {
     "reportportal": {
-      // choose the Docker or binary configuration from the section above
+      // paste your chosen configuration here
     }
   }
 }
 ```
 
 **For remote server:**
+
+> **Note:** The remote server must be **deployed and running** in HTTP mode before connecting.
+
 ```json
 {
   "mcpServers": {
     "reportportal": {
       "url": "http://your-mcp-server-host:port/mcp/",
       "headers": {
-        "Authorization": "Bearer your-api-token",
+        "Authorization": "Bearer ${RP_API_TOKEN}",
         "X-Project": "YourProjectInReportPortal"
       }
     }
@@ -137,28 +186,34 @@ Or follow the next steps:
 }
 ```
 
-Documentation: [Cursor MCP](https://docs.cursor.com/en/tools/developers#example).
+Documentation: [Cursor MCP](https://cursor.com/en-US/docs/context/mcp).
 
 ### GitHub Copilot (In VS Code and JetBrains IDEs)
 
 #### VS Code
 
 1. Install/update the GitHub Copilot plugin.
-2. Type **>mcp** in the search bar and select **MCP: Open User Configuration**.
-3. Add configuration:
+2. Press `Ctrl+P` and type `>mcp` in the search bar and select **MCP: Open User Configuration**.
+3. That will open file `mcp.json` where you need to add a new MCP server entry that runs the ReportPortal MCP Server:
 
 **For local installation (Docker or binary):**
+
+> Choose your preferred configuration from the [Installation section](#installation) and paste it inside the `reportportal` block.
+
 ```json
 {
   "servers": {
     "reportportal": {
-      // choose the Docker or binary configuration from the section above
+      // paste your chosen configuration here
     }
   }
 }
 ```
 
 **For remote server:**
+
+> **Note:** The remote server must be **deployed and running** in HTTP mode before connecting.
+
 ```json
 {
   "servers": {
@@ -166,7 +221,7 @@ Documentation: [Cursor MCP](https://docs.cursor.com/en/tools/developers#example)
       "url": "http://your-mcp-server-host:port/mcp/",
       "requestInit": {
         "headers": {
-          "Authorization": "Bearer your-api-token",
+          "Authorization": "Bearer ${RP_API_TOKEN}",
           "X-Project": "YourProjectInReportPortal"
         }
       }
@@ -184,17 +239,23 @@ Documentation: [VS Code Copilot Guide](https://code.visualstudio.com/docs/copilo
 3. Add configuration:
 
 **For local installation (Docker or binary):**
+
+> Choose your preferred configuration from the [Installation section](#installation) and paste it inside the `reportportal` block.
+
 ```json
 {
   "servers": {
     "reportportal": {
-      // choose the Docker or binary configuration from the section above
+      // paste your chosen configuration here
     }
   }
 }
 ```
 
 **For remote server:**
+
+> **Note:** The remote server must be **deployed and running** in HTTP mode before connecting.
+
 ```json
 {
   "servers": {
@@ -202,7 +263,7 @@ Documentation: [VS Code Copilot Guide](https://code.visualstudio.com/docs/copilo
       "url": "http://your-mcp-server-host:port/mcp/",
       "requestInit": {
         "headers": {
-          "Authorization": "Bearer your-api-token",
+          "Authorization": "Bearer ${RP_API_TOKEN}",
           "X-Project": "YourProjectInReportPortal"
         }
       }
@@ -221,11 +282,14 @@ Documentation: [JetBrains Copilot Guide](https://plugins.jetbrains.com/plugin/17
 2. Add a new MCP server entry that runs the ReportPortal MCP Server.
 
 **For local installation (Docker or binary):**
+
+> Choose your preferred configuration from the [Installation section](#installation) and paste it inside the `reportportal` block.
+
 ```json
 {
   "mcpServers": {
     "reportportal": {
-      // choose the Docker or binary configuration from the section above
+      // paste your chosen configuration here
     }
   }
 }
@@ -234,7 +298,7 @@ Documentation: [JetBrains Copilot Guide](https://plugins.jetbrains.com/plugin/17
 
 **For remote server:**
 
-TBU
+Claude Desktop does not natively support direct Server-Sent Events (SSE) transport for remote Model Context Protocol (MCP) servers, as it is designed to communicate primarily via local standard I/O (stdio). To connect to a remote SSE server, you must use a local wrapper script or bridging tool (e.g., mcp-remote, npx) in your claude_desktop_config.json to bridge stdio to SSE.
 
 ### Claude Code CLI
 
@@ -243,12 +307,15 @@ TBU
 
 **For local installation (Docker):**
 ```bash
-claude mcp add-json reportportal '{"command": "docker", "args": ["run", "-i", "--rm", "-e", "RP_API_TOKEN", "-e", "RP_HOST", "-e", "RP_PROJECT", "reportportal/mcp-server"], "env": {"RP_API_TOKEN": "your-api-token", "RP_HOST": "https://your-reportportal-instance.com", "RP_PROJECT": "YourProjectInReportPortal"}}'
+claude mcp add-json reportportal '{"command": "docker", "args": ["run", "-i", "--rm", "-e", "RP_API_TOKEN", "-e", "RP_HOST", "-e", "RP_PROJECT", "reportportal/mcp-server"], "env": {"RP_API_TOKEN": "${RP_API_TOKEN}", "RP_HOST": "https://your-reportportal-instance.com", "RP_PROJECT": "YourProjectInReportPortal"}}'
 ```
 
 **For remote server:**
+
+> **Note:** The remote server must be **deployed and running** in HTTP mode before connecting.
+
 ```bash
-claude mcp add-json reportportal '{"url": "http://your-mcp-server-host:port/mcp/", "headers": {"Authorization": "Bearer your-api-token", "X-Project": "YourProjectInReportPortal"}}'
+claude mcp add-json reportportal '{"url": "http://your-mcp-server-host:port/mcp/", "headers": {"Authorization": "Bearer ${RP_API_TOKEN}", "X-Project": "YourProjectInReportPortal"}}'
 ```
 
 **Configuration Options:**
@@ -278,6 +345,9 @@ The ReportPortal MCP Server is compatible with any MCP-compatible coding agent. 
 ```
 
 **Remote server (HTTP mode):**
+
+> **Note:** The remote server must be **deployed and running** in HTTP mode before connecting.
+
 ```json
 {
   "reportportal": {
@@ -293,6 +363,8 @@ The ReportPortal MCP Server is compatible with any MCP-compatible coding agent. 
 Please refer to your coding agent's documentation for the exact configuration format and where to place the configuration file.
 
 Once connected, your AI assistant will list ReportPortal-related "tools" it can invoke. You can then ask your questions in chat, and the assistant will call those tools on your behalf.
+
+> **Note:** After completing the setup, see [Verifying Your Setup](#verifying-your-setup) section for instructions on how to test your configuration.
 
 ## ReportPortal compatibility
 
@@ -310,16 +382,18 @@ The ReportPortal MCP server provides a comprehensive set of capabilities for int
 - Get launch details by name or ID
 - Force-finish running launches
 - Delete launches
-- Run automated analysis (auto analysis, unique error analysis) on launches
+- Run automated analysis (auto analysis, unique error analysis, quality gate) on launches
 
 ### Test Item Analysis
+
 - Get test items within by filter
 - Get detailed information on each test item
 - View test execution statistics and failures
 - Retrieve test logs and attachments
-- Make a dicision on test result with updating test item defect types
+- Make a decision on test result by updating test item defect types
 
 ### Report Generation
+
 - Analyze launches to get detailed test execution insights
 - Generate structured reports with statistics and failure analysis
 
@@ -328,19 +402,21 @@ The ReportPortal MCP server provides a comprehensive set of capabilities for int
 | Tool Name                  | Description                                      | Parameters                                                                                                    |
 |----------------------------|--------------------------------------------------|---------------------------------------------------------------------------------------------------------------|
 | Get Launches by filter            | Lists ReportPortal launches with pagination by filter      |  `name`, `description`, `owner`, `number`, `start_time`, `end_time`, `attributes`, `sort`, `page`, `page-size` (all optional)                                                                     |
-| Get Last Launch by Name    | Retrieves the most recent launch by name         | `name`                                                                                                      |
+| Get Last Launch by Name    | Retrieves the most recent launch by name         | `launch` (required)                                                                                                      |
 | Get Launch by ID           | Retrieves a specific launch by its ID directly   | `project` (optional, string), `launch_id` (required, string)                                                                 |
-| Run Auto Analysis          | Runs auto analysis on a launch                   | `launch_id`, `analyzer_mode`, `analyzer_type`, `analyzer_item_modes`                                          |
-| Run Unique Error Analysis  | Runs unique error analysis on a launch           | `launch_id`, `remove_numbers`                                                                                 |
-| Force Finish Launch        | Forces a launch to finish                        | `launch_id`                                                                                                   |
-| Delete Launch              | Deletes a specific launch                        | `launch_id`                                                                                                   |
+| Run Quality Gate          | Runs quality gate analysis on a launch           | `launch_id` (required), `project` (optional)                                          |
+| Run Auto Analysis          | Runs auto analysis on a launch                   | `launch_id` (required), `analyzer_mode` (optional), `analyzer_type` (optional), `analyzer_item_modes` (optional)                                          |
+| Run Unique Error Analysis  | Runs unique error analysis on a launch           | `launch_id` (required), `remove_numbers` (optional)                                                                                 |
+| Force Finish Launch        | Forces a launch to finish                        | `launch_id` (required)                                                                                                   |
+| Delete Launch              | Deletes a specific launch                        | `launch_id` (required)                                                                                                   |
 | Get Suites by filter  | Lists test suites for a specific launch           | `launch-id` (required), `name`, `description`, `start_time_from`, `start_time_to`, `attributes`, `parent_id`, `sort`, `page`, `page-size` (all optional)                                                        |
 | Get Test Items by filter  | Lists test items for a specific launch           | `launch-id` (required), `name`, `description`, `status`, `has_retries`, `start_time_from`, `start_time_to`, `attributes`, `parent_id`, `defect_comment`, `auto_analyzed`, `ignored_in_aa`, `pattern_name`, `ticket_id`, `sort`, `page`, `page-size` (all optional)                                                        |
-| Get Logs by filter  | Lists logs for a specific test item or nested step          | `parent-id` (required), `log_level`, `log_content`, `logs_with_attachments`, `status`, `sort`, `page`, `page-size` (all optional)                                                        |
-| Get Attachment by ID        | Retrieves an attachment binary by id        | `attachment_id`                                                                                                |
-| Get Test Item by ID        | Retrieves details of a specific test item        | `test_item_id`                                                                                                |
-| Get Project Defect Types        | Retrieves details regarding existing defect types on the specific project        |                                                                                               |
-| Update defect types by item ids        | Retrieves details regarding existing defect types on the specific project        |`test_items_ids` (required), `defect_type_id` (required), `defect_type_comment` (optional)                                                                                               |
+| Get Logs by filter  | Lists logs for a specific test item or nested step          | `parent-item-id` (required), `log_level`, `log_content`, `logs_with_attachments`, `status`, `sort`, `page`, `page-size` (all optional)                                                        |
+| Get Attachment by ID        | Retrieves an attachment binary by id        | `attachment-content-id` (required)                                                                                                |
+| Get Test Item by ID        | Retrieves details of a specific test item        | `test_item_id` (required)                                                                                                |
+| Get Project Defect Types        | Retrieves available defect types for the specific project        | None                                                                                              |
+| Update defect types by item ids        | Updates defect types for multiple test items        |`test_items_ids` (required), `defect_type_id` (required), `defect_type_comment` (optional)                                                                                               |
+
 ### Available Prompts
 
 #### Analyze Launch
@@ -360,6 +436,7 @@ Here are some real-world examples of what you might ask your AI after setup (the
 - **"What tests failed in the latest run?"** – shows failed test items for the most recent launch.
 - **"Show me details of launch with ID 119000."** – retrieves a specific launch directly by its ID without pagination.
 - **"Show me details of launch with number 1234."** – fetches information (ID, name, description, stats) for that specific launch.
+- **"Run quality gate on launch 12345."** – executes quality gate analysis to verify if launch meets defined quality criteria.
 - **"Run an analysis on launch ABC."** – triggers the ReportPortal's auto-analysis to summarize results and failures for launch "ABC".
 - **"Finish the running launch with ID 4321."** – forces a currently running test launch to stop.
 - **"Show me the top five 500-level errors in the last hour"** - lists the top 5 such errors from the recent test results.
@@ -371,7 +448,7 @@ These features let you query and manage your test reports in many ways through s
 ## For developers
 
 ### Prerequisites
-- Go 1.24.1 or later
+- Go 1.24.4 or later
 - A ReportPortal instance
 
 ### Building from Source
@@ -584,6 +661,325 @@ To add a new prompt, simply create a YAML file describing your prompt and place 
 3. Rebuild the server to load the new prompt.
 
 This approach allows you to extend the server's capabilities with custom prompts quickly and without modifying the codebase.
+
+## Verifying Your Setup
+
+### 1. Verify ReportPortal Accessibility
+
+Before testing the MCP server, ensure your ReportPortal instance is accessible:
+
+**Via Browser:**
+1. Open your ReportPortal URL (`RP_HOST`) in a web browser
+2. You should see the ReportPortal login page or dashboard
+3. Verify you can log in with your credentials
+
+**Via Command Line (curl):**
+
+```bash
+# Test basic connectivity
+curl -I https://your-reportportal-instance.com
+
+# Test API access with your token
+curl -H "Authorization: Bearer your-api-token" \
+     https://your-reportportal-instance.com/api/v1/YourProject/launch
+```
+
+**Via PowerShell:**
+
+```powershell
+# Test basic connectivity
+Invoke-WebRequest -Uri "https://your-reportportal-instance.com" -Method Head
+
+# Test API access
+$headers = @{
+    "Authorization" = "Bearer your-api-token"
+}
+Invoke-RestMethod -Uri "https://your-reportportal-instance.com/api/v1/YourProject/launch" -Headers $headers
+```
+
+**Expected Results:**
+- HTTP 200 OK response
+- Valid JSON response with launch data (if project has launches)
+- No authentication errors (401) or forbidden errors (403)
+
+### 2. Verify Remote MCP Server (if using remote deployment)
+
+If connecting to a remote MCP server, verify it's accessible:
+
+**Via Browser:**
+
+```text
+http://your-mcp-server-host:port/
+```
+
+Should return server information and available endpoints.
+
+**Via curl (GET request):**
+
+```bash
+# Check server health
+curl http://your-mcp-server-host:port/health
+
+# Check server info
+curl http://your-mcp-server-host:port/info
+```
+
+**Via curl (MCP protocol test):**
+
+```bash
+# Test MCP endpoint with JSON-RPC request
+curl -X POST http://your-mcp-server-host:port/mcp \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer your-api-token" \
+  -H "X-Project: YourProject" \
+  -d '{
+    "jsonrpc": "2.0",
+    "method": "tools/list",
+    "id": 1
+  }'
+```
+
+**Via PowerShell:**
+
+```powershell
+# Check server health
+Invoke-RestMethod -Uri "http://your-mcp-server-host:port/health"
+
+# Test MCP endpoint
+$headers = @{
+    "Content-Type" = "application/json"
+    "Authorization" = "Bearer your-api-token"
+    "X-Project" = "YourProject"
+}
+$body = @{
+    jsonrpc = "2.0"
+    method = "tools/list"
+    id = 1
+} | ConvertTo-Json
+
+Invoke-RestMethod -Uri "http://your-mcp-server-host:port/mcp" -Method Post -Headers $headers -Body $body
+```
+
+**Via ping (network connectivity only):**
+
+```bash
+ping your-mcp-server-host
+```
+
+**Expected Results:**
+- Server responds to health checks
+- `/info` returns server configuration
+- MCP endpoint returns list of available tools
+- No connection refused or timeout errors
+
+### 3. Verify MCP Server Integration
+
+After configuration, verify the AI assistant can communicate with the MCP server:
+
+**Step 1: Check Available Tools**
+
+Ask your AI assistant:
+
+```text
+"What ReportPortal tools are available?"
+```
+
+Expected response: A list of 15 tools including launches, test items, analysis tools, etc.
+
+**Step 2: Test Basic Query**
+
+Try a simple query:
+
+```text
+"List the 5 most recent test launches"
+```
+
+Expected response: A formatted list of recent launches with names, statuses, and timestamps.
+
+**Step 3: Check Server Logs**
+
+Monitor logs to verify requests are being processed:
+
+**Docker:**
+
+```bash
+# View logs
+docker logs <container-name>
+
+# Follow logs in real-time
+docker logs -f <container-name>
+
+# View last 50 lines
+docker logs --tail 50 <container-name>
+```
+
+**Binary (stdio mode):**
+Check the terminal output where the server is running. You should see log entries for each request.
+
+**Binary (HTTP mode):**
+
+```bash
+# If redirecting to file
+./reportportal-mcp-server > server.log 2>&1
+
+# Then view logs
+tail -f server.log
+```
+
+**Expected Log Output:**
+
+```text
+INFO: MCP server started
+INFO: Received request: tools/list
+INFO: Processing tool call: get_launches
+DEBUG: Calling ReportPortal API: /api/v1/project/launch
+```
+
+### 4. Common Verification Issues
+
+| Issue | Cause | Solution |
+|-------|-------|----------|
+| AI shows no ReportPortal tools | MCP server not connected | Check configuration file syntax, restart AI assistant |
+| "Connection refused" error | Server not running or wrong port | Verify server is running: `docker ps` or check process |
+| "401 Unauthorized" | Invalid API token | Regenerate token in ReportPortal profile |
+| "403 Forbidden" | Token valid but no project access | Check `RP_PROJECT` name, verify user has access |
+| "404 Not Found" | Wrong endpoint URL | Ensure remote URL ends with `/mcp/` |
+| Empty results from queries | No data in ReportPortal | Run some tests first to populate data |
+| Timeout errors | Network issues or slow ReportPortal | Check network connectivity, ReportPortal performance |
+
+## Troubleshooting
+
+### Connection Issues
+
+**Problem: Cannot connect to ReportPortal**
+
+Symptoms:
+- "Connection refused" errors
+- "Could not resolve host" errors
+- Timeout errors
+
+Solutions:
+1. Verify `RP_HOST` is correct and includes protocol (`https://` or `http://`)
+2. Check network connectivity: `ping your-reportportal-host`
+3. Verify ReportPortal is running and accessible
+4. Check firewall rules allow connection to ReportPortal
+5. For HTTPS, verify SSL certificates are valid
+
+**Problem: Cannot connect to remote MCP server**
+
+Symptoms:
+- "Connection refused" on MCP server
+- "No route to host" errors
+
+Solutions:
+1. Verify MCP server is running: Check with `curl http://host:port/health`
+2. Check `MCP_MODE=http` is set on the server
+3. Verify port is correct (default: 8080)
+4. Check firewall/security groups allow access to the port
+5. Ensure server is bound to correct network interface (`MCP_SERVER_HOST`)
+
+### Authentication Issues
+
+**Problem: 401 Unauthorized errors**
+
+Solutions:
+1. Verify API token is correct and not expired
+2. Regenerate token in ReportPortal: Profile → API Keys → Generate New Token
+3. Check token is properly set in environment variable or configuration
+4. For remote servers, verify `Authorization: Bearer <token>` header is sent
+5. Ensure no extra spaces or quotes around the token value
+
+**Problem: 403 Forbidden errors**
+
+Solutions:
+1. Verify user has access to the specified project
+2. Check project name matches exactly (case-sensitive)
+3. Verify user role has sufficient permissions
+4. For remote servers, check `X-Project` header is set correctly
+
+### Docker Issues
+
+**Problem: Docker container exits immediately**
+
+Solutions:
+1. Check container logs: `docker logs <container-name>`
+2. Verify all required environment variables are set
+3. Ensure environment variable values don't have syntax errors
+4. Check Docker has permission to access the network
+
+**Problem: "docker: command not found"**
+
+Solutions:
+1. Install Docker Desktop for your OS
+2. Verify Docker is running: `docker --version`
+3. For Linux, add user to docker group: `sudo usermod -aG docker $USER`
+
+### AI Assistant Integration Issues
+
+**Problem: AI assistant doesn't recognize MCP server**
+
+Solutions:
+1. Verify configuration file syntax is valid JSON
+2. Check configuration file is in the correct location
+3. Restart the AI assistant after configuration changes
+4. For Cursor/VS Code, check MCP extension is installed and enabled
+5. Review AI assistant logs for error messages
+
+**Problem: Tools list is empty**
+
+Solutions:
+1. Verify MCP server is running and accessible
+2. Check server logs for startup errors
+3. Ensure server mode matches client configuration (stdio vs HTTP)
+4. For remote servers, verify URL ends with `/mcp/`
+
+### Performance Issues
+
+**Problem: Slow responses or timeouts**
+
+Solutions:
+1. Check ReportPortal API performance (test with curl)
+2. Reduce page size in queries (`page-size` parameter)
+3. Use filters to limit data retrieval
+4. Check network latency between server and ReportPortal
+5. Monitor server resources (CPU, memory)
+
+**Problem: High memory usage**
+
+Solutions:
+1. Reduce concurrent requests
+2. Limit result set sizes with pagination
+3. Restart the MCP server periodically
+4. Check for memory leaks in logs
+
+### Configuration Issues
+
+**Problem: "Environment variable not set"**
+
+Solutions:
+1. Verify variable names are correct: `RP_HOST`, `RP_PROJECT`, `RP_API_TOKEN`
+2. For Docker, check `-e` flags are specified correctly
+3. For binary, export variables in the same shell session
+4. Use `echo $VAR_NAME` (Linux/Mac) or `$env:VAR_NAME` (PowerShell) to verify
+
+**Problem: "Invalid JSON" configuration errors**
+
+Solutions:
+1. Validate JSON syntax using a JSON validator
+2. Remove trailing commas in JSON objects
+3. Ensure all strings are properly quoted
+4. Check for comments (JSON doesn't support comments)
+5. Verify escape characters in paths (use `\\` in Windows paths)
+
+### Getting Help
+
+If you're still experiencing issues:
+
+1. **Check Logs**: Enable debug logging and review detailed error messages
+2. **Test Components**: Verify each component separately (ReportPortal → MCP Server → AI Assistant)
+3. **GitHub Issues**: Search or create an issue at [reportportal-mcp-server](https://github.com/reportportal/reportportal-mcp-server/issues)
+4. **Documentation**: Review [MCP specification](https://modelcontextprotocol.io/) and [ReportPortal API docs](https://reportportal.io/docs/)
+5. **Community**: Join ReportPortal community for support
 
 ## License
 
