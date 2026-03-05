@@ -121,5 +121,5 @@ tasks:
       {{end}}
 
   verify:testdata:
-    desc: "Verifies all JSON test fixtures in testdata/ (recursively) against running MCP server at http://localhost:{{.MCP_SERVER_PORT}}/mcp (requires server to be running, RP_API_TOKEN and RP_PROJECT env vars)"
-    cmd: go run cmd/verify-testdata/main.go -url "http://localhost:{{.MCP_SERVER_PORT}}/mcp" -dir testdata
+    desc: "Verifies all JSON test fixtures in internal/integration/testdata/ (recursively) against running MCP server at http://localhost:{{.MCP_SERVER_PORT}}/mcp (requires server to be running, RP_API_TOKEN and RP_PROJECT env vars)"
+    cmd: go run cmd/verify-testdata/main.go -url "http://localhost:{{.MCP_SERVER_PORT}}/mcp"
