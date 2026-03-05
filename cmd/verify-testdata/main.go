@@ -17,7 +17,7 @@ import (
 
 	"github.com/fatih/color"
 
-	"github.com/reportportal/reportportal-mcp-server/internal/testdata"
+	"github.com/reportportal/reportportal-mcp-server/internal/integration/testdata"
 )
 
 const (
@@ -76,7 +76,7 @@ var (
 	mcpServerURL = flag.String("url", "http://localhost:8080/mcp", "MCP server URL")
 	testDataDir  = flag.String(
 		"dir",
-		"testdata",
+		"internal/integration/testdata",
 		"Test data directory (searched recursively for .json files)",
 	)
 	verbose = flag.Bool("v", false, "Verbose output")

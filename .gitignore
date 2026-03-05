@@ -2,6 +2,7 @@
 bin/
 .env
 .vscode/
+.temp/
 junit-report.xml
 dist/
 

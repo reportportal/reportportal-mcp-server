@@ -15,34 +15,6 @@ const (
 	BodyModeGraphQL    = "graphql"
 )
 
-// MaxCollectionNestingDepth limits the depth of nested items in a collection
-// to prevent stack overflow from deeply nested structures
-const MaxCollectionNestingDepth = 20
-
-// PostmanCollection represents a Postman Collection v2.1.0 structure
-// Based on: https://schema.postman.com/collection/json/v2.1.0/draft-07/collection.json
-type PostmanCollection struct {
-	Info PostmanInfo   `json:"info"`
-	Item []PostmanItem `json:"item"`
-}
-
-// PostmanInfo contains collection metadata
-type PostmanInfo struct {
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-	Schema      string `json:"schema"`
-	PostmanID   string `json:"_postman_id,omitempty"`
-}
-
-// PostmanItem represents a request item in the collection
-type PostmanItem struct {
-	Name        string            `json:"name"`
-	Description string            `json:"description,omitempty"`
-	Request     PostmanRequest    `json:"request"`
-	Response    []PostmanResponse `json:"response,omitempty"`
-	Item        []PostmanItem     `json:"item,omitempty"` // For folders
-}
-
 // PostmanRequest represents an HTTP request
 type PostmanRequest struct {
 	Method      string              `json:"method"`
@@ -169,55 +141,6 @@ type RequestResponsePair struct {
 type LLMClientMockConfig struct {
 	Request          PostmanRequest  `json:"request"`
 	ExpectedResponse PostmanResponse `json:"expectedResponse"`
-}
-
-// ParsePostmanCollection parses a Postman collection JSON
-func ParsePostmanCollection(data []byte) (*PostmanCollection, error) {
-	var collection PostmanCollection
-	if err := json.Unmarshal(data, &collection); err != nil {
-		return nil, fmt.Errorf("failed to parse Postman collection: %w", err)
-	}
-
-	// Validate all items in the collection
-	if err := validateCollectionItems(collection.Item, "", 0); err != nil {
-		return nil, err
-	}
-
-	return &collection, nil
-}
-
-// validateCollectionItems recursively validates items in a collection
-// with a depth limit to prevent stack overflow from deeply nested structures
-func validateCollectionItems(items []PostmanItem, path string, depth int) error {
-	if depth > MaxCollectionNestingDepth {
-		return fmt.Errorf("collection nesting depth exceeds maximum of %d levels at path: %s", MaxCollectionNestingDepth, path)
-	}
-
-	for i, item := range items {
-		itemPath := fmt.Sprintf("%s[%d]:%s", path, i, item.Name)
-
-		// Validate request body if present
-		if err := validateRequestBody(&item.Request); err != nil {
-			return fmt.Errorf("invalid request body in item %s: %w", itemPath, err)
-		}
-
-		// Validate response bodies
-		for j, resp := range item.Response {
-			if resp.OriginalRequest.Body != nil {
-				if err := resp.OriginalRequest.Body.ValidateMode(); err != nil {
-					return fmt.Errorf("invalid request body in response[%d] of item %s: %w", j, itemPath, err)
-				}
-			}
-		}
-
-		// Recursively validate nested items (folders)
-		if len(item.Item) > 0 {
-			if err := validateCollectionItems(item.Item, itemPath, depth+1); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
 }
 
 // ParseTestCase parses a test case JSON

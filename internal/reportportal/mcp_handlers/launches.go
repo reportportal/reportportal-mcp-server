@@ -679,12 +679,6 @@ func (lr *LaunchResources) toolForceFinishLaunch() (*mcp.Tool, ToolHandler[Launc
 		)
 }
 
-// parseLaunchURI parses a URI like "reportportal://{project}/launch/{launchId}"
-// and extracts the project and launchId parameters.
-func parseLaunchURI(uri string) (project, launchId string, err error) {
-	return utils.ParseReportPortalURI(uri, "launch")
-}
-
 // resourceLaunch creates a resource template for accessing launches by URI.
 func (lr *LaunchResources) resourceLaunch() (*mcp.ResourceTemplate, mcp.ResourceHandler) {
 	return &mcp.ResourceTemplate{
@@ -696,7 +690,7 @@ func (lr *LaunchResources) resourceLaunch() (*mcp.ResourceTemplate, mcp.Resource
 			// Parse the URI to extract parameters
 
 			uri := request.Params.URI
-			project, launchIdStr, err := parseLaunchURI(uri)
+			project, launchIdStr, err := utils.ParseReportPortalURI(uri, "launch")
 			if err != nil {
 				return nil, err
 			}
