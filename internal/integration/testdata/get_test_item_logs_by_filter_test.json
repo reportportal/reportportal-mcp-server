@@ -1,0 +1,111 @@
+{
+  "name": "get_test_item_logs_by_filter Test",
+  "description": "Integration test for MCP tool \"get_test_item_logs_by_filter\"",
+  "reportPortalMock": {
+    "requestResponsePairs": [
+      {
+        "request": {
+          "method": "GET",
+          "header": [
+            {
+              "key": "Authorization",
+              "value": "Bearer test-token-1234567"
+            }
+          ],
+          "url": {
+            "raw": "http://localhost/api/v1/test-project/log/nested/5638608055?page.page=1\u0026page.size=50\u0026page.sort=logTime%2CASC\u0026params%5BparentId%5D=5638608055",
+            "protocol": "http",
+            "host": [
+              "localhost"
+            ],
+            "path": [
+              "api",
+              "v1",
+              "test-project",
+              "log",
+              "nested",
+              "5638608055"
+            ],
+            "query": [
+              {
+                "key": "page.size",
+                "value": "50"
+              },
+              {
+                "key": "page.sort",
+                "value": "logTime,ASC"
+              },
+              {
+                "key": "params[parentId]",
+                "value": "5638608055"
+              },
+              {
+                "key": "page.page",
+                "value": "1"
+              }
+            ]
+          }
+        },
+        "response": {
+          "name": "",
+          "originalRequest": {
+            "method": "",
+            "url": {}
+          },
+          "code": 200,
+          "header": [
+            {
+              "key": "Content-Type",
+              "value": "application/json"
+            }
+          ],
+          "body": "{\"content\":[{\"id\":16121500357,\"uuid\":\"ab81525a-1ea8-45d8-a095-50fa1160bf5e\",\"time\":\"2026-03-09T09:32:02.982759Z\",\"message\":\"09:55:39.020 [main] INFO  com.epam.ta.utils.logger.Logger - [STEP] Navigate to test level.\",\"binaryContent\":{\"id\":\"233635039\",\"contentType\":\"text/plain\"},\"level\":\"INFO\",\"itemId\":5638608055},{\"id\":16121500358,\"uuid\":\"a42ac782-1812-47e3-b503-d9e6771567c7\",\"time\":\"2026-03-09T09:32:02.982818Z\",\"message\":\"10:21:12.642 [main] INFO  com.epam.ta.utils.logger.Logger - Click 'Submit' button.\",\"level\":\"DEBUG\",\"itemId\":5638608055}],\"page\":{\"number\":1,\"size\":50,\"totalElements\":2,\"totalPages\":1}}"
+        }
+      }
+    ]
+  },
+  "llmClientMock": {
+    "request": {
+      "method": "POST",
+      "header": [
+        {
+          "key": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "key": "Authorization",
+          "value": "Bearer test-token-1234567"
+        },
+        {
+          "key": "X-Project",
+          "value": "test-project"
+        }
+      ],
+      "body": {
+        "mode": "raw",
+        "raw": "{\n  \"id\": 1,\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"arguments\": {\n      \"project\": \"\",\n      \"parent-item-id\": \"5638608055\"\n    },\n    \"name\": \"get_test_item_logs_by_filter\"\n  }\n}"
+      },
+      "url": {
+        "raw": "/mcp",
+        "path": [
+          "mcp"
+        ]
+      }
+    },
+    "expectedResponse": {
+      "name": "MCP get_test_item_logs_by_filter Response",
+      "originalRequest": {
+        "method": "",
+        "url": {}
+      },
+      "code": 200,
+      "header": [
+        {
+          "key": "Content-Type",
+          "value": "text/event-stream"
+        }
+      ],
+      "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"content\\\":[{\\\"id\\\":16121500357,\\\"uuid\\\":\\\"ab81525a-1ea8-45d8-a095-50fa1160bf5e\\\",\\\"time\\\":\\\"2026-03-09T09:32:02.982759Z\\\",\\\"message\\\":\\\"09:55:39.020 [main] INFO  com.epam.ta.utils.logger.Logger - [STEP] Navigate to test level.\\\",\\\"binaryContent\\\":{\\\"id\\\":\\\"233635039\\\",\\\"contentType\\\":\\\"text/plain\\\"},\\\"level\\\":\\\"INFO\\\",\\\"itemId\\\":5638608055},{\\\"id\\\":16121500358,\\\"uuid\\\":\\\"a42ac782-1812-47e3-b503-d9e6771567c7\\\",\\\"time\\\":\\\"2026-03-09T09:32:02.982818Z\\\",\\\"message\\\":\\\"10:21:12.642 [main] INFO  com.epam.ta.utils.logger.Logger - Click 'Submit' button.\\\",\\\"level\\\":\\\"DEBUG\\\",\\\"itemId\\\":5638608055}],\\\"page\\\":{\\\"number\\\":1,\\\"size\\\":50,\\\"totalElements\\\":2,\\\"totalPages\\\":1}}\"}]}}\n"
+    }
+  }
+}

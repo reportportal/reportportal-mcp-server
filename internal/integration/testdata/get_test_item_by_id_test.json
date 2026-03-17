@@ -1,0 +1,92 @@
+{
+  "name": "get_test_item_by_id Test",
+  "description": "Integration test for MCP tool \"get_test_item_by_id\"",
+  "reportPortalMock": {
+    "requestResponsePairs": [
+      {
+        "request": {
+          "method": "GET",
+          "header": [
+            {
+              "key": "Authorization",
+              "value": "Bearer test-token-1234567"
+            }
+          ],
+          "url": {
+            "raw": "http://localhost/api/v1/test-project/item/5638608055",
+            "protocol": "http",
+            "host": [
+              "localhost"
+            ],
+            "path": [
+              "api",
+              "v1",
+              "test-project",
+              "item",
+              "5638608055"
+            ]
+          }
+        },
+        "response": {
+          "name": "",
+          "originalRequest": {
+            "method": "",
+            "url": {}
+          },
+          "code": 200,
+          "header": [
+            {
+              "key": "Content-Type",
+              "value": "application/json"
+            }
+          ],
+          "body": "{\"id\":5638608055,\"uuid\":\"2750024b-37fe-42ed-9de5-0b9948e0732c\",\"name\":\"beforeSuite\",\"codeRef\":\"com.epam.ta.reportportal.demodata.beforeSuite\",\"parameters\":[],\"attributes\":[],\"type\":\"BEFORE_SUITE\",\"startTime\":\"2026-03-09T09:32:02.976286Z\",\"endTime\":\"2026-03-09T09:32:03.001375Z\",\"status\":\"PASSED\",\"statistics\":{\"executions\":{},\"defects\":{}},\"pathNames\":{\"launchPathName\":{\"name\":\"Demo Api Tests\",\"number\":25}},\"hasChildren\":false,\"hasStats\":true,\"launchId\":9683164,\"uniqueId\":\"auto:40252e728f2f6080763fceb30ba67071\",\"testCaseId\":\"com.epam.ta.reportportal.demodata.beforeSuite\",\"testCaseHash\":-1302302993,\"patternTemplates\":[],\"path\":\"5638608055\"}"
+        }
+      }
+    ]
+  },
+  "llmClientMock": {
+    "request": {
+      "method": "POST",
+      "header": [
+        {
+          "key": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "key": "Authorization",
+          "value": "Bearer test-token-1234567"
+        },
+        {
+          "key": "X-Project",
+          "value": "test-project"
+        }
+      ],
+      "body": {
+        "mode": "raw",
+        "raw": "{\n  \"id\": 1,\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"arguments\": {\n      \"project\": \"\",\n      \"test_item_id\": \"5638608055\"\n    },\n    \"name\": \"get_test_item_by_id\"\n  }\n}"
+      },
+      "url": {
+        "raw": "/mcp",
+        "path": [
+          "mcp"
+        ]
+      }
+    },
+    "expectedResponse": {
+      "name": "MCP get_test_item_by_id Response",
+      "originalRequest": {
+        "method": "",
+        "url": {}
+      },
+      "code": 200,
+      "header": [
+        {
+          "key": "Content-Type",
+          "value": "text/event-stream"
+        }
+      ],
+      "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"id\\\":5638608055,\\\"uuid\\\":\\\"2750024b-37fe-42ed-9de5-0b9948e0732c\\\",\\\"name\\\":\\\"beforeSuite\\\",\\\"codeRef\\\":\\\"com.epam.ta.reportportal.demodata.beforeSuite\\\",\\\"parameters\\\":[],\\\"attributes\\\":[],\\\"type\\\":\\\"BEFORE_SUITE\\\",\\\"startTime\\\":\\\"2026-03-09T09:32:02.976286Z\\\",\\\"endTime\\\":\\\"2026-03-09T09:32:03.001375Z\\\",\\\"status\\\":\\\"PASSED\\\",\\\"statistics\\\":{\\\"executions\\\":{},\\\"defects\\\":{}},\\\"pathNames\\\":{\\\"launchPathName\\\":{\\\"name\\\":\\\"Demo Api Tests\\\",\\\"number\\\":25}},\\\"hasChildren\\\":false,\\\"hasStats\\\":true,\\\"launchId\\\":9683164,\\\"uniqueId\\\":\\\"auto:40252e728f2f6080763fceb30ba67071\\\",\\\"testCaseId\\\":\\\"com.epam.ta.reportportal.demodata.beforeSuite\\\",\\\"testCaseHash\\\":-1302302993,\\\"patternTemplates\\\":[],\\\"path\\\":\\\"5638608055\\\"}\"}]}}\n"
+    }
+  }
+}

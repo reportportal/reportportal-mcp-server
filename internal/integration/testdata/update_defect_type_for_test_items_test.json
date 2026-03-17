@@ -1,0 +1,95 @@
+{
+  "name": "update_defect_type_for_test_items Test",
+  "description": "Integration test for MCP tool \"update_defect_type_for_test_items\"",
+  "reportPortalMock": {
+    "requestResponsePairs": [
+      {
+        "request": {
+          "method": "PUT",
+          "header": [
+            {
+              "key": "Authorization",
+              "value": "Bearer test-token-1234567"
+            }
+          ],
+          "body": {
+            "mode": "raw",
+            "raw": "{\"issues\":[{\"issue\":{\"autoAnalyzed\":false,\"issueType\":\"ab001\"},\"testItemId\":5638607545}]}\n"
+          },
+          "url": {
+            "raw": "http://localhost/api/v1/test-project/item",
+            "protocol": "http",
+            "host": [
+              "localhost"
+            ],
+            "path": [
+              "api",
+              "v1",
+              "test-project",
+              "item"
+            ]
+          }
+        },
+        "response": {
+          "name": "",
+          "originalRequest": {
+            "method": "",
+            "url": {}
+          },
+          "code": 200,
+          "header": [
+            {
+              "key": "Content-Type",
+              "value": "application/json"
+            }
+          ],
+          "body": "[{\"issueType\":\"ab001\",\"comment\":\"Environment not available. VM Down\",\"autoAnalyzed\":false,\"ignoreAnalyzer\":false,\"externalSystemIssues\":[]}]"
+        }
+      }
+    ]
+  },
+  "llmClientMock": {
+    "request": {
+      "method": "POST",
+      "header": [
+        {
+          "key": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "key": "Authorization",
+          "value": "Bearer test-token-1234567"
+        },
+        {
+          "key": "X-Project",
+          "value": "test-project"
+        }
+      ],
+      "body": {
+        "mode": "raw",
+        "raw": "{\n  \"id\": 1,\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"arguments\": {\n      \"project\": \"\",\n      \"defect_type_id\": \"ab001\",\n      \"test_items_ids\": [\n        \"5638607545\"\n      ]\n    },\n    \"name\": \"update_defect_type_for_test_items\"\n  }\n}"
+      },
+      "url": {
+        "raw": "/mcp",
+        "path": [
+          "mcp"
+        ]
+      }
+    },
+    "expectedResponse": {
+      "name": "MCP update_defect_type_for_test_items Response",
+      "originalRequest": {
+        "method": "",
+        "url": {}
+      },
+      "code": 200,
+      "header": [
+        {
+          "key": "Content-Type",
+          "value": "text/event-stream"
+        }
+      ],
+      "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"[{\\\"issueType\\\":\\\"ab001\\\",\\\"comment\\\":\\\"Environment not available. VM Down\\\",\\\"autoAnalyzed\\\":false,\\\"ignoreAnalyzer\\\":false,\\\"externalSystemIssues\\\":[]}]\"}]}}\n"
+    }
+  }
+}

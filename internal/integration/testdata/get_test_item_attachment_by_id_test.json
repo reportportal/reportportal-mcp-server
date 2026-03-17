@@ -1,0 +1,92 @@
+{
+  "name": "get_test_item_attachment_by_id Test",
+  "description": "Integration test for MCP tool \"get_test_item_attachment_by_id\"",
+  "reportPortalMock": {
+    "requestResponsePairs": [
+      {
+        "request": {
+          "method": "GET",
+          "header": [
+            {
+              "key": "Authorization",
+              "value": "Bearer test-token-1234567"
+            }
+          ],
+          "url": {
+            "raw": "http://localhost/api/v1/data/test-project/233635039",
+            "protocol": "http",
+            "host": [
+              "localhost"
+            ],
+            "path": [
+              "api",
+              "v1",
+              "data",
+              "test-project",
+              "233635039"
+            ]
+          }
+        },
+        "response": {
+          "name": "",
+          "originalRequest": {
+            "method": "",
+            "url": {}
+          },
+          "code": 200,
+          "header": [
+            {
+              "key": "Content-Type",
+              "value": "text/plain"
+            }
+          ],
+          "body": "var APP = APP || {};\nAPP.Views.People = Backbone.View.extend({\n  template: APP.getTemplate('people-list-template'),\n  initialize: function () {\n    this.render();\n    var peopleControls = new APP.Views.PeopleControls({\n      el: '#controls'\n    });\n    var peopleInfo = new APP.Views.PeopleInfo({\n      el: '#summary'\n    });\n    this.showPeopleCount();\n    this.listenTo(this.collection, 'reset', this.renderPeopleList);\n    this.listenTo(this.collection, 'all', this.showPeopleCount);\n  },\n  events: {\n    'click .toJSON': 'convertToJSON',\n    'click .deleteAll': 'deleteAll',\n    'click .addPerson': 'addPerson'\n  },\n  convertToJSON: function () {\n    this.$('#JSON-output').html(JSON.stringify(this.collection.toJSON()));\n  },\n  renderPerson: function (person) {\n    var personView = new APP.Views.Person({\n      model: person,\n      //el: '#peopleList' затирает el при каждом вызове\n    });\n    this.$el.find('#peopleList').append(personView.render().el);\n  },\n  deleteAll: function () {\n    if (confirm('Delete all data?')) {\n      this.collection.reset();\n    }\n  },\n  addPerson: function () {\n    var personModel = new APP.Models.Person({\n      'name': this.$el.find('#name').val().trim(),\n      'age': +this.$el.find('#age').val().trim(),\n      'profession': this.$el.find('#profession \u003e option:selected').text(),\n    }, {\n      validate: true\n    });\n    if (!personModel.validationError) {\n      this.collection.add(personModel);\n      this.renderPerson(personModel);\n    } else {\n      alert(personModel.validationError);\n    }\n  },\n  renderPeopleList: function () {\n    this.$el.find('#peopleList').html('');\n    this.collection.each(this.renderCollection, this);\n  },\n  showPeopleCount: function () {\n    this.$el.find('#peopleCount').html(this.collection.length);\n  },\n  render: function () {\n    this.$el.html(this.template);\n    this.collection.each(this.renderPerson, this);\n  }\n});\n"
+        }
+      }
+    ]
+  },
+  "llmClientMock": {
+    "request": {
+      "method": "POST",
+      "header": [
+        {
+          "key": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "key": "Authorization",
+          "value": "Bearer test-token-1234567"
+        },
+        {
+          "key": "X-Project",
+          "value": "test-project"
+        }
+      ],
+      "body": {
+        "mode": "raw",
+        "raw": "{\n  \"id\": 1,\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"arguments\": {\n      \"project\": \"\",\n      \"attachment-content-id\": \"233635039\"\n    },\n    \"name\": \"get_test_item_attachment_by_id\"\n  }\n}"
+      },
+      "url": {
+        "raw": "/mcp",
+        "path": [
+          "mcp"
+        ]
+      }
+    },
+    "expectedResponse": {
+      "name": "MCP get_test_item_attachment_by_id Response",
+      "originalRequest": {
+        "method": "",
+        "url": {}
+      },
+      "code": 200,
+      "header": [
+        {
+          "key": "Content-Type",
+          "value": "text/event-stream"
+        }
+      ],
+      "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"Text content (text/plain, 1924 bytes)\\nvar APP = APP || {};\\nAPP.Views.People = Backbone.View.extend({\\n  template: APP.getTemplate('people-list-template'),\\n  initialize: function () {\\n    this.render();\\n    var peopleControls = new APP.Views.PeopleControls({\\n      el: '#controls'\\n    });\\n    var peopleInfo = new APP.Views.PeopleInfo({\\n      el: '#summary'\\n    });\\n    this.showPeopleCount();\\n    this.listenTo(this.collection, 'reset', this.renderPeopleList);\\n    this.listenTo(this.collection, 'all', this.showPeopleCount);\\n  },\\n  events: {\\n    'click .toJSON': 'convertToJSON',\\n    'click .deleteAll': 'deleteAll',\\n    'click .addPerson': 'addPerson'\\n  },\\n  convertToJSON: function () {\\n    this.$('#JSON-output').html(JSON.stringify(this.collection.toJSON()));\\n  },\\n  renderPerson: function (person) {\\n    var personView = new APP.Views.Person({\\n      model: person,\\n      //el: '#peopleList' затирает el при каждом вызове\\n    });\\n    this.$el.find('#peopleList').append(personView.render().el);\\n  },\\n  deleteAll: function () {\\n    if (confirm('Delete all data?')) {\\n      this.collection.reset();\\n    }\\n  },\\n  addPerson: function () {\\n    var personModel = new APP.Models.Person({\\n      'name': this.$el.find('#name').val().trim(),\\n      'age': +this.$el.find('#age').val().trim(),\\n      'profession': this.$el.find('#profession \\u003e option:selected').text(),\\n    }, {\\n      validate: true\\n    });\\n    if (!personModel.validationError) {\\n      this.collection.add(personModel);\\n      this.renderPerson(personModel);\\n    } else {\\n      alert(personModel.validationError);\\n    }\\n  },\\n  renderPeopleList: function () {\\n    this.$el.find('#peopleList').html('');\\n    this.collection.each(this.renderCollection, this);\\n  },\\n  showPeopleCount: function () {\\n    this.$el.find('#peopleCount').html(this.collection.length);\\n  },\\n  render: function () {\\n    this.$el.html(this.template);\\n    this.collection.each(this.renderPerson, this);\\n  }\\n});\\n\"}]}}\n"
+    }
+  }
+}
