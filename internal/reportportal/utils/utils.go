@@ -27,6 +27,7 @@ const (
 	DefaultFilterEqHasStats    = "true"
 	DefaultFilterInType        = "STEP"
 	DefaultFilterInTypeSuites  = "SUITE,TEST"
+	AllFilterInTypes           = "BEFORE_SUITE,BEFORE_GROUPS,BEFORE_CLASS,BEFORE_TEST,TEST,BEFORE_METHOD,STEP,AFTER_METHOD,AFTER_TEST,AFTER_CLASS,AFTER_GROUPS,AFTER_SUITE"
 	DefaultItemLogLevel        = "TRACE" // Default log level for test item logs
 )
 
