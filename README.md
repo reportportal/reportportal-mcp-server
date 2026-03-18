@@ -391,6 +391,7 @@ The ReportPortal MCP server provides a comprehensive set of capabilities for int
 - View test execution statistics and failures
 - Retrieve test logs and attachments
 - Make a decision on test result by updating test item defect types
+- Get historical execution data for test items across launches
 
 ### Report Generation
 
@@ -416,6 +417,45 @@ The ReportPortal MCP server provides a comprehensive set of capabilities for int
 | Get Test Item by ID        | Retrieves details of a specific test item        | `test_item_id` (required)                                                                                                |
 | Get Project Defect Types        | Retrieves available defect types for the specific project        | None                                                                                              |
 | Update defect types by item ids        | Updates defect types for multiple test items        |`test_items_ids` (required), `defect_type_id` (required), `defect_type_comment` (optional)                                                                                               |
+| Get Test Items History | Retrieves execution history of test items for a specific launch or parent suite | `filter-eq-launchId` or `filter-eq-parentId` (one required), `historyDepth`, `type`, `name`, `description`, `status`, `start_time_from`, `start_time_to`, `attributes`, `has_retries`, `defect_comment`, `auto_analyzed`, `ignored_in_aa`, `ticket_id`, `pattern_name`, `page`, `page-size`, `page-sort` (all optional) |
+
+#### get_test_items_history
+
+Retrieves execution history of test items by calling the `/v1/{projectName}/item/history` endpoint. The following query parameters are applied automatically and are not exposed as tool parameters: `filter.eq.hasStats=true`, `filter.eq.hasChildren=false`, `filter.in.type=STEP`.
+
+**Pagination**
+
+| Description | Parameter | Default |
+|---|---|---|
+| Current page | `page` | `1` |
+| Page size | `page-size` | `50` |
+| Sort fields and direction | `page-sort` | `startTime,DESC` |
+
+**Required (one of)**
+
+| Parameter | Query parameter | Description |
+|---|---|---|
+| `filter-eq-launchId` | `filter.eq.launchId` | Filter by Launch ID. Required when `filter-eq-parentId` is not set. |
+| `filter-eq-parentId` | `filter.eq.parentId` | Filter by Parent Test Item (suite) ID. Required when `filter-eq-launchId` is not set. |
+
+**Optional**
+
+| Parameter | Query parameter | Description |
+|---|---|---|
+| `historyDepth` | `historyDepth` | Depth of history to retrieve. Values: 1–30. Default: `10`. |
+| `type` | `type` | History base: `table` (default, all launches) or `line` (launches with the same name). |
+| `filter-cnt-name` | `filter.cnt.name` | Items whose name contains this substring. |
+| `filter-has-compositeAttribute` | `filter.has.compositeAttribute` | Items with this combination of attributes. Format: `key:value,key2:value2,value3` (no spaces). |
+| `filter-cnt-description` | `filter.cnt.description` | Items whose description contains this substring. |
+| `filter-btw-startTime-from` | `filter.btw.startTime` (start) | Start of the start-time range. RFC3339 or Unix epoch in ms (UTC+00:00). |
+| `filter-btw-startTime-to` | `filter.btw.startTime` (end) | End of the start-time range. RFC3339 or Unix epoch in ms (UTC+00:00). |
+| `filter-in-status` | `filter.in.status` | JSON array of unique execution statuses. Valid values: `PASSED`, `FAILED`, `SKIPPED`, `INTERRUPTED`, `IN_PROGRESS`. Example: `["PASSED","FAILED"]`. |
+| `filter-eq-hasRetries` | `filter.eq.hasRetries` | `TRUE`, `FALSE`, or `--` (default, filter not applied). |
+| `filter-cnt-issueComment` | `filter.cnt.issueComment` | Items whose defect comment contains this substring. |
+| `filter-eq-autoAnalyzed` | `filter.eq.autoAnalyzed` | `true`/`false` — filter items analyzed by ReportPortal Auto-Analyzer (AA). |
+| `filter-in-ignoreAnalyzer` | `filter.in.ignoreAnalyzer` | `true`/`false` — filter items ignored in AA analysis. |
+| `filter-has-ticketId` | `filter.has.ticketId` | Filter items linked to a bug tracking system ticket/issue by its ID. |
+| `filter-any-patternName` | `filter.any.patternName` | Filter items whose name matches this pattern name in Pattern Analysis. |
 
 ### Available Prompts
 
@@ -784,7 +824,7 @@ Ask your AI assistant:
 "What ReportPortal tools are available?"
 ```
 
-Expected response: A list of 15 tools including launches, test items, analysis tools, etc.
+Expected response: A list of 16 tools including launches, test items, analysis tools, etc.
 
 **Step 2: Test Basic Query**
 
