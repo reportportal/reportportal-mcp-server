@@ -89,6 +89,7 @@ type GetTestItemsByFilterArgs struct {
 	FilterHasTicketId           string `json:"filter-has-ticketId"`
 	FilterAnyPatternName        string `json:"filter-any-patternName"`
 	FilterEqAutoAnalyzed        *bool  `json:"filter-eq-autoAnalyzed"`
+	IncludeBeforeAfterHooks     *bool  `json:"include-before-after-hooks"`
 }
 
 // toolGetTestItemsByFilter creates a tool to list test items for a specific launch.
@@ -167,6 +168,11 @@ func (lr *TestItemResources) toolGetTestItemsByFilter() (*mcp.Tool, ToolHandler[
 		Type:        "boolean",
 		Description: "Items analyzed by RP (AA)",
 	}
+	properties["include-before-after-hooks"] = &jsonschema.Schema{
+		Type:        "boolean",
+		Description: "Include all Before/After hook item types (BEFORE_SUITE, BEFORE_GROUPS, BEFORE_CLASS, BEFORE_TEST, TEST, BEFORE_METHOD, AFTER_METHOD, AFTER_TEST, AFTER_CLASS, AFTER_GROUPS, AFTER_SUITE, STEP) together with STEP items. Default: false (only STEP items)",
+		Default:     mustMarshalJSON(false),
+	}
 
 	return &mcp.Tool{
 			Name:        "get_test_items_by_filter",
@@ -187,11 +193,15 @@ func (lr *TestItemResources) toolGetTestItemsByFilter() (*mcp.Tool, ToolHandler[
 				return nil, nil, fmt.Errorf("launch-id is required")
 			}
 
+			filterInType := utils.DefaultFilterInType
+			if args.IncludeBeforeAfterHooks != nil && *args.IncludeBeforeAfterHooks {
+				filterInType = utils.AllFilterInTypes
+			}
 			urlValues := url.Values{
 				"providerType":          {utils.DefaultProviderType},
 				"filter.eq.hasStats":    {utils.DefaultFilterEqHasStats},
 				"filter.eq.hasChildren": {utils.DefaultFilterEqHasChildren},
-				"filter.in.type":        {utils.DefaultFilterInType},
+				"filter.in.type":        {filterInType},
 			}
 			urlValues.Add("launchId", strconv.FormatUint(uint64(args.LaunchID), 10))
 
