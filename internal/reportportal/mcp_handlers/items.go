@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/url"
 	"strconv"
+	"strings"
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -43,6 +44,7 @@ func RegisterTestItemTools(
 	registerTool(s, testItems.toolGetTestSuitesByFilter)
 	registerTool(s, testItems.toolGetProjectDefectTypes)
 	registerTool(s, testItems.toolUpdateDefectTypeForTestItems)
+	registerTool(s, testItems.toolGetTestItemsHistory)
 
 	registerResourceTemplate(s, testItems.resourceTestItem)
 }
@@ -163,7 +165,7 @@ func (lr *TestItemResources) toolGetTestItemsByFilter() (*mcp.Tool, ToolHandler[
 	}
 	properties["filter-eq-autoAnalyzed"] = &jsonschema.Schema{
 		Type:        "boolean",
-		Description: "Items analysed by RP (AA)",
+		Description: "Items analyzed by RP (AA)",
 	}
 
 	return &mcp.Tool{
@@ -938,6 +940,245 @@ func (lr *TestItemResources) toolUpdateDefectTypeForTestItems() (*mcp.Tool, Tool
 			}
 
 			// Return the serialized testItem as a text result
+			return utils.ReadResponseBody(response)
+		})
+}
+
+// GetTestItemsHistoryArgs holds filter and pagination params for get_test_items_history.
+type GetTestItemsHistoryArgs struct {
+	Project                     string   `json:"project"`
+	FilterEqLaunchId            int32    `json:"filter-eq-launchId"`
+	FilterEqParentId            uint64   `json:"filter-eq-parentId"`
+	Page                        uint     `json:"page"`
+	PageSize                    uint     `json:"page-size"`
+	PageSort                    string   `json:"page-sort"`
+	HistoryDepth                int32    `json:"historyDepth"`
+	HistoryBase                 string   `json:"type"`
+	FilterCntName               string   `json:"filter-cnt-name"`
+	FilterHasCompositeAttribute string   `json:"filter-has-compositeAttribute"`
+	FilterCntDescription        string   `json:"filter-cnt-description"`
+	FilterBtwStartTimeFrom      string   `json:"filter-btw-startTime-from"`
+	FilterBtwStartTimeTo        string   `json:"filter-btw-startTime-to"`
+	FilterInStatus              []string `json:"filter-in-status"`
+	FilterEqHasRetries          string   `json:"filter-eq-hasRetries"`
+	FilterCntIssueComment       string   `json:"filter-cnt-issueComment"`
+	FilterEqAutoAnalyzed        *bool    `json:"filter-eq-autoAnalyzed"`
+	FilterInIgnoreAnalyzer      *bool    `json:"filter-in-ignoreAnalyzer"`
+	FilterHasTicketId           string   `json:"filter-has-ticketId"`
+	FilterAnyPatternName        string   `json:"filter-any-patternName"`
+}
+
+// toolGetTestItemsHistory creates a tool to retrieve history of test items.
+func (lr *TestItemResources) toolGetTestItemsHistory() (*mcp.Tool, ToolHandler[GetTestItemsHistoryArgs, any]) {
+	properties := make(map[string]*jsonschema.Schema)
+	properties["project"] = lr.projectSchema()
+	properties["filter-eq-launchId"] = &jsonschema.Schema{
+		Type:        "integer",
+		Description: "Filter by Launch ID. Conditionally required if Parent ID is not provided.",
+		Minimum:     openapi.PtrFloat64(0),
+	}
+	properties["filter-eq-parentId"] = &jsonschema.Schema{
+		Type:        "integer",
+		Description: "Filter by Parent Test Item ID (suite ID). Conditionally required if Launch ID is not provided.",
+	}
+
+	paginationProps := utils.SetPaginationProperties(utils.DefaultSortingForItems)
+	for k, v := range paginationProps {
+		properties[k] = v
+	}
+
+	properties["historyDepth"] = &jsonschema.Schema{
+		Type:        "integer",
+		Description: "Depth of history to retrieve. Allowed values: 1–30.",
+		Default:     mustMarshalJSON(10),
+		Minimum:     openapi.PtrFloat64(1),
+		Maximum:     openapi.PtrFloat64(30),
+	}
+	properties["type"] = &jsonschema.Schema{
+		Type:        "string",
+		Description: "History base: 'table' collects history from all launches (default), 'line' collects history from launches with the same name.",
+		Enum:        []any{"table", "line"},
+		Default:     mustMarshalJSON("table"),
+	}
+	properties["filter-cnt-name"] = &jsonschema.Schema{
+		Type:        "string",
+		Description: "Items whose name contains this substring",
+	}
+	properties["filter-has-compositeAttribute"] = &jsonschema.Schema{
+		Type:        "string",
+		Description: "Items that have this combination of attribute values. Format: key:value,key2:value2,value3 (no spaces)",
+	}
+	properties["filter-cnt-description"] = &jsonschema.Schema{
+		Type:        "string",
+		Description: "Items whose description contains this substring",
+	}
+	properties["filter-btw-startTime-from"] = &jsonschema.Schema{
+		Type:        "string",
+		Description: "Items with start time from this timestamp (GMT/UTC+00:00, RFC3339 format or Unix epoch in ms)",
+	}
+	properties["filter-btw-startTime-to"] = &jsonschema.Schema{
+		Type:        "string",
+		Description: "Items with start time up to this timestamp (GMT/UTC+00:00, RFC3339 format or Unix epoch in ms)",
+	}
+	properties["filter-in-status"] = &jsonschema.Schema{
+		Type:        "array",
+		Description: "Filter by execution status",
+		Items: &jsonschema.Schema{
+			Type: "string",
+			Enum: []any{
+				"PASSED",
+				"FAILED",
+				"SKIPPED",
+				"INTERRUPTED",
+				"IN_PROGRESS",
+			},
+		},
+		UniqueItems: true,
+	}
+	properties["filter-eq-hasRetries"] = &jsonschema.Schema{
+		Type:        "string",
+		Description: "Filter items that have retries (TRUE), don't have retries (FALSE), or skip this filter (--)",
+		Enum:        []any{"TRUE", "FALSE", "--"},
+		Default:     mustMarshalJSON("--"),
+	}
+	properties["filter-cnt-issueComment"] = &jsonschema.Schema{
+		Type:        "string",
+		Description: "Items whose defect comment contains this substring",
+	}
+	properties["filter-eq-autoAnalyzed"] = &jsonschema.Schema{
+		Type:        "boolean",
+		Description: "Filter items analyzed by ReportPortal Auto-Analyzer (AA)",
+	}
+	properties["filter-in-ignoreAnalyzer"] = &jsonschema.Schema{
+		Type:        "boolean",
+		Description: "Filter items ignored in AA analysis",
+	}
+	properties["filter-has-ticketId"] = &jsonschema.Schema{
+		Type:        "string",
+		Description: "Filter items linked to a bug tracking system ticket/issue by its ID",
+	}
+	properties["filter-any-patternName"] = &jsonschema.Schema{
+		Type:        "string",
+		Description: "Filter items whose name matches a pattern name in Pattern Analysis",
+	}
+
+	return &mcp.Tool{
+			Name:        "get_test_items_history",
+			Description: "Get history of test items for a specific launch or parent suite. Either filter-eq-launchId or filter-eq-parentId must be provided.",
+			InputSchema: &jsonschema.Schema{
+				Type:       "object",
+				Properties: properties,
+				Required:   []string{"project"},
+			},
+		}, utils.WithAnalytics(lr.analytics, "get_test_items_history", func(ctx context.Context, request *mcp.CallToolRequest, args GetTestItemsHistoryArgs) (*mcp.CallToolResult, any, error) {
+			slog.Debug("START PROCESSING")
+			project, err := utils.ExtractProject(ctx, args.Project)
+			if err != nil {
+				return nil, nil, err
+			}
+
+			if args.FilterEqLaunchId == 0 && args.FilterEqParentId == 0 {
+				return nil, nil, fmt.Errorf(
+					"either filter-eq-launchId or filter-eq-parentId is required",
+				)
+			}
+
+			if args.HistoryDepth != 0 && (args.HistoryDepth < 1 || args.HistoryDepth > 30) {
+				return nil, nil, fmt.Errorf("historyDepth must be between 1 and 30")
+			}
+
+			urlValues := url.Values{
+				"filter.eq.hasStats":    {utils.DefaultFilterEqHasStats},
+				"filter.eq.hasChildren": {utils.DefaultFilterEqHasChildren},
+				"filter.in.type":        {utils.DefaultFilterInType},
+			}
+
+			if args.FilterEqParentId != 0 {
+				urlValues.Add(
+					"filter.eq.parentId",
+					strconv.FormatUint(uint64(args.FilterEqParentId), 10),
+				)
+			}
+
+			if args.FilterCntName != "" {
+				urlValues.Add("filter.cnt.name", args.FilterCntName)
+			}
+			if args.FilterCntDescription != "" {
+				urlValues.Add("filter.cnt.description", args.FilterCntDescription)
+			}
+			if len(args.FilterInStatus) > 0 {
+				urlValues.Add("filter.in.status", strings.Join(args.FilterInStatus, ","))
+			}
+			if args.FilterCntIssueComment != "" {
+				urlValues.Add("filter.cnt.issueComment", args.FilterCntIssueComment)
+			}
+			if args.FilterHasTicketId != "" {
+				urlValues.Add("filter.has.ticketId", args.FilterHasTicketId)
+			}
+			if args.FilterAnyPatternName != "" {
+				urlValues.Add("filter.any.patternName", args.FilterAnyPatternName)
+			}
+			if args.FilterInIgnoreAnalyzer != nil {
+				urlValues.Add(
+					"filter.in.ignoreAnalyzer",
+					strconv.FormatBool(*args.FilterInIgnoreAnalyzer),
+				)
+			}
+			if args.FilterHasCompositeAttribute != "" {
+				urlValues.Add("filter.has.compositeAttribute", args.FilterHasCompositeAttribute)
+			}
+
+			filterStartTime, err := utils.ProcessStartTimeFilter(
+				args.FilterBtwStartTimeFrom,
+				args.FilterBtwStartTimeTo,
+			)
+			if err != nil {
+				return nil, nil, err
+			}
+			if filterStartTime != "" {
+				urlValues.Add("filter.btw.startTime", filterStartTime)
+			}
+
+			ctxWithParams := utils.WithQueryParams(ctx, urlValues)
+			apiRequest := lr.client.TestItemAPI.GetItemsHistory(ctxWithParams, project)
+
+			if args.FilterEqLaunchId != 0 {
+				apiRequest = apiRequest.FilterEqLaunchId(
+					args.FilterEqLaunchId,
+				)
+			}
+			if args.HistoryDepth > 0 {
+				apiRequest = apiRequest.HistoryDepth(args.HistoryDepth)
+			} else {
+				apiRequest = apiRequest.HistoryDepth(10)
+			}
+			if args.HistoryBase != "" {
+				apiRequest = apiRequest.Type_(args.HistoryBase)
+			}
+			if args.FilterEqHasRetries != "--" && args.FilterEqHasRetries != "" {
+				apiRequest = apiRequest.FilterEqHasRetries(args.FilterEqHasRetries == "TRUE")
+			}
+			if args.FilterEqAutoAnalyzed != nil {
+				apiRequest = apiRequest.FilterEqAutoAnalyzed(*args.FilterEqAutoAnalyzed)
+			}
+
+			apiRequest = utils.ApplyPaginationOptions(
+				apiRequest,
+				args.Page,
+				args.PageSize,
+				args.PageSort,
+				utils.DefaultSortingForItems,
+			)
+
+			_, response, err := apiRequest.Execute()
+			if err != nil {
+				return nil, nil, fmt.Errorf(
+					"%s: %w",
+					utils.ExtractResponseError(err, response),
+					err,
+				)
+			}
+
 			return utils.ReadResponseBody(response)
 		})
 }
