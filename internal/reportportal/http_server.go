@@ -569,12 +569,12 @@ func RunStreamingServer(ctx context.Context, cmd *cli.Command) error {
 	select {
 	case <-ctx.Done(): // Context canceled (e.g., SIGTERM received)
 		slog.Info("shutting down server...")
-		analytics.StopAnalytics(analyticsInstance, "")
 		sCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := httpServer.Shutdown(sCtx); err != nil {
 			slog.Error("error during server shutdown", "error", err)
 		}
+		// Stop() handles analytics shutdown internally
 		if err := serverHandler.MCP.Stop(); err != nil {
 			slog.Error("error stopping HTTP server", "error", err)
 		}

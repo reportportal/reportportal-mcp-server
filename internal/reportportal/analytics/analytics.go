@@ -116,16 +116,19 @@ type Analytics struct {
 	metricsLock sync.RWMutex                 // protects metrics map
 
 	// Background processing
-	stopChan   chan struct{}
-	wg         sync.WaitGroup
-	tickerDone chan struct{}
-	stopOnce   sync.Once // ensures Stop() is only executed once
+	ctx      context.Context    // cancelled on Stop() to interrupt in-flight HTTP requests
+	cancel   context.CancelFunc // cancels ctx
+	stopChan chan struct{}
+	wg       sync.WaitGroup
+	stopOnce sync.Once // ensures Stop() is only executed once
 }
 
-// ensureInstanceID lazily fetches the instance ID if not already set
-// Retries on each call until a non-empty instance ID is retrieved
-// Thread-safe for concurrent calls using atomic bool for fast-path check
-func (a *Analytics) ensureInstanceID() {
+// ensureInstanceID lazily fetches the instance ID if not already set.
+// Retries on each call until a non-empty instance ID is retrieved.
+// Thread-safe for concurrent calls using atomic bool for fast-path check.
+// The provided context is forwarded to the HTTP request so the fetch is
+// cancelled immediately when Stop() cancels a.ctx.
+func (a *Analytics) ensureInstanceID(ctx context.Context) {
 	// Fast path: check atomic flag without any locks
 	if a.instanceIDFetched.Load() {
 		return
@@ -147,7 +150,7 @@ func (a *Analytics) ensureInstanceID() {
 	}
 
 	// Attempt to fetch instance ID
-	fetchedID := fetchInstanceID(a.rpHostURL, a.httpClient)
+	fetchedID := fetchInstanceID(ctx, a.rpHostURL, a.httpClient)
 	if fetchedID != "" {
 		a.instanceID = fetchedID
 		a.instanceIDFetched.Store(true) // Mark as fetched
@@ -157,13 +160,19 @@ func (a *Analytics) ensureInstanceID() {
 	}
 }
 
-// fetchInstanceID retrieves the ReportPortal instance ID from the /api/info endpoint
-// The endpoint is available without authentication
-func fetchInstanceID(hostURL string, httpClient *http.Client) string {
+// fetchInstanceID retrieves the ReportPortal instance ID from the /api/info endpoint.
+// The endpoint is available without authentication.
+// The caller context is used as the parent for the per-request timeout so that
+// a Stop()-triggered cancellation is honoured immediately.  If ctx is nil,
+// context.Background() is used as a safe fallback.
+func fetchInstanceID(ctx context.Context, hostURL string, httpClient *http.Client) string {
 	// Build the API info endpoint URL
 	apiURL := fmt.Sprintf("%s/api/info", strings.TrimSuffix(hostURL, "/"))
 
-	ctx, cancel := context.WithTimeout(context.Background(), instanceIDFetchTimeout)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, instanceIDFetchTimeout)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
@@ -174,6 +183,11 @@ func fetchInstanceID(hostURL string, httpClient *http.Client) string {
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
+		// Context cancellation / deadline during shutdown is expected — log quietly.
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			slog.Debug("Instance ID fetch cancelled", "url", apiURL)
+			return ""
+		}
 		slog.Warn("Failed to fetch instance ID from ReportPortal", "error", err, "url", apiURL)
 		return ""
 	}
@@ -280,14 +294,17 @@ func NewAnalytics(
 		Timeout: 10 * time.Second,
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+
 	analytics := &Analytics{
 		Config:     config,
 		httpClient: httpClient,
 		rpHostURL:  rpHostURL,                          // Store for lazy fetching
 		instanceID: "",                                 // Will be fetched lazily on first use
 		metrics:    make(map[string]map[string]*int64), // userID -> toolName -> counter
+		ctx:        ctx,
+		cancel:     cancel,
 		stopChan:   make(chan struct{}),
-		tickerDone: make(chan struct{}),
 	}
 
 	analytics.startMetricsProcessor()
@@ -390,6 +407,11 @@ func (a *Analytics) sendPayload(ctx context.Context, payload GAPayload) error {
 
 	resp, err := a.httpClient.Do(req)
 	if err != nil {
+		// Context cancellation / deadline during shutdown is expected — log quietly.
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			slog.Debug("GA4 request cancelled", "events_count", len(payload.Events))
+			return fmt.Errorf("failed to send analytics request: %w", err)
+		}
 		slog.Error("GA4 batch HTTP request failed",
 			"error", err,
 			"events_count", len(payload.Events),
@@ -465,7 +487,6 @@ func (a *Analytics) startMetricsProcessor() {
 				a.processMetrics()
 			case <-a.stopChan:
 				slog.Debug("Analytics metrics processor stopped")
-				close(a.tickerDone)
 				return
 			}
 		}
@@ -481,17 +502,27 @@ func (a *Analytics) Stop() {
 	// Use sync.Once to ensure Stop() can only be executed once
 	a.stopOnce.Do(func() {
 		slog.Debug("Stopping analytics metrics processor")
+
+		// Cancel context first to interrupt any in-flight HTTP requests in processMetrics
+		if a.cancel != nil {
+			a.cancel()
+		}
+
 		close(a.stopChan)
 
-		// Wait for ticker goroutine to finish
+		// Wait for the background goroutine to exit, with a hard timeout
+		done := make(chan struct{})
+		go func() {
+			a.wg.Wait()
+			close(done)
+		}()
+
 		select {
-		case <-a.tickerDone:
+		case <-done:
 			slog.Debug("Analytics metrics processor stopped gracefully")
 		case <-time.After(5 * time.Second):
 			slog.Warn("Analytics metrics processor stop timeout")
 		}
-
-		a.wg.Wait()
 	})
 }
 
@@ -583,8 +614,9 @@ func (a *Analytics) processMetrics() {
 		"total_events", totalEvents,
 	)
 
-	// Send metrics as a batch to GA4 per user
-	a.sendBatchMetricsPerUser(context.Background(), metricsToSend)
+	// Send metrics as a batch to GA4 per user, using the analytics context so
+	// in-flight requests are cancelled promptly when Stop() is called.
+	a.sendBatchMetricsPerUser(a.ctx, metricsToSend)
 }
 
 // sendBatchMetricsPerUser sends multiple tool metrics per user as batch events to GA4
@@ -597,8 +629,21 @@ func (a *Analytics) sendBatchMetricsPerUser(
 		return
 	}
 
-	// Process each user's metrics separately
+	// Guard 1: skip the entire loop if already cancelled before we start.
+	if ctx.Err() != nil {
+		slog.Debug("Skipping batch send: context cancelled before per-user loop")
+		return
+	}
+
+	// Process each user's metrics separately, checking for cancellation
+	// between users so a shutdown stops after the current user finishes
+	// rather than processing every remaining user (each of which can block
+	// on ensureInstanceID and an HTTP send).
 	for userID, metrics := range metricsPerUser {
+		if ctx.Err() != nil {
+			slog.Debug("Stopping per-user loop: context cancelled")
+			return
+		}
 		a.sendBatchMetrics(ctx, userID, metrics)
 	}
 }
@@ -610,8 +655,9 @@ func (a *Analytics) sendBatchMetrics(ctx context.Context, userID string, metrics
 		return
 	}
 
-	// Lazily fetch instance ID on first batch send
-	a.ensureInstanceID()
+	// Lazily fetch instance ID on first batch send, forwarding the caller's
+	// context so Stop() can cancel the HTTP request immediately.
+	a.ensureInstanceID(ctx)
 
 	// Collect all individual events for batch sending
 	var events []GAEvent
@@ -622,6 +668,16 @@ func (a *Analytics) sendBatchMetrics(ctx context.Context, userID string, metrics
 		a.instanceIDLock.Lock()
 		currentInstanceID = a.instanceID
 		a.instanceIDLock.Unlock()
+	}
+
+	// Guard 2: skip event expansion if already cancelled.
+	if ctx.Err() != nil {
+		slog.Debug(
+			"Skipping event expansion: context cancelled",
+			"user_id_prefix",
+			truncateForLog(userID, 16),
+		)
+		return
 	}
 
 	// Create individual events for each tool usage (matching analytics-client format)
@@ -651,6 +707,17 @@ func (a *Analytics) sendBatchMetrics(ctx context.Context, userID string, metrics
 	sent := 0
 	failed := 0
 	for start := 0; start < len(events); start += maxPerRequest {
+		// Guard 3: stop iterating chunks once cancelled to avoid sending
+		// requests that will immediately fail and spam error logs.
+		if ctx.Err() != nil {
+			slog.Debug(
+				"Stopping chunk send: context cancelled",
+				"user_id_prefix",
+				truncateForLog(userID, 16),
+			)
+			break
+		}
+
 		end := start + maxPerRequest
 		if end > len(events) {
 			end = len(events)
@@ -658,14 +725,19 @@ func (a *Analytics) sendBatchMetrics(ctx context.Context, userID string, metrics
 		// Use userID for the batch events
 		if err := a.sendBatchEventsForUser(ctx, userID, events[start:end]); err != nil {
 			failed += end - start
+			// Context cancellation during shutdown is expected — log quietly.
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				slog.Debug("Batch send cancelled",
+					"events_count", end-start,
+					"user_id_prefix", truncateForLog(userID, 16),
+				)
+				continue
+			}
 			slog.Error(
 				"Failed to send batch tool events",
-				"error",
-				err,
-				"events_count",
-				end-start,
-				"user_id_prefix",
-				truncateForLog(userID, 16),
+				"error", err,
+				"events_count", end-start,
+				"user_id_prefix", truncateForLog(userID, 16),
 			)
 			continue
 		}
