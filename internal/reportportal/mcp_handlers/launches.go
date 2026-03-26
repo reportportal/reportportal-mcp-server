@@ -1,12 +1,23 @@
 package mcphandlers
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log/slog"
+	"mime"
+	"mime/multipart"
+	"net/http"
+	"net/textproto"
 	"net/url"
+	"path"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -15,6 +26,15 @@ import (
 
 	"github.com/reportportal/reportportal-mcp-server/internal/reportportal/analytics"
 	"github.com/reportportal/reportportal-mcp-server/internal/reportportal/utils"
+)
+
+const (
+	importHTTPClientTimeout = 30 * time.Second
+	// importMaxFileSizeBytes is the upper bound on the decoded file payload
+	// accepted by the import tool. The MCP protocol delivers file_content as a
+	// JSON string so the full content is already resident in memory; this limit
+	// prevents an abnormally large value from being processed further.
+	importMaxFileSizeBytes = 50 * 1024 * 1024 // 50 MiB
 )
 
 // ToolHandler is a function type for MCP tool handlers with typed input and output.
@@ -70,8 +90,146 @@ func RegisterLaunchTools(
 	registerTool(s, launches.toolRunAutoAnalysis)
 	registerTool(s, launches.toolUniqueErrorAnalysis)
 	registerTool(s, launches.toolRunQualityGate)
+	registerTool(s, launches.toolImportLaunchFromFile)
 
 	registerResourceTemplate(s, launches.resourceLaunch)
+}
+
+// importPluginInfo holds metadata for a single IMPORT-type plugin.
+type importPluginInfo struct {
+	Name             string   // canonical plugin name as returned by the API
+	MimeTypes        []string // details.acceptFileMimeTypes (empty → use upload defaults)
+	MaxFileSizeBytes int64    // from details.maxFileSize, or importMaxFileSizeBytes
+}
+
+func parseAcceptFileMimeTypes(v any) []string {
+	switch x := v.(type) {
+	case []interface{}:
+		out := make([]string, 0, len(x))
+		for _, e := range x {
+			if s, ok := e.(string); ok && s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	case []string:
+		out := make([]string, 0, len(x))
+		for _, s := range x {
+			if s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func normalizeMediaType(s string) string {
+	s = strings.TrimSpace(s)
+	if i := strings.Index(s, ";"); i >= 0 {
+		s = s[:i]
+	}
+	return strings.ToLower(s)
+}
+
+// pickImportContentType chooses the multipart part Content-Type using optional
+// explicit caller input, else by matching fileName's extension to plugin MimeTypes.
+func pickImportContentType(mimeTypes []string, fileName, explicit string) (string, error) {
+	explicit = strings.TrimSpace(explicit)
+	if explicit != "" {
+		if len(mimeTypes) > 0 {
+			want := normalizeMediaType(explicit)
+			for _, m := range mimeTypes {
+				if normalizeMediaType(m) == want {
+					return m, nil
+				}
+			}
+			return "", fmt.Errorf(
+				"content_type %q is not in this plugin's acceptFileMimeTypes [%s]",
+				explicit,
+				strings.Join(mimeTypes, ", "),
+			)
+		}
+		return explicit, nil
+	}
+	if len(mimeTypes) == 0 {
+		return "application/octet-stream", nil
+	}
+	if len(mimeTypes) == 1 {
+		return mimeTypes[0], nil
+	}
+	ext := strings.ToLower(path.Ext(fileName))
+	if ext == "" {
+		return "", fmt.Errorf(
+			"file_name must include a file extension or set content_type to one of: %s",
+			strings.Join(mimeTypes, ", "),
+		)
+	}
+	for _, m := range mimeTypes {
+		base := strings.TrimSpace(m)
+		if i := strings.Index(base, ";"); i >= 0 {
+			base = base[:i]
+		}
+		exts, _ := mime.ExtensionsByType(base)
+		for _, e := range exts {
+			if strings.ToLower(e) == ext {
+				return m, nil
+			}
+		}
+	}
+	if t := mime.TypeByExtension(ext); t != "" {
+		tNorm := normalizeMediaType(t)
+		for _, m := range mimeTypes {
+			if normalizeMediaType(m) == tNorm {
+				return m, nil
+			}
+		}
+	}
+	return "", fmt.Errorf(
+		"could not map file extension %q to an accepted MIME type; set content_type to one of: %s",
+		ext,
+		strings.Join(mimeTypes, ", "),
+	)
+}
+
+// importPluginCache holds a thread-safe snapshot of available IMPORT-type plugins.
+type importPluginCache struct {
+	mu      sync.RWMutex
+	plugins []importPluginInfo
+}
+
+// set replaces the cached plugin entries.
+func (c *importPluginCache) set(plugins []importPluginInfo) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.plugins = plugins
+}
+
+// lookup returns a pointer to the importPluginInfo whose Name matches name
+// (case-insensitive, whitespace-trimmed), or nil if not found.
+func (c *importPluginCache) lookup(name string) *importPluginInfo {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	normalized := strings.ToLower(strings.TrimSpace(name))
+	for i := range c.plugins {
+		if strings.ToLower(strings.TrimSpace(c.plugins[i].Name)) == normalized {
+			info := c.plugins[i] // copy
+			return &info
+		}
+	}
+	return nil
+}
+
+// list returns a copy of the current plugin names.
+func (c *importPluginCache) list() []string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	names := make([]string, len(c.plugins))
+	for i, p := range c.plugins {
+		names[i] = p.Name
+	}
+	return names
 }
 
 // LaunchResources is a struct that encapsulates the ReportPortal client.
@@ -79,6 +237,7 @@ type LaunchResources struct {
 	client         *gorp.Client // Client to interact with the ReportPortal API
 	defaultProject string       // Default project name
 	analytics      *analytics.Analytics
+	importPlugins  importPluginCache
 }
 
 func NewLaunchResources(
@@ -91,6 +250,40 @@ func NewLaunchResources(
 		defaultProject: project,
 		analytics:      analytics,
 	}
+}
+
+// fetchAndCacheImportPlugins calls GET /api/v1/plugin, filters entries whose groupType
+// is "IMPORT", and stores their metadata in the local cache.
+func (lr *LaunchResources) fetchAndCacheImportPlugins(ctx context.Context) error {
+	plugins, _, err := lr.client.PluginAPI.GetPlugins(ctx).Execute()
+	if err != nil {
+		return fmt.Errorf("get plugins: %w", err)
+	}
+	var infos []importPluginInfo
+	for _, p := range plugins {
+		if p.GroupType != nil && strings.EqualFold(*p.GroupType, "IMPORT") && p.Name != nil {
+			info := importPluginInfo{
+				Name:             *p.Name,
+				MaxFileSizeBytes: importMaxFileSizeBytes,
+			}
+			details := p.GetDetails()
+			if mimes, ok := details["acceptFileMimeTypes"]; ok {
+				info.MimeTypes = parseAcceptFileMimeTypes(mimes)
+			}
+			if maxSize, ok := details["maxFileSize"]; ok {
+				if f, ok := maxSize.(float64); ok && f > 0 {
+					pluginMax := int64(f)
+					if pluginMax < info.MaxFileSizeBytes {
+						info.MaxFileSizeBytes = pluginMax
+					}
+				}
+			}
+			infos = append(infos, info)
+		}
+	}
+	lr.importPlugins.set(infos)
+	slog.Debug("import plugin cache refreshed", "plugins", infos)
+	return nil
 }
 
 // projectSchema returns a JSON schema for the project parameter
@@ -674,6 +867,252 @@ func (lr *LaunchResources) toolForceFinishLaunch() (*mcp.Tool, ToolHandler[Launc
 							),
 						},
 					},
+				}, nil, nil
+			},
+		)
+}
+
+// ImportLaunchFromFileArgs holds parameters for importing a launch from a file.
+type ImportLaunchFromFileArgs struct {
+	Project         string `json:"project"`
+	PluginName      string `json:"plugin_name"`
+	FileName        string `json:"file_name"`
+	FileContent     string `json:"file_content"`
+	ContentEncoding string `json:"content_encoding"`
+	ContentType     string `json:"content_type"`
+}
+
+// toolImportLaunchFromFile creates a tool to import a launch into ReportPortal from a file passed inline.
+func (lr *LaunchResources) toolImportLaunchFromFile() (*mcp.Tool, ToolHandler[ImportLaunchFromFileArgs, any]) {
+	properties := map[string]*jsonschema.Schema{
+		"project": lr.projectSchema(),
+		"plugin_name": {
+			Type: "string",
+			Description: "Name of the import plugin to use (e.g. 'junit'). " +
+				"Available import plugins (groupType: \"IMPORT\") and their accepted MIME types " +
+				"(details.acceptFileMimeTypes) can be listed via the GET /api/v1/plugin endpoint.",
+		},
+		"file_name": {
+			Type:        "string",
+			Description: "File name with extension (e.g. 'results.xml', 'report.zip'). Used as the multipart upload filename.",
+		},
+		"file_content": {
+			Type: "string",
+			Description: "Content of the file to import. " +
+				"Plain text (e.g. raw XML) by default; set content_encoding to \"base64\" for binary files (e.g. ZIP archives).",
+		},
+		"content_encoding": {
+			Type:        "string",
+			Description: "Encoding of file_content. Omit or set to \"none\" for plain text files (e.g. XML). Set to \"base64\" for binary files (e.g. ZIP archives).",
+			Enum:        []any{"none", "base64"},
+			Default:     mustMarshalJSON("none"),
+		},
+		"content_type": {
+			Type: "string",
+			Description: "Optional IANA media type for the file part (must match an entry in the plugin's acceptFileMimeTypes when that list is non-empty). " +
+				"If omitted, the type is chosen from the file extension and the plugin's accepted MIME list.",
+		},
+	}
+
+	return &mcp.Tool{
+			Name: "import_launch_from_file",
+			Description: "Import a launch into ReportPortal from a file passed inline. " +
+				"Pass plain text content directly (e.g. raw XML) or base64-encoded content for binary files (e.g. ZIP). " +
+				"The plugin_name must match a plugin with groupType \"IMPORT\" available on the server " +
+				"(retrievable via GET /api/v1/plugin). Each import plugin defines the accepted file " +
+				"MIME types in its details.acceptFileMimeTypes field.",
+			InputSchema: &jsonschema.Schema{
+				Type:       "object",
+				Properties: properties,
+				Required:   []string{"plugin_name", "file_name", "file_content"},
+			},
+		},
+		utils.WithAnalytics(
+			lr.analytics,
+			"import_launch_from_file",
+			func(ctx context.Context, req *mcp.CallToolRequest, args ImportLaunchFromFileArgs) (*mcp.CallToolResult, any, error) {
+				project, err := utils.ExtractProject(ctx, args.Project)
+				if err != nil {
+					return nil, nil, err
+				}
+
+				if args.PluginName == "" {
+					return nil, nil, fmt.Errorf("plugin_name is required")
+				}
+				if args.FileName == "" {
+					return nil, nil, fmt.Errorf("file_name is required")
+				}
+				if args.FileContent == "" {
+					return nil, nil, fmt.Errorf("file_content is required")
+				}
+
+				// Validate plugin_name against the known import-plugin cache.
+				// If not found, refresh the cache once using the current request
+				// context (carries auth token in HTTP mode) and check again.
+				pluginInfo := lr.importPlugins.lookup(args.PluginName)
+				if pluginInfo == nil {
+					if refreshErr := lr.fetchAndCacheImportPlugins(ctx); refreshErr != nil {
+						return nil, nil, fmt.Errorf(
+							"failed to refresh import plugins cache: %w",
+							refreshErr,
+						)
+					}
+					pluginInfo = lr.importPlugins.lookup(args.PluginName)
+					if pluginInfo == nil {
+						slog.Warn("plugin_name not found in available import plugins",
+							"plugin_name", args.PluginName,
+							"available_plugins", strings.Join(lr.importPlugins.list(), ", "))
+						return nil, nil, fmt.Errorf(
+							"plugin %q not found; available import plugins: [%s]",
+							args.PluginName, strings.Join(lr.importPlugins.list(), ", "))
+					}
+				}
+
+				// Fail fast before allocating the multipart body: measure the decoded
+				// size against the plugin's limit. For plain text the byte count is
+				// exact; for base64 content we run the real decoder into io.Discard so
+				// the measurement is precise rather than estimated.
+				maxFileSizeBytes := pluginInfo.MaxFileSizeBytes
+				var decodedSize int64
+				contentEncoding := strings.ToLower(strings.TrimSpace(args.ContentEncoding))
+				switch contentEncoding {
+				case "", "none":
+					decodedSize = int64(len(args.FileContent))
+				case "base64":
+					dec := base64.NewDecoder(
+						base64.StdEncoding,
+						strings.NewReader(args.FileContent),
+					)
+					var countErr error
+					decodedSize, countErr = io.Copy(
+						io.Discard,
+						io.LimitReader(dec, maxFileSizeBytes+1),
+					)
+					if countErr != nil {
+						return nil, nil, fmt.Errorf("invalid base64 content: %w", countErr)
+					}
+				default:
+					return nil, nil, fmt.Errorf(
+						"unsupported content_encoding %q; expected \"none\" or \"base64\"",
+						args.ContentEncoding,
+					)
+				}
+				if decodedSize > maxFileSizeBytes {
+					return nil, nil, fmt.Errorf(
+						"file too large: decoded size %d bytes exceeds limit %d bytes",
+						decodedSize,
+						maxFileSizeBytes,
+					)
+				}
+
+				// Build the multipart body by copying directly from the source
+				// reader, avoiding an intermediate []byte allocation for the file
+				// content. The body is bounded by maxFileSizeBytes.
+				var body bytes.Buffer
+				mw := multipart.NewWriter(&body)
+
+				mimeType, mimeErr := pickImportContentType(
+					pluginInfo.MimeTypes,
+					args.FileName,
+					args.ContentType,
+				)
+				if mimeErr != nil {
+					return nil, nil, mimeErr
+				}
+				// quoteEscaper handles \, ", \r, \n per multipart spec
+				escapedFilename := strings.NewReplacer(
+					`\`, `\\`,
+					`"`, `\"`,
+					"\r", "",
+					"\n", "",
+					"\x00", "",
+				).Replace(args.FileName)
+				fh := make(textproto.MIMEHeader)
+				fh.Set(
+					"Content-Disposition",
+					fmt.Sprintf(`form-data; name="file"; filename="%s"`, escapedFilename),
+				)
+				fh.Set("Content-Type", mimeType)
+				part, err := mw.CreatePart(fh)
+				if err != nil {
+					return nil, nil, fmt.Errorf("failed to create multipart field: %w", err)
+				}
+				var src io.Reader = strings.NewReader(args.FileContent)
+				if contentEncoding == "base64" {
+					src = base64.NewDecoder(base64.StdEncoding, src)
+				}
+				if _, err = io.Copy(part, src); err != nil {
+					return nil, nil, fmt.Errorf("failed to write file content: %w", err)
+				}
+				if err = mw.Close(); err != nil {
+					return nil, nil, fmt.Errorf("failed to finalise multipart body: %w", err)
+				}
+
+				// Reuse the same APIClient config (host, scheme, auth headers, middleware)
+				// so HTTP-mode token injection and other settings work identically.
+				cfg := lr.client.GetConfig()
+				// Snapshot reference-type config fields before use. GetConfig returns a
+				// pointer to shared state. Config fields are only written during
+				// initialization (before the server starts serving requests) and are
+				// never mutated afterwards, so no synchronization is required here.
+				// The copies below are a defensive measure to avoid relying on that
+				// immutability guarantee implicitly.
+				localHeaders := make(map[string]string, len(cfg.DefaultHeader))
+				for k, v := range cfg.DefaultHeader {
+					localHeaders[k] = v
+				}
+				localMw := cfg.Middleware
+				localResponseMw := cfg.ResponseMiddleware
+				localHTTPClient := cfg.HTTPClient
+
+				importURL := fmt.Sprintf("%s://%s/api/v1/plugin/%s/%s/import",
+					cfg.Scheme, cfg.Host,
+					url.PathEscape(project), url.PathEscape(pluginInfo.Name))
+
+				httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, importURL, &body)
+				if err != nil {
+					return nil, nil, fmt.Errorf("failed to build import request: %w", err)
+				}
+				// Apply defaults first so that request-specific headers can override them.
+				for k, v := range localHeaders {
+					httpReq.Header.Set(k, v)
+				}
+				httpReq.Header.Set("Content-Type", mw.FormDataContentType())
+				httpReq.Header.Set("Accept", "application/json")
+				if localMw != nil {
+					localMw(httpReq)
+				}
+
+				httpClient := localHTTPClient
+				if httpClient == nil {
+					httpClient = &http.Client{Timeout: importHTTPClientTimeout}
+				}
+				resp, err := httpClient.Do(httpReq)
+				if err != nil {
+					return nil, nil, fmt.Errorf("import request failed: %w", err)
+				}
+				defer resp.Body.Close() //nolint:errcheck
+
+				respBody, err := io.ReadAll(resp.Body)
+				if err != nil {
+					return nil, nil, fmt.Errorf("failed to read import response: %w", err)
+				}
+				if localResponseMw != nil {
+					if mwErr := localResponseMw(resp, respBody); mwErr != nil {
+						return nil, nil, fmt.Errorf("import response middleware error: %w", mwErr)
+					}
+				}
+
+				if resp.StatusCode >= 300 {
+					return nil, nil, fmt.Errorf(
+						"import failed (HTTP %d): %s",
+						resp.StatusCode,
+						string(respBody),
+					)
+				}
+
+				return &mcp.CallToolResult{
+					Content: []mcp.Content{&mcp.TextContent{Text: string(respBody)}},
 				}, nil, nil
 			},
 		)

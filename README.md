@@ -1,4 +1,4 @@
-![Build Status](https://github.com/reportportal/reportportal-mcp-server/workflows/Build/badge.svg)
+﻿![Build Status](https://github.com/reportportal/reportportal-mcp-server/workflows/Build/badge.svg)
 [![Go Report Card](https://goreportcard.com/badge/github.com/reportportal/reportportal-mcp-server)](https://goreportcard.com/report/github.com/reportportal/goRP)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
@@ -383,6 +383,7 @@ The ReportPortal MCP server provides a comprehensive set of capabilities for int
 - Force-finish running launches
 - Delete launches
 - Run automated analysis (auto analysis, unique error analysis, quality gate) on launches
+- Import launches from files using ReportPortal import plugins (supported formats depend on the plugins installed on your ReportPortal instance — typically XML reports and ZIP archives, e.g. JUnit XML, Allure ZIP)
 
 ### Test Item Analysis
 
@@ -410,6 +411,8 @@ The ReportPortal MCP server provides a comprehensive set of capabilities for int
 | Run Unique Error Analysis  | Runs unique error analysis on a launch           | `launch_id` (required), `remove_numbers` (optional)                                                                                 |
 | Force Finish Launch        | Forces a launch to finish                        | `launch_id` (required)                                                                                                   |
 | Delete Launch              | Deletes a specific launch                        | `launch_id` (required)                                                                                                   |
+| Import Launch from File    | Imports a launch from a file using a ReportPortal import plugin. Supported file formats depend on the plugins installed on the server (e.g. JUnit XML, Allure ZIP). Available plugins and their accepted MIME types can be discovered via `GET /api/v1/plugin` (filter by `groupType: "IMPORT"`). The handler enforces a decoded upload limit of up to 50 MiB by default, and may apply a lower cap when the selected plugin advertises a smaller `details.maxFileSize`; base64-encoded uploads are measured after decoding. Imports exceeding the effective limit are rejected — split the file or pre-compress it before upload. | `plugin_name` (required), `file_name` (required, e.g. `results.xml`), `file_content` (required, raw text for text formats or base64 for binary), `content_encoding` (optional, `"none"` (default) or `"base64"`), `project` (optional) |
+
 | Get Suites by filter  | Lists test suites for a specific launch           | `launch-id` (required), `name`, `description`, `start_time_from`, `start_time_to`, `attributes`, `parent_id`, `sort`, `page`, `page-size` (all optional)                                                        |
 | Get Test Items by filter  | Lists test items for a specific launch           | `launch-id` (required), `include-before-after-hooks`, `name`, `description`, `status`, `has_retries`, `start_time_from`, `start_time_to`, `attributes`, `parent_id`, `defect_comment`, `auto_analyzed`, `ignored_in_aa`, `pattern_name`, `ticket_id`, `sort`, `page`, `page-size` (all optional)                                                        |
 | Get Logs by filter  | Lists logs for a specific test item or nested step          | `parent-item-id` (required), `log_level`, `log_content`, `logs_with_attachments`, `status`, `sort`, `page`, `page-size` (all optional)                                                        |
@@ -442,6 +445,7 @@ Here are some real-world examples of what you might ask your AI after setup (the
 - **"Run an analysis on launch ABC."** – triggers the ReportPortal's auto-analysis to summarize results and failures for launch "ABC".
 - **"Finish the running launch with ID 4321."** – forces a currently running test launch to stop.
 - **"Show me the top five 500-level errors in the last hour"** - lists the top 5 such errors from the recent test results.
+- **"Import this JUnit XML report into project 'my_project' using the junit plugin."** – uploads the provided report file to ReportPortal and creates a new launch from it.
 
 Each query above corresponds to a "tool" provided by the MCP server, but you just phrase it naturally.
 The AI will invoke the correct command behind the scenes.
@@ -786,7 +790,7 @@ Ask your AI assistant:
 "What ReportPortal tools are available?"
 ```
 
-Expected response: A list of 16 tools including launches, test items, analysis tools, etc.
+Expected response: A list of 17 tools including launches, test items, analysis tools, etc.
 
 **Step 2: Test Basic Query**
 
