@@ -68,10 +68,79 @@ func NewTestItemResources(
 	}
 }
 
+// resolveSavedFilterIDByName returns the numeric filter ID for the filterId query parameter
+// using GET /v1/{projectName}/filter with filter.eq.name.
+func (lr *TestItemResources) resolveSavedFilterIDByName(
+	ctx context.Context,
+	project, filterName string,
+) (string, error) {
+	page, resp, err := lr.client.UserFilterAPI.GetAllFilters(ctx, project).
+		FilterEqName(filterName).
+		Execute()
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", utils.ExtractResponseError(err, resp), err)
+	}
+	content := page.GetContent()
+	if len(content) == 0 {
+		return "", fmt.Errorf("no saved filter found with name %q", filterName)
+	}
+	return strconv.FormatInt(content[0].GetId(), 10), nil
+}
+
+// isAllDecimalDigits reports whether s is non-empty and contains only ASCII digits (saved filter IDs are numeric).
+func isAllDecimalDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// resolveFilterIDForProvider returns the value for the filterId query parameter when using providerType=filter.
+// All-decimal strings are treated as saved filter IDs and passed through; any other non-empty string is resolved
+// as a saved filter name via resolveSavedFilterIDByName.
+func (lr *TestItemResources) resolveFilterIDForProvider(
+	ctx context.Context,
+	project, filterIDOrName string,
+) (filterID string, err error) {
+	trimmed := strings.TrimSpace(filterIDOrName)
+	if trimmed == "" {
+		return "", fmt.Errorf("filter-id is empty")
+	}
+	if isAllDecimalDigits(trimmed) {
+		slog.Debug(
+			"filter-id is numeric; using as saved filter ID",
+			"filterId",
+			trimmed,
+			"project",
+			project,
+		)
+		return trimmed, nil
+	}
+	id, err := lr.resolveSavedFilterIDByName(ctx, project, trimmed)
+	if err != nil {
+		return "", err
+	}
+	slog.Debug(
+		"resolved filter-id from saved filter name",
+		"filterName",
+		trimmed,
+		"filterId",
+		id,
+		"project",
+		project,
+	)
+	return id, nil
+}
+
 // GetTestItemsByFilterArgs holds filter and pagination params for get_test_items_by_filter.
 type GetTestItemsByFilterArgs struct {
 	Project                     string `json:"project"`
-	LaunchID                    uint32 `json:"launch-id"`
+	LaunchID                    int32  `json:"launch-id"`
 	Page                        uint   `json:"page"`
 	PageSize                    uint   `json:"page-size"`
 	PageSort                    string `json:"page-sort"`
@@ -90,6 +159,9 @@ type GetTestItemsByFilterArgs struct {
 	FilterAnyPatternName        string `json:"filter-any-patternName"`
 	FilterEqAutoAnalyzed        *bool  `json:"filter-eq-autoAnalyzed"`
 	IncludeBeforeAfterHooks     *bool  `json:"include-before-after-hooks"`
+	FilterAnyCompositeAttribute string `json:"filter-any-compositeAttribute"`
+	FilterName                  string `json:"filter-name"`
+	LaunchesLimit               uint32 `json:"launches-limit"`
 }
 
 // toolGetTestItemsByFilter creates a tool to list test items for a specific launch.
@@ -98,9 +170,19 @@ func (lr *TestItemResources) toolGetTestItemsByFilter() (*mcp.Tool, ToolHandler[
 
 	// Required parameters
 	properties["project"] = lr.projectSchema()
+
+	// Conditionally required parameters
 	properties["launch-id"] = &jsonschema.Schema{
-		Type:        "integer",
-		Description: "Items with specific Launch ID, this is a required parameter",
+		Type: "integer",
+		Description: "Maps to filter.eq.launchId. When set, providerType is launch. " +
+			"Conditionally required if filter-name is not provided. " +
+			"Must be non-negative; when querying by launch, use a positive ReportPortal launch ID (omit or 0 when using filter-name only).",
+		Minimum: openapi.PtrFloat64(0),
+	}
+	properties["filter-name"] = &jsonschema.Schema{
+		Type: "string",
+		Description: "Maps to filterId (numeric saved filter ID, e.g. 197496). When set, providerType is filter. " +
+			"Conditionally required if launch-id is not provided.",
 	}
 
 	// Add pagination parameters
@@ -173,14 +255,23 @@ func (lr *TestItemResources) toolGetTestItemsByFilter() (*mcp.Tool, ToolHandler[
 		Description: "Include all Before/After hook item types (BEFORE_SUITE, BEFORE_GROUPS, BEFORE_CLASS, BEFORE_TEST, TEST, BEFORE_METHOD, AFTER_METHOD, AFTER_TEST, AFTER_CLASS, AFTER_GROUPS, AFTER_SUITE, STEP) together with STEP items. Default: false (only STEP items)",
 		Default:     mustMarshalJSON(false),
 	}
+	properties["filter-any-compositeAttribute"] = &jsonschema.Schema{
+		Type:        "string",
+		Description: "Maps to filter.any.compositeAttribute. Format: attribute1Key:attribute1Value,attribute2Key:attribute2Value, attribute3Value, e.g. demo,platform:ios,build:1.2.3.",
+	}
+	properties["launches-limit"] = &jsonschema.Schema{
+		Type:        "integer",
+		Description: "Maps to launchesLimit when providerType is filter. Ignored for providerType launch. Default: 600 if omitted.",
+		Default:     mustMarshalJSON(utils.DefaultLaunchesLimitForFilterProvider),
+	}
 
 	return &mcp.Tool{
 			Name:        "get_test_items_by_filter",
-			Description: "Get list of test items for a specific launch ID with optional filters",
+			Description: "Get list of test items with optional filters, using a launch (filter.eq.launchId) or saved filter (filter.eq.name). Either launch-id or filter-name must be provided.",
 			InputSchema: &jsonschema.Schema{
 				Type:       "object",
 				Properties: properties,
-				Required:   []string{"project", "launch-id"},
+				Required:   []string{"project"},
 			},
 		}, utils.WithAnalytics(lr.analytics, "get_test_items_by_filter", func(ctx context.Context, request *mcp.CallToolRequest, args GetTestItemsByFilterArgs) (*mcp.CallToolResult, any, error) {
 			slog.Debug("START PROCESSING")
@@ -189,21 +280,53 @@ func (lr *TestItemResources) toolGetTestItemsByFilter() (*mcp.Tool, ToolHandler[
 				return nil, nil, err
 			}
 
-			if args.LaunchID == 0 {
-				return nil, nil, fmt.Errorf("launch-id is required")
+			if args.LaunchID == 0 && strings.TrimSpace(args.FilterName) == "" {
+				return nil, nil, fmt.Errorf(
+					"either launch-id or filter-name is required",
+				)
+			} else if args.LaunchID != 0 && strings.TrimSpace(args.FilterName) != "" {
+				return nil, nil, fmt.Errorf(
+					"provide either launch-id or filter-name, not both",
+				)
+			}
+			if args.LaunchID < 0 {
+				return nil, nil, fmt.Errorf("launch-id must be non-negative, got %d", args.LaunchID)
 			}
 
 			filterInType := utils.DefaultFilterInType
 			if args.IncludeBeforeAfterHooks != nil && *args.IncludeBeforeAfterHooks {
 				filterInType = utils.AllFilterInTypes
 			}
+
 			urlValues := url.Values{
-				"providerType":          {utils.DefaultProviderType},
 				"filter.eq.hasStats":    {utils.DefaultFilterEqHasStats},
 				"filter.eq.hasChildren": {utils.DefaultFilterEqHasChildren},
 				"filter.in.type":        {filterInType},
 			}
-			urlValues.Add("launchId", strconv.FormatUint(uint64(args.LaunchID), 10))
+			if args.FilterAnyCompositeAttribute != "" {
+				urlValues.Add("filter.any.compositeAttribute", args.FilterAnyCompositeAttribute)
+			}
+
+			providerType := utils.DefaultProviderType
+			var resolvedFilterID string
+			if strings.TrimSpace(args.FilterName) != "" {
+				providerType = utils.FilterProviderType
+				resolvedFilterID, err = lr.resolveFilterIDForProvider(ctx, project, args.FilterName)
+				if err != nil {
+					return nil, nil, err
+				}
+				urlValues.Add("filterId", resolvedFilterID)
+				launchesLimit := args.LaunchesLimit
+				if launchesLimit == 0 {
+					launchesLimit = utils.DefaultLaunchesLimitForFilterProvider
+				}
+				urlValues.Add("launchesLimit", strconv.FormatUint(uint64(launchesLimit), 10))
+			} else if args.LaunchID != 0 {
+				// Launch provider expects top-level query param launchId (same as get_test_suites_by_filter); Params() only adds params[launchId].
+				urlValues.Add("launchId", strconv.FormatInt(int64(args.LaunchID), 10))
+			}
+
+			urlValues.Add("providerType", providerType)
 
 			// Add optional filters to urlValues if they have values
 			if args.FilterCntName != "" {
@@ -254,8 +377,9 @@ func (lr *TestItemResources) toolGetTestItemsByFilter() (*mcp.Tool, ToolHandler[
 
 			ctxWithParams := utils.WithQueryParams(ctx, urlValues)
 			// Prepare "requiredUrlParams" for the API request because the ReportPortal API v2 expects them in a specific format
-			requiredUrlParams := map[string]string{
-				"launchId": strconv.FormatUint(uint64(args.LaunchID), 10),
+			requiredUrlParams := map[string]string{}
+			if strings.TrimSpace(args.FilterName) == "" {
+				requiredUrlParams["launchId"] = strconv.FormatInt(int64(args.LaunchID), 10)
 			}
 			// Build the API request with filters
 			apiRequest := lr.client.TestItemAPI.GetTestItemsV2(ctxWithParams, project).
