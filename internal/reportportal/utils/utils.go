@@ -23,12 +23,16 @@ const (
 	DefaultSortingForSuites    = "startTime,ASC"         // default sorting order for suites
 	DefaultSortingForLogs      = "logTime,ASC"           // default sorting order for logs
 	DefaultProviderType        = "launch"                // default provider type
+	FilterProviderType         = "filter"                // provider type when using saved filter or composite attribute filter
 	DefaultFilterEqHasChildren = "false"                 // items which don't have children
 	DefaultFilterEqHasStats    = "true"
 	DefaultFilterInType        = "STEP"
 	DefaultFilterInTypeSuites  = "SUITE,TEST"
 	AllFilterInTypes           = "BEFORE_SUITE,BEFORE_GROUPS,BEFORE_CLASS,BEFORE_TEST,TEST,BEFORE_METHOD,STEP,AFTER_METHOD,AFTER_TEST,AFTER_CLASS,AFTER_GROUPS,AFTER_SUITE"
 	DefaultItemLogLevel        = "TRACE" // Default log level for test item logs
+	// defaultLaunchesLimitForFilterProvider is the launchesLimit query value when providerType is filter
+	// and launches-limit is omitted or zero (matches JSON schema default).
+	DefaultLaunchesLimitForFilterProvider uint32 = 600
 )
 
 // PaginatedRequest is a generic interface for API requests that support pagination
