@@ -1090,6 +1090,7 @@ type GetTestItemsHistoryArgs struct {
 	HistoryBase                 string   `json:"type"`
 	FilterCntName               string   `json:"filter-cnt-name"`
 	FilterHasCompositeAttribute string   `json:"filter-has-compositeAttribute"`
+	FilterAnyCompositeAttribute string   `json:"filter-any-compositeAttribute"`
 	FilterCntDescription        string   `json:"filter-cnt-description"`
 	FilterBtwStartTimeFrom      string   `json:"filter-btw-startTime-from"`
 	FilterBtwStartTimeTo        string   `json:"filter-btw-startTime-to"`
@@ -1141,6 +1142,10 @@ func (lr *TestItemResources) toolGetTestItemsHistory() (*mcp.Tool, ToolHandler[G
 	properties["filter-has-compositeAttribute"] = &jsonschema.Schema{
 		Type:        "string",
 		Description: "Items that have this combination of attribute values. Format: key:value,key2:value2,value3 (no spaces)",
+	}
+	properties["filter-any-compositeAttribute"] = &jsonschema.Schema{
+		Type:        "string",
+		Description: "Maps to filter.any.compositeAttribute. Format: attribute1Key:attribute1Value,attribute2Key:attribute2Value,attribute3Value, e.g. demo,platform:ios,build:1.2.3",
 	}
 	properties["filter-cnt-description"] = &jsonschema.Schema{
 		Type:        "string",
@@ -1260,6 +1265,9 @@ func (lr *TestItemResources) toolGetTestItemsHistory() (*mcp.Tool, ToolHandler[G
 			}
 			if args.FilterHasCompositeAttribute != "" {
 				urlValues.Add("filter.has.compositeAttribute", args.FilterHasCompositeAttribute)
+			}
+			if args.FilterAnyCompositeAttribute != "" {
+				urlValues.Add("filter.any.compositeAttribute", args.FilterAnyCompositeAttribute)
 			}
 
 			filterStartTime, err := utils.ProcessStartTimeFilter(
