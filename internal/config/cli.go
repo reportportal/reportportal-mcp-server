@@ -124,7 +124,11 @@ func GetMCPMode() string {
 	// Get MCP mode from environment variable, default to stdio
 	rawMcpMode := os.Getenv("MCP_MODE")
 	mcpMode := strings.ToLower(strings.TrimSpace(rawMcpMode))
-	slog.Debug("MCP_MODE env variable is set to: " + rawMcpMode)
+	slog.Debug( //nolint:gosec // env var value passed as structured log arg, no injection risk
+		"MCP_MODE env variable is set to:",
+		"value",
+		rawMcpMode,
+	)
 	if mcpMode == "" {
 		mcpMode = "stdio"
 	}

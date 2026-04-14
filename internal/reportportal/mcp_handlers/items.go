@@ -597,7 +597,12 @@ func (lr *TestItemResources) toolGetTestItemAttachment() (*mcp.Tool, ToolHandler
 				return &mcp.CallToolResult{
 					Content: []mcp.Content{
 						&mcp.TextContent{
-							Text: fmt.Sprintf("Binary content (%s, %d bytes)\nBase64: %s", contentType, len(rawBody), base64.StdEncoding.EncodeToString(rawBody)),
+							Text: fmt.Sprintf(
+								"Binary content (%s, %d bytes)\nBase64: %s",
+								contentType,
+								len(rawBody),
+								base64.StdEncoding.EncodeToString(rawBody),
+							),
 						},
 					},
 				}, nil, nil

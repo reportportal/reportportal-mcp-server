@@ -1,7 +1,7 @@
 ARG APP_VERSION="develop"
 ARG VERSION_PKG="github.com/reportportal/reportportal-mcp-server/internal/config"
 
-FROM golang:1.24.4 AS build
+FROM golang:1.25.0 AS build
 # allow this step access to build arg
 ARG APP_VERSION
 ARG VERSION_PKG

@@ -1,6 +1,6 @@
 # Dockerfile
 
-FROM golang:1.24.4 AS builder
+FROM golang:1.25.0 AS builder
 
 # allow this step access to build arg
 ARG VERSION

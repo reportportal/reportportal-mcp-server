@@ -408,7 +408,10 @@ func normalizeContentText(obj interface{}) {
 								// If it's valid JSON, normalize it and update
 								normalized, err := json.Marshal(textJSON)
 								if err != nil {
-									fmt.Printf("Warning: failed to marshal normalized JSON content: %v\n", err)
+									fmt.Printf(
+										"Warning: failed to marshal normalized JSON content: %v\n",
+										err,
+									)
 								} else {
 									contentItem["text"] = string(normalized)
 								}
@@ -545,7 +548,11 @@ func verifyTestCase(
 	}
 
 	// Validate response against expected response
-	if err := validateResponse(&mcpResp, resp.StatusCode, &testCase.LLMClientMock.ExpectedResponse); err != nil {
+	if err := validateResponse(
+		&mcpResp,
+		resp.StatusCode,
+		&testCase.LLMClientMock.ExpectedResponse,
+	); err != nil {
 		return false, fmt.Errorf("response validation failed: %w", err)
 	}
 
