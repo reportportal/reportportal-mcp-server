@@ -99,7 +99,7 @@ func (m *ReportPortalMockServer) handleRequest(w http.ResponseWriter, r *http.Re
 	slog.Debug("Requesting pairs", "pairs", m.requestPairs)
 	var matchedPair *testdata.RequestResponsePair
 	for i, pair := range m.requestPairs {
-		slog.Debug(
+		slog.Debug( //nolint:gosec // structured log with literal message; r.Method/r.URL.Path are value args only
 			"Trying to match request",
 			"pairIndex",
 			i,
@@ -154,7 +154,7 @@ func (m *ReportPortalMockServer) handleRequest(w http.ResponseWriter, r *http.Re
 	}
 
 	// No matching request found
-	slog.Warn(
+	slog.Warn( //nolint:gosec // structured log with literal message; r.Method/r.URL.Path are value args only
 		"No matching request found",
 		"method",
 		r.Method,
@@ -212,14 +212,26 @@ func (m *ReportPortalMockServer) matchesRequest(
 ) bool {
 	// Check HTTP method
 	if !strings.EqualFold(expected.Method, r.Method) {
-		slog.Debug("Method mismatch", "expected", expected.Method, "got", r.Method)
+		slog.Debug( //nolint:gosec // structured log with literal message; values are structured args only
+			"Method mismatch",
+			"expected",
+			expected.Method,
+			"got",
+			r.Method,
+		)
 		return false
 	}
 
 	// Check URL path
 	expectedPath := m.buildPath(expected.URL)
 	if expectedPath != r.URL.Path {
-		slog.Debug("Path mismatch", "expected", expectedPath, "got", r.URL.Path)
+		slog.Debug( //nolint:gosec // structured log with literal message; values are structured args only
+			"Path mismatch",
+			"expected",
+			expectedPath,
+			"got",
+			r.URL.Path,
+		) //nolint:gosec // structured log with literal message; values are structured args only
 		return false
 	}
 
@@ -312,7 +324,7 @@ func (m *ReportPortalMockServer) matchesQueryParams(
 			}
 		}
 		if !found {
-			slog.Debug(
+			slog.Debug( //nolint:gosec // structured log with literal message; values are structured args only
 				"Query parameter value mismatch",
 				"key",
 				param.Key,
@@ -343,7 +355,7 @@ func (m *ReportPortalMockServer) matchesHeaders(
 		}
 		value := r.Header.Get(header.Key)
 		if value != header.Value {
-			slog.Debug(
+			slog.Debug( //nolint:gosec // structured log with literal message; values are structured args only
 				"Header mismatch",
 				"key",
 				header.Key,

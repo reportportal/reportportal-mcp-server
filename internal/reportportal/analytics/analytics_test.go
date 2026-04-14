@@ -344,7 +344,9 @@ func TestAnalyticsStop(t *testing.T) {
 		{
 			name: "valid analytics",
 			analytics: func() *Analytics {
-				ctx, cancel := context.WithCancel(context.Background())
+				ctx, cancel := context.WithCancel( //nolint:gosec // cancel is stored in the struct
+					context.Background(),
+				)
 				return &Analytics{
 					Config:   &AnalyticsConfig{},
 					stopChan: make(chan struct{}),

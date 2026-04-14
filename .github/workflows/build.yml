@@ -18,14 +18,14 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24.2' # The Go version to download (if necessary) and use.
+          go-version: '1.25.0' # The Go version to download (if necessary) and use.
       - name: Install Task
         uses: arduino/setup-task@v2
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v8
         with:
           # Required: the version of golangci-lint is required and must be specified without patch version: we always use the latest patch version.
-          version: v2.1.6
+          version: v2.11.4
           # Optional: show only new issues if it's a pull request. The default value is `false`.
           only-new-issues: false
 

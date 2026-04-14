@@ -148,7 +148,10 @@ func NewHTTPServer(
 func (hs *HTTPServer) initializeTools() error {
 	// Create ReportPortal client with empty token in HTTP mode
 	// The actual token will be injected per-request via QueryParamsMiddleware from HTTP headers
-	rpClient := gorp.NewClient(hs.config.HostURL, hs.config.FallbackRPToken)
+	rpClient := gorp.NewClient(
+		hs.config.HostURL,
+		gorp.WithApiKeyAuth(context.Background(), hs.config.FallbackRPToken),
+	)
 
 	// Use HTTP client
 	rpClient.APIClient.GetConfig().HTTPClient = hs.httpClient

@@ -52,7 +52,7 @@ func TestNewHTTPServer_WithoutRPAPIToken(t *testing.T) {
 		},
 		{
 			name: "server starts with valid RP_API_TOKEN",
-			config: HTTPServerConfig{
+			config: HTTPServerConfig{ //nolint:gosec // test UUID token, not a real credential
 				Version:               "1.0.0",
 				HostURL:               mustParseURL("https://reportportal.example.com"),
 				FallbackRPToken:       "550e8400-e29b-41d4-a716-446655440000", // Valid UUID token
@@ -82,7 +82,7 @@ func TestNewHTTPServer_WithoutRPAPIToken(t *testing.T) {
 		},
 		{
 			name: "server starts without GA4 secret",
-			config: HTTPServerConfig{
+			config: HTTPServerConfig{ //nolint:gosec // test UUID token, not a real credential
 				Version:               "1.0.0",
 				HostURL:               mustParseURL("https://reportportal.example.com"),
 				FallbackRPToken:       "550e8400-e29b-41d4-a716-446655440000",
@@ -198,7 +198,7 @@ func TestCreateHTTPServerWithMiddleware_WithoutRPAPIToken(t *testing.T) {
 		},
 		{
 			name: "server with middleware starts with valid token",
-			config: HTTPServerConfig{
+			config: HTTPServerConfig{ //nolint:gosec // test UUID token, not a real credential
 				Version:               "1.0.0",
 				HostURL:               mustParseURL("https://reportportal.example.com"),
 				FallbackRPToken:       "550e8400-e29b-41d4-a716-446655440000",

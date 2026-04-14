@@ -46,7 +46,11 @@ func TestListLaunchesTool(t *testing.T) {
 
 	// Create launch resources with mocked RP client
 	serverURL, _ := url.Parse(mockServer.URL)
-	launchTools := NewLaunchResources(gorp.NewClient(serverURL, ""), nil, "")
+	launchTools := NewLaunchResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(ctx, "")),
+		nil,
+		"",
+	)
 
 	// Get the tool and handler
 	_, handler := launchTools.toolGetLaunches()
@@ -95,7 +99,11 @@ func TestGetLaunchByIdTool(t *testing.T) {
 
 	// Create launch resources with mocked RP client
 	serverURL, _ := url.Parse(mockServer.URL)
-	launchTools := NewLaunchResources(gorp.NewClient(serverURL, ""), nil, "")
+	launchTools := NewLaunchResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(ctx, "")),
+		nil,
+		"",
+	)
 
 	// Get the tool and handler
 	_, handler := launchTools.toolGetLaunchById()
@@ -149,7 +157,11 @@ func TestGetLaunchByIdTool_NotFound(t *testing.T) {
 
 	// Create launch resources with mocked RP client
 	serverURL, _ := url.Parse(mockServer.URL)
-	launchTools := NewLaunchResources(gorp.NewClient(serverURL, ""), nil, "")
+	launchTools := NewLaunchResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(ctx, "")),
+		nil,
+		"",
+	)
 
 	// Get the tool and handler
 	_, handler := launchTools.toolGetLaunchById()
@@ -201,7 +213,11 @@ func TestRunAutoAnalysisTool(t *testing.T) {
 
 	// Create launch resources with mocked RP client
 	serverURL, _ := url.Parse(mockServer.URL)
-	launchTools := NewLaunchResources(gorp.NewClient(serverURL, ""), nil, "")
+	launchTools := NewLaunchResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(ctx, "")),
+		nil,
+		"",
+	)
 
 	// Get the tool and handler
 	tool, handler := launchTools.toolRunAutoAnalysis()

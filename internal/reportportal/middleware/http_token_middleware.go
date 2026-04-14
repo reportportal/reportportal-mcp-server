@@ -18,15 +18,25 @@ func HTTPTokenMiddleware(next http.Handler) http.Handler {
 			// Add token to request context for use by MCP handlers
 			r = r.WithContext(utils.WithTokenInContext(r.Context(), rpToken))
 
-			slog.Debug("Extracted RP API token from HTTP request",
-				"source", "http_header",
-				"method", r.Method,
-				"path", r.URL.Path)
+			slog.Debug( //nolint:gosec // structured log with literal message string; r.Method/r.URL.Path are value args only
+				"Extracted RP API token from HTTP request",
+				"source",
+				"http_header",
+				"method",
+				r.Method,
+				"path",
+				r.URL.Path,
+			)
 		} else {
-			slog.Debug("No RP API token found in HTTP request headers",
-				"method", r.Method,
-				"path", r.URL.Path,
-				"checked_headers", []string{"Authorization"})
+			slog.Debug( //nolint:gosec // structured log with literal message string; r.Method/r.URL.Path are value args only
+				"No RP API token found in HTTP request headers",
+				"method",
+				r.Method,
+				"path",
+				r.URL.Path,
+				"checked_headers",
+				[]string{"Authorization"},
+			)
 		}
 
 		// Extract project parameter from request headers
@@ -36,16 +46,27 @@ func HTTPTokenMiddleware(next http.Handler) http.Handler {
 			// Add project to request context for use by MCP handlers
 			r = r.WithContext(utils.WithProjectInContext(r.Context(), rpProject))
 
-			slog.Debug("Extracted RP project parameter from HTTP request",
-				"source", "http_header",
-				"method", r.Method,
-				"path", r.URL.Path,
-				"project", rpProject)
+			slog.Debug( //nolint:gosec // structured log with literal message; r.Method/r.URL.Path are value args only
+				"Extracted RP project parameter from HTTP request",
+				"source",
+				"http_header",
+				"method",
+				r.Method,
+				"path",
+				r.URL.Path,
+				"project",
+				rpProject,
+			)
 		} else {
-			slog.Debug("No RP project parameter found in HTTP request headers",
-				"method", r.Method,
-				"path", r.URL.Path,
-				"checked_headers", []string{"X-Project"})
+			slog.Debug( //nolint:gosec // structured log with literal message; r.Method/r.URL.Path are value args only
+				"No RP project parameter found in HTTP request headers",
+				"method",
+				r.Method,
+				"path",
+				r.URL.Path,
+				"checked_headers",
+				[]string{"X-Project"},
+			)
 		}
 
 		// Continue to next handler
@@ -83,9 +104,13 @@ func extractRPTokenFromRequest(r *http.Request) string {
 func extractRPProjectFromRequest(r *http.Request) string {
 	project := strings.TrimSpace(r.Header.Get("X-Project"))
 	if project != "" {
-		slog.Debug("Valid RP project parameter extracted from request header",
-			"source", "X-Project",
-			"project", project)
+		slog.Debug( //nolint:gosec // structured log with literal message; project is a value arg only
+			"Valid RP project parameter extracted from request header",
+			"source",
+			"X-Project",
+			"project",
+			project,
+		)
 		return project
 	}
 	return ""

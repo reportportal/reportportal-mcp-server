@@ -41,7 +41,7 @@ func NewServer(
 	)
 
 	// Create a new ReportPortal client
-	rpClient := gorp.NewClient(hostUrl, token)
+	rpClient := gorp.NewClient(hostUrl, gorp.WithApiKeyAuth(context.Background(), token))
 	rpClient.APIClient.GetConfig().Middleware = middleware.QueryParamsMiddleware
 
 	// Initialize analytics (disabled if analyticsOff is true)

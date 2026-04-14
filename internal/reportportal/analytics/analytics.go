@@ -277,7 +277,11 @@ func NewAnalytics(
 	} else if userID != "" {
 		// Use provided user ID if available
 		analyticsUserID = HashToken(userID)
-		slog.Debug("Using custom user ID for analytics", "user_id_hash", truncateForLog(analyticsUserID, 16))
+		slog.Debug(
+			"Using custom user ID for analytics",
+			"user_id_hash",
+			truncateForLog(analyticsUserID, 16),
+		)
 	} else {
 		// Generate a generic identifier for anonymous tracking
 		analyticsUserID = anonymousUserIDHash
@@ -294,7 +298,9 @@ func NewAnalytics(
 		Timeout: 10 * time.Second,
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel( //nolint:gosec // cancel is stored in the struct and called via analytics.cancel
+		context.Background(),
+	)
 
 	analytics := &Analytics{
 		Config:     config,
@@ -459,8 +465,12 @@ func GetAnalyticArg() string {
 	seed := uint32(0x1337)
 	p1Bytes := []byte{107, 110, 74, 83}
 	for i := range p1Bytes {
-		p1Bytes[i] ^= byte(seed >> (i * 8))
-		p1Bytes[i] ^= byte(seed >> (i * 8))
+		p1Bytes[i] ^= byte( //nolint:gosec // intentional XOR obfuscation, uint32->byte overflow is expected
+			seed >> (i * 8),
+		)
+		p1Bytes[i] ^= byte( //nolint:gosec // intentional XOR obfuscation, uint32->byte overflow is expected
+			seed >> (i * 8),
+		)
 	}
 	prefix1 := string(p1Bytes)
 	value := string(rune(95))

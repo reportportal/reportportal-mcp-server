@@ -17,12 +17,12 @@ func TestIsUUIDFormat(t *testing.T) {
 		token    string
 		expected bool
 	}{
-		{
+		{ //nolint:gosec // test UUID, not a real credential
 			name:     "valid UUID v4",
 			token:    "014b329b-a882-4c2d-9988-c2f6179a421b",
 			expected: true,
 		},
-		{
+		{ //nolint:gosec // test UUID, not a real credential
 			name:     "valid UUID with uppercase",
 			token:    "014B329B-A882-4C2D-9988-C2F6179A421B",
 			expected: true,
@@ -79,7 +79,7 @@ func TestValidateRPToken(t *testing.T) {
 		token    string
 		expected bool
 	}{
-		{
+		{ //nolint:gosec // test UUID, not a real credential
 			name:     "valid UUID should pass",
 			token:    "014b329b-a882-4c2d-9988-c2f6179a421b",
 			expected: true,

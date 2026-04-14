@@ -1,6 +1,7 @@
 package mcphandlers
 
 import (
+	"context"
 	"net/url"
 	"testing"
 
@@ -172,7 +173,7 @@ func contains(s, substr string) bool {
 func TestUpdateDefectTypeForTestItemsTool(t *testing.T) {
 	serverURL, _ := url.Parse("http://localhost:8080")
 	tool, _ := NewTestItemResources(
-		gorp.NewClient(serverURL, ""),
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
 		nil,
 		"",
 	).toolUpdateDefectTypeForTestItems()
