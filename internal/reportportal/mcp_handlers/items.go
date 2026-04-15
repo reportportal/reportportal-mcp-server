@@ -162,6 +162,9 @@ type GetTestItemsByFilterArgs struct {
 	FilterAnyCompositeAttribute string `json:"filter-any-compositeAttribute"`
 	FilterName                  string `json:"filter-name"`
 	LaunchesLimit               uint32 `json:"launches-limit"`
+	// FilterEqDefectType maps to filter.eq.issueType (issue locator). Accepts built-in names
+	// (e.g. Product Bug, TO_INVESTIGATE) or a project-specific locator from get_project_defect_types.
+	FilterEqDefectType 			string `json:"filter-eq-defect-type"`
 }
 
 // toolGetTestItemsByFilter creates a tool to list test items for a specific launch.
@@ -264,10 +267,17 @@ func (lr *TestItemResources) toolGetTestItemsByFilter() (*mcp.Tool, ToolHandler[
 		Description: "Maps to launchesLimit when providerType is filter. Ignored for providerType launch. Default: 600 if omitted.",
 		Default:     mustMarshalJSON(utils.DefaultLaunchesLimitForFilterProvider),
 	}
+	properties["filter-eq-defect-type"] = &jsonschema.Schema{
+		Type: "string",
+		Description: "Restricts results to items whose issue/defect matches this type. Maps to filter.eq.issueType (issue locator). " +
+			"Built-in names (case-insensitive): To Investigate, Product Bug, Automation Bug, System Issue, No Defect. " +
+			"Same mapping via type refs: TO_INVESTIGATE, PRODUCT_BUG, AUTOMATION_BUG, SYSTEM_ISSUE, NO_DEFECT (default locators ti001, pb001, ab001, si001, nd001). " +
+			"Custom project subtypes: pass the locator from get_project_defect_types verbatim.",
+	}
 
 	return &mcp.Tool{
 			Name:        "get_test_items_by_filter",
-			Description: "Get list of test items with optional filters, using a launch (filter.eq.launchId) or saved filter (filter.eq.name). Either launch-id or filter-name must be provided.",
+			Description: "Get list of test items with optional filters, using a launch (filter.eq.launchId) or saved filter (filter.eq.name). Either launch-id or filter-name must be provided. Optional filter-eq-defect-type narrows items by defect/issue type.",
 			InputSchema: &jsonschema.Schema{
 				Type:       "object",
 				Properties: properties,
@@ -407,6 +417,10 @@ func (lr *TestItemResources) toolGetTestItemsByFilter() (*mcp.Tool, ToolHandler[
 			}
 			if args.FilterEqAutoAnalyzed != nil {
 				apiRequest = apiRequest.FilterEqAutoAnalyzed(*args.FilterEqAutoAnalyzed)
+			}
+			if defectType := strings.TrimSpace(args.FilterEqDefectType); defectType != "" {
+				issueLocator := utils.ResolveDefectTypeToIssueTypeLocator(defectType)
+				apiRequest = apiRequest.FilterEqIssueType(issueLocator)
 			}
 
 			// Execute the request
