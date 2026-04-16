@@ -85,6 +85,7 @@ func RegisterLaunchTools(
 	registerTool(s, launches.toolGetLaunches)
 	registerTool(s, launches.toolGetLastLaunchByName)
 	registerTool(s, launches.toolGetLaunchById)
+	registerTool(s, launches.toolUpdateLaunch)
 	registerTool(s, launches.toolForceFinishLaunch)
 	registerTool(s, launches.toolDeleteLaunch)
 	registerTool(s, launches.toolRunAutoAnalysis)
@@ -803,6 +804,126 @@ func (lr *LaunchResources) toolUniqueErrorAnalysis() (*mcp.Tool, ToolHandler[Uni
 						LaunchId:      int64(args.LaunchID),
 						RemoveNumbers: openapi.PtrBool(args.RemoveNumbers),
 					}).
+					Execute()
+				if err != nil {
+					return nil, nil, fmt.Errorf(
+						"%s: %w",
+						utils.ExtractResponseError(err, response),
+						err,
+					)
+				}
+
+				return &mcp.CallToolResult{
+					Content: []mcp.Content{&mcp.TextContent{Text: rs.GetMessage()}},
+				}, nil, nil
+			},
+		)
+}
+
+// UpdateLaunchAttribute represents a single key/value attribute for a launch.
+type UpdateLaunchAttribute struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+// UpdateLaunchArgs holds params for update_launch.
+type UpdateLaunchArgs struct {
+	Project     string                  `json:"project"`
+	LaunchID    uint32                  `json:"launch_id"`
+	Description *string                 `json:"description,omitempty"`
+	Attributes  []UpdateLaunchAttribute `json:"attributes,omitempty"`
+}
+
+func (lr *LaunchResources) toolUpdateLaunch() (*mcp.Tool, ToolHandler[UpdateLaunchArgs, any]) {
+	return &mcp.Tool{
+			Name:        "update_launch",
+			Description: "Update launch attributes and description in ReportPortal",
+			InputSchema: &jsonschema.Schema{
+				Type: "object",
+				Properties: map[string]*jsonschema.Schema{
+					"project": lr.projectSchema(),
+					"launch_id": {
+						Type:        "integer",
+						Description: "Launch ID",
+					},
+					"description": {
+						Type:        "string",
+						Description: "New description for the launch. Replaces the existing description.",
+					},
+					"attributes": {
+						Type:        "array",
+						Description: "List of attributes to set on the launch. Each attribute has a key (optional) and a value. Replaces all existing attributes.",
+						Items: &jsonschema.Schema{
+							Type: "object",
+							Properties: map[string]*jsonschema.Schema{
+								"key": {
+									Type:        "string",
+									Description: "Attribute key (may be empty for tag-style attributes)",
+								},
+								"value": {
+									Type:        "string",
+									Description: "Attribute value",
+								},
+							},
+							Required: []string{"value"},
+						},
+					},
+				},
+				Required: []string{"launch_id"},
+				AnyOf: []*jsonschema.Schema{
+					{Required: []string{"description"}},
+					{Required: []string{"attributes"}},
+				},
+			},
+		},
+		utils.WithAnalytics(
+			lr.analytics,
+			"update_launch",
+			func(ctx context.Context, req *mcp.CallToolRequest, args UpdateLaunchArgs) (*mcp.CallToolResult, any, error) {
+				project, err := utils.ExtractProject(ctx, args.Project)
+				if err != nil {
+					return nil, nil, err
+				}
+
+				if args.LaunchID == 0 {
+					return nil, nil, fmt.Errorf("launch_id is required")
+				}
+
+				if args.Description == nil && args.Attributes == nil {
+					return nil, nil, fmt.Errorf(
+						"at least one of description or attributes must be provided",
+					)
+				}
+
+				updateRQ := openapi.UpdateLaunchRQ{}
+				if args.Description != nil {
+					updateRQ.SetDescription(*args.Description)
+				}
+				if args.Attributes != nil {
+					attrs := make([]openapi.ItemAttributeResource, 0, len(args.Attributes))
+					for i, a := range args.Attributes {
+						if strings.TrimSpace(a.Value) == "" {
+							if trimmedKey := strings.TrimSpace(a.Key); trimmedKey != "" {
+								return nil, nil, fmt.Errorf(
+									"attribute[%d] key=%q has empty value",
+									i,
+									trimmedKey,
+								)
+							}
+							return nil, nil, fmt.Errorf("attribute[%d] has empty value", i)
+						}
+						attr := openapi.ItemAttributeResource{Value: a.Value}
+						if trimmedKey := strings.TrimSpace(a.Key); trimmedKey != "" {
+							attr.SetKey(trimmedKey)
+						}
+						attrs = append(attrs, attr)
+					}
+					updateRQ.SetAttributes(attrs)
+				}
+
+				rs, response, err := lr.client.LaunchAPI.
+					UpdateLaunch(ctx, int64(args.LaunchID), project).
+					UpdateLaunchRQ(updateRQ).
 					Execute()
 				if err != nil {
 					return nil, nil, fmt.Errorf(

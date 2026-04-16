@@ -409,6 +409,7 @@ The ReportPortal MCP server provides a comprehensive set of capabilities for int
 | Run Quality Gate          | Runs quality gate analysis on a launch           | `launch_id` (required), `project` (optional)                                          |
 | Run Auto Analysis          | Runs auto analysis on a launch                   | `launch_id` (required), `analyzer_mode` (optional), `analyzer_type` (optional), `analyzer_item_modes` (optional)                                          |
 | Run Unique Error Analysis  | Runs unique error analysis on a launch           | `launch_id` (required), `remove_numbers` (optional)                                                                                 |
+| Update Launch              | Updates the description and/or attributes of a launch | `launch_id` (required), `description` (optional, replaces existing), `attributes` (optional, array of `{key, value}` objects — replaces all existing attributes) |
 | Force Finish Launch        | Forces a launch to finish                        | `launch_id` (required)                                                                                                   |
 | Delete Launch              | Deletes a specific launch                        | `launch_id` (required)                                                                                                   |
 | Import Launch from File    | Imports a launch from a file using a ReportPortal import plugin. Supported file formats depend on the plugins installed on the server (e.g. JUnit XML, Allure ZIP). Available plugins and their accepted MIME types can be discovered via `GET /api/v1/plugin` (filter by `groupType: "IMPORT"`). The handler enforces a decoded upload limit of up to 50 MiB by default, and may apply a lower cap when the selected plugin advertises a smaller `details.maxFileSize`; base64-encoded uploads are measured after decoding. Imports exceeding the effective limit are rejected — split the file or pre-compress it before upload. | `plugin_name` (required), `file_name` (required, e.g. `results.xml`), `file_content` (required, raw text for text formats or base64 for binary), `content_encoding` (optional, `"none"` (default) or `"base64"`), `project` (optional) |
@@ -790,7 +791,7 @@ Ask your AI assistant:
 "What ReportPortal tools are available?"
 ```
 
-Expected response: A list of 17 tools including launches, test items, analysis tools, etc.
+Expected response: A list of 18 tools including launches, test items, analysis tools, etc.
 
 **Step 2: Test Basic Query**
 
