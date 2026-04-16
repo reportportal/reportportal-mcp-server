@@ -36,18 +36,5 @@ func ResolveDefectTypeToIssueTypeLocator(s string) string {
 		return IssueLocatorNoDefect
 	}
 
-	switch strings.ToLower(strings.Join(strings.Fields(trimmed), " ")) {
-	case "to investigate":
-		return IssueLocatorToInvestigate
-	case "product bug":
-		return IssueLocatorProductBug
-	case "automation bug":
-		return IssueLocatorAutomationBug
-	case "system issue":
-		return IssueLocatorSystemIssue
-	case "no defect":
-		return IssueLocatorNoDefect
-	}
-
 	return trimmed
 }

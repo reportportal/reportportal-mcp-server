@@ -30,6 +30,7 @@ func TestResolveDefectTypeToIssueTypeLocator(t *testing.T) {
 		{"ti001", "ti001"},
 		{"pb001", "pb001"},
 		{"custom_nd002", "custom_nd002"},
+		{"  custom_nd002  ", "custom_nd002"},
 	}
 	for i, tt := range tests {
 		t.Run(fmt.Sprintf("%d_%q", i, tt.in), func(t *testing.T) {
