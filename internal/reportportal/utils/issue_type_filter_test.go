@@ -5,6 +5,9 @@ import (
 	"testing"
 )
 
+// TestResolveDefectTypeToIssueTypeLocator verifies that supported defect-type
+// labels normalize to canonical issue-type locators and unknown/custom values
+// are returned as trimmed custom locators.
 func TestResolveDefectTypeToIssueTypeLocator(t *testing.T) {
 	tests := []struct {
 		in   string
