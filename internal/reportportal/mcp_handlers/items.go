@@ -162,6 +162,9 @@ type GetTestItemsByFilterArgs struct {
 	FilterAnyCompositeAttribute string `json:"filter-any-compositeAttribute"`
 	FilterName                  string `json:"filter-name"`
 	LaunchesLimit               uint32 `json:"launches-limit"`
+	// FilterEqDefectType maps to filter.eq.issueType (defect/issue type locator). Valid values
+	// come from get_project_defect_types (same locators as defect_type_id on update_defect_type_for_test_items).
+	FilterEqDefectType string `json:"filter-eq-defect-type"`
 }
 
 // toolGetTestItemsByFilter creates a tool to list test items for a specific launch.
@@ -264,10 +267,18 @@ func (lr *TestItemResources) toolGetTestItemsByFilter() (*mcp.Tool, ToolHandler[
 		Description: "Maps to launchesLimit when providerType is filter. Ignored for providerType launch. Default: 600 if omitted.",
 		Default:     mustMarshalJSON(utils.DefaultLaunchesLimitForFilterProvider),
 	}
+	properties["filter-eq-defect-type"] = &jsonschema.Schema{
+		Type: "string",
+		Description: "Filters results to test items with this defect/issue type locator (maps to filter.eq.issueType). " +
+			"Use get_project_defect_types to retrieve the valid locator values for your project " +
+			"(e.g. ti001, pb001, ab001, si001, nd001 for the built-in types, or project-specific subtypes like ab002). " +
+			"All possible values can be received from the tool get_project_defect_types. " +
+			"Example: {\"NO_DEFECT\": { \"locator\": \"nd001\" }} (where NO_DEFECT is the defect type name, nd001 is the defect type unique id)",
+	}
 
 	return &mcp.Tool{
 			Name:        "get_test_items_by_filter",
-			Description: "Get list of test items with optional filters, using a launch (filter.eq.launchId) or saved filter (filter.eq.name). Either launch-id or filter-name must be provided.",
+			Description: "Get list of test items with optional filters, using a launch (filter.eq.launchId) or saved filter (filter.eq.name). Either launch-id or filter-name must be provided. Optional filter-eq-defect-type narrows items by defect/issue type.",
 			InputSchema: &jsonschema.Schema{
 				Type:       "object",
 				Properties: properties,
@@ -407,6 +418,9 @@ func (lr *TestItemResources) toolGetTestItemsByFilter() (*mcp.Tool, ToolHandler[
 			}
 			if args.FilterEqAutoAnalyzed != nil {
 				apiRequest = apiRequest.FilterEqAutoAnalyzed(*args.FilterEqAutoAnalyzed)
+			}
+			if defectType := strings.TrimSpace(args.FilterEqDefectType); defectType != "" {
+				apiRequest = apiRequest.FilterEqIssueType(defectType)
 			}
 
 			// Execute the request

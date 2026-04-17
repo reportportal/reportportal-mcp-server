@@ -387,7 +387,7 @@ The ReportPortal MCP server provides a comprehensive set of capabilities for int
 
 ### Test Item Analysis
 
-- Get test items within by filter
+- Get test items by launch or saved filter, with optional filters (including defect/issue type)
 - Get detailed information on each test item
 - View test execution statistics and failures
 - Retrieve test logs and attachments
@@ -415,13 +415,15 @@ The ReportPortal MCP server provides a comprehensive set of capabilities for int
 | Import Launch from File    | Imports a launch from a file using a ReportPortal import plugin. Supported file formats depend on the plugins installed on the server (e.g. JUnit XML, Allure ZIP). Available plugins and their accepted MIME types can be discovered via `GET /api/v1/plugin` (filter by `groupType: "IMPORT"`). The handler enforces a decoded upload limit of up to 50 MiB by default, and may apply a lower cap when the selected plugin advertises a smaller `details.maxFileSize`; base64-encoded uploads are measured after decoding. Imports exceeding the effective limit are rejected — split the file or pre-compress it before upload. | `plugin_name` (required), `file_name` (required, e.g. `results.xml`), `file_content` (required, raw text for text formats or base64 for binary), `content_encoding` (optional, `"none"` (default) or `"base64"`), `project` (optional) |
 
 | Get Suites by filter  | Lists test suites for a specific launch           | `launch-id` (required), `name`, `description`, `start_time_from`, `start_time_to`, `attributes`, `parent_id`, `sort`, `page`, `page-size` (all optional)                                                        |
-| Get Test Items by filter  | Lists test items for a specific launch           | `launch-id` (required), `include-before-after-hooks`, `name`, `description`, `status`, `has_retries`, `start_time_from`, `start_time_to`, `attributes`, `parent_id`, `defect_comment`, `auto_analyzed`, `ignored_in_aa`, `pattern_name`, `ticket_id`, `sort`, `page`, `page-size` (all optional)                                                        |
+| Get Test Items by filter  | Lists test items for a specific launch or saved filter           | `launch-id` (required), `include-before-after-hooks`, `name`, `description`, `status`, `has_retries`, `start_time_from`, `start_time_to`, `attributes`, `parent_id`, `defect_comment`, `auto_analyzed`, `ignored_in_aa`, `pattern_name`, `ticket_id`, `filter-eq-defect-type`, `sort`, `page`, `page-size` (all optional)                                                        |
 | Get Logs by filter  | Lists logs for a specific test item or nested step          | `parent-item-id` (required), `log_level`, `log_content`, `logs_with_attachments`, `status`, `sort`, `page`, `page-size` (all optional)                                                        |
 | Get Attachment by ID        | Retrieves an attachment binary by id        | `attachment-content-id` (required)                                                                                                |
 | Get Test Item by ID        | Retrieves details of a specific test item        | `test_item_id` (required)                                                                                                |
 | Get Project Defect Types        | Retrieves available defect types for the specific project        | None                                                                                              |
 | Update defect types by item ids        | Updates defect types for multiple test items        |`test_items_ids` (required), `defect_type_id` (required), `defect_type_comment` (optional)                                                                                               |
 | Get Test Items History | Retrieves execution history of test items for a specific launch or parent suite | `filter-eq-launchId` or `filter-eq-parentId` (one required), `historyDepth`, `type`, `name`, `description`, `status`, `start_time_from`, `start_time_to`, `attributes`, `has_retries`, `defect_comment`, `auto_analyzed`, `ignored_in_aa`, `ticket_id`, `pattern_name`, `page`, `page-size`, `page-sort` (all optional) |
+
+**Note:** On **Get Test Items by filter**, optional `filter-eq-defect-type` limits results to a defect/issue type (ReportPortal `filter.eq.issueType`). Pass the defect type **locator** for your project; use **Get Project Defect Types** to list valid values (for example built-in `ti001`, `pb001`, `ab001`, `si001`, `nd001`, or project-specific subtypes such as `ab002`).
 
 ### Available Prompts
 
