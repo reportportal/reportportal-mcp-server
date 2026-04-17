@@ -162,9 +162,9 @@ type GetTestItemsByFilterArgs struct {
 	FilterAnyCompositeAttribute string `json:"filter-any-compositeAttribute"`
 	FilterName                  string `json:"filter-name"`
 	LaunchesLimit               uint32 `json:"launches-limit"`
-	// FilterEqDefectType maps to filter.eq.issueType (issue locator). Accepts built-in names
-	// (e.g. Product Bug, TO_INVESTIGATE) or a project-specific locator from get_project_defect_types.
-	FilterEqDefectType 			string `json:"filter-eq-defect-type"`
+	// FilterEqDefectType maps to filter.eq.issueType (defect/issue type locator). Valid values
+	// come from get_project_defect_types (same locators as defect_type_id on update_defect_type_for_test_items).
+	FilterEqDefectType string `json:"filter-eq-defect-type"`
 }
 
 // toolGetTestItemsByFilter creates a tool to list test items for a specific launch.
@@ -269,10 +269,11 @@ func (lr *TestItemResources) toolGetTestItemsByFilter() (*mcp.Tool, ToolHandler[
 	}
 	properties["filter-eq-defect-type"] = &jsonschema.Schema{
 		Type: "string",
-		Description: "Restricts results to items whose issue/defect matches this type. Maps to filter.eq.issueType (issue locator). " +
-			"Built-in names (case-insensitive): To Investigate, Product Bug, Automation Bug, System Issue, No Defect. " +
-			"Same mapping via type refs: TO_INVESTIGATE, PRODUCT_BUG, AUTOMATION_BUG, SYSTEM_ISSUE, NO_DEFECT (default locators ti001, pb001, ab001, si001, nd001). " +
-			"Custom project subtypes: pass the locator from get_project_defect_types verbatim.",
+		Description: "Filters results to test items with this defect/issue type locator (maps to filter.eq.issueType). " +
+			"Use get_project_defect_types to retrieve the valid locator values for your project " +
+			"(e.g. ti001, pb001, ab001, si001, nd001 for the built-in types, or project-specific subtypes like ab002). " +
+			"All possible values can be received from the tool get_project_defect_types. " +
+			"Example: {\"NO_DEFECT\": { \"locator\": \"nd001\" }} (where NO_DEFECT is the defect type name, nd001 is the defect type unique id)",
 	}
 
 	return &mcp.Tool{
@@ -419,8 +420,7 @@ func (lr *TestItemResources) toolGetTestItemsByFilter() (*mcp.Tool, ToolHandler[
 				apiRequest = apiRequest.FilterEqAutoAnalyzed(*args.FilterEqAutoAnalyzed)
 			}
 			if defectType := strings.TrimSpace(args.FilterEqDefectType); defectType != "" {
-				issueLocator := utils.ResolveDefectTypeToIssueTypeLocator(defectType)
-				apiRequest = apiRequest.FilterEqIssueType(issueLocator)
+				apiRequest = apiRequest.FilterEqIssueType(defectType)
 			}
 
 			// Execute the request
