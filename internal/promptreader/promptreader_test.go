@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -33,7 +33,7 @@ prompts:
             Focus on the following aspects:
               1. Test Execution Status: Provide a summary of the test execution status.
               2. Test Duration: Analyze the duration of the test execution.
-      - role: system
+      - role: assistant
         content:
           type: text
           text: "I'll provide a comprehensive analysis of the test results."
@@ -57,11 +57,11 @@ prompts:
 
 	t.Run("VerifyPromptMetadata", func(t *testing.T) {
 		// Check first prompt metadata
-		assert.Equal(t, "reportportal_analyze_launch", prompts[0].Prompt.GetName())
+		assert.Equal(t, "reportportal_analyze_launch", prompts[0].Prompt.Name)
 		assert.Equal(t, "Analyze ReportPortal launch", prompts[0].Prompt.Description)
 
 		// Check second prompt metadata
-		assert.Equal(t, "reportportal_summarize_errors", prompts[1].Prompt.GetName())
+		assert.Equal(t, "reportportal_summarize_errors", prompts[1].Prompt.Name)
 		assert.Equal(
 			t,
 			"Summarize errors from a ReportPortal launch",
@@ -95,18 +95,16 @@ prompts:
 	t.Run("TestTemplateRendering", func(t *testing.T) {
 		// Call the handler with test arguments
 		ctx := context.Background()
-		promptResult, err := prompts[0].Handler(ctx, mcp.GetPromptRequest{
-			Params: struct {
-				Name      string            `json:"name"`
-				Arguments map[string]string `json:"arguments,omitempty"`
-			}{
+		req := &mcp.GetPromptRequest{
+			Params: &mcp.GetPromptParams{
 				Name: "reportportal_analyze_launch",
 				Arguments: map[string]string{
 					"launch_id": "123",
 					"name":      "Test Launch",
 				},
 			},
-		})
+		}
+		promptResult, err := prompts[0].Handler(ctx, req)
 
 		require.NoError(t, err)
 		require.NotNil(t, promptResult)
@@ -131,21 +129,20 @@ prompts:
 	t.Run("TestMissingArgument", func(t *testing.T) {
 		// Call the handler with missing arguments
 		ctx := context.Background()
-		promptRes, err := prompts[0].Handler(ctx, mcp.GetPromptRequest{
-			Params: struct {
-				Name      string            `json:"name"`
-				Arguments map[string]string `json:"arguments,omitempty"`
-			}{
+		req := &mcp.GetPromptRequest{
+			Params: &mcp.GetPromptParams{
 				Name: "reportportal_analyze_launch",
 				Arguments: map[string]string{
 					"launch_id": "123",
 					// Missing "name"
 				},
 			},
-		})
-		assert.NoError(t, err)
-		_, err = json.Marshal(promptRes)
+		}
+		promptRes, err := prompts[0].Handler(ctx, req)
+		// With the official SDK, template execution fails when arguments are missing
+		// This is expected and correct behavior
 		assert.Error(t, err)
+		assert.Nil(t, promptRes)
 	})
 }
 
@@ -181,17 +178,13 @@ prompts:
 
 	// Get prompt result
 	ctx := context.Background()
-	promptResult, err := prompts[0].Handler(ctx, mcp.GetPromptRequest{
-		Params: struct {
-			Name      string            `json:"name"`
-			Arguments map[string]string `json:"arguments,omitempty"`
-		}{
-			Name: "reportportal_analyze_launch",
-			Arguments: map[string]string{
-				"launch_id": "123",
-			},
+	req := &mcp.GetPromptRequest{
+		Params: &mcp.GetPromptParams{
+			Name:      "reportportal_analyze_launch",
+			Arguments: map[string]string{"launch_id": "123"},
 		},
-	})
+	}
+	promptResult, err := prompts[0].Handler(ctx, req)
 	require.NoError(t, err)
 
 	// Test JSON serialization of the result
@@ -234,6 +227,36 @@ prompts:
 	assert.Error(t, err)
 }
 
+func TestInvalidRole(t *testing.T) {
+	yamlContent := []byte(`
+prompts:
+  - name: invalid_role_prompt
+    description: "Prompt with an invalid role"
+    arguments: []
+    messages:
+      - role: system
+        content:
+          type: text
+          text: "This role is not allowed by MCP"
+`)
+
+	prompts, err := promptreader.LoadPromptsFromYAML(yamlContent)
+	require.NoError(t, err)
+	require.Len(t, prompts, 1)
+
+	ctx := context.Background()
+	req := &mcp.GetPromptRequest{
+		Params: &mcp.GetPromptParams{
+			Name:      "invalid_role_prompt",
+			Arguments: map[string]string{},
+		},
+	}
+	_, err = prompts[0].Handler(ctx, req)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid role")
+	assert.Contains(t, err.Error(), "system")
+}
+
 func TestMultipleUserMessages(t *testing.T) {
 	// Test with multiple user messages
 	yamlContent := []byte(`
@@ -249,7 +272,7 @@ prompts:
         content:
           type: text
           text: "First user message: {{.test_arg}}"
-      - role: system
+      - role: assistant
         content:
           type: text
           text: "System response"
@@ -264,17 +287,13 @@ prompts:
 	require.Len(t, prompts, 1)
 
 	ctx := context.Background()
-	promptResult, err := prompts[0].Handler(ctx, mcp.GetPromptRequest{
-		Params: struct {
-			Name      string            `json:"name"`
-			Arguments map[string]string `json:"arguments,omitempty"`
-		}{
-			Name: "multi_user_messages",
-			Arguments: map[string]string{
-				"test_arg": "test value",
-			},
+	req := &mcp.GetPromptRequest{
+		Params: &mcp.GetPromptParams{
+			Name:      "multi_user_messages",
+			Arguments: map[string]string{"test_arg": "test value"},
 		},
-	})
+	}
+	promptResult, err := prompts[0].Handler(ctx, req)
 	require.NoError(t, err)
 
 	// Verify all messages were processed
@@ -282,6 +301,6 @@ prompts:
 
 	// For each message, check the role
 	assert.Equal(t, "user", string(promptResult.Messages[0].Role))
-	assert.Equal(t, "system", string(promptResult.Messages[1].Role))
+	assert.Equal(t, "assistant", string(promptResult.Messages[1].Role))
 	assert.Equal(t, "user", string(promptResult.Messages[2].Role))
 }

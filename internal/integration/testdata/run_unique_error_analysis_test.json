@@ -1,0 +1,96 @@
+{
+  "name": "run_unique_error_analysis Test",
+  "description": "Integration test for MCP tool \"run_unique_error_analysis\"",
+  "reportPortalMock": {
+    "requestResponsePairs": [
+      {
+        "request": {
+          "method": "POST",
+          "header": [
+            {
+              "key": "Authorization",
+              "value": "Bearer test-token-1234567"
+            }
+          ],
+          "body": {
+            "mode": "raw",
+            "raw": "{\"launchId\":9683161,\"removeNumbers\":false}\n"
+          },
+          "url": {
+            "raw": "http://localhost/api/v1/test-project/launch/cluster",
+            "protocol": "http",
+            "host": [
+              "localhost"
+            ],
+            "path": [
+              "api",
+              "v1",
+              "test-project",
+              "launch",
+              "cluster"
+            ]
+          }
+        },
+        "response": {
+          "name": "",
+          "originalRequest": {
+            "method": "",
+            "url": {}
+          },
+          "code": 200,
+          "header": [
+            {
+              "key": "Content-Type",
+              "value": "application/json"
+            }
+          ],
+          "body": "{\"message\":\"Clusters generation for launch with ID='9683161' started.\"}"
+        }
+      }
+    ]
+  },
+  "llmClientMock": {
+    "request": {
+      "method": "POST",
+      "header": [
+        {
+          "key": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "key": "Authorization",
+          "value": "Bearer test-token-1234567"
+        },
+        {
+          "key": "X-Project",
+          "value": "test-project"
+        }
+      ],
+      "body": {
+        "mode": "raw",
+        "raw": "{\n  \"id\": 1,\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"arguments\": {\n      \"launch_id\": 9683161,\n      \"remove_numbers\": false\n    },\n    \"name\": \"run_unique_error_analysis\"\n  }\n}"
+      },
+      "url": {
+        "raw": "/mcp",
+        "path": [
+          "mcp"
+        ]
+      }
+    },
+    "expectedResponse": {
+      "name": "MCP run_unique_error_analysis Response",
+      "originalRequest": {
+        "method": "",
+        "url": {}
+      },
+      "code": 200,
+      "header": [
+        {
+          "key": "Content-Type",
+          "value": "text/event-stream"
+        }
+      ],
+      "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"Clusters generation for launch with ID='9683161' started.\"}]}}\n"
+    }
+  }
+}

@@ -17,7 +17,7 @@ import (
 
 	"github.com/fatih/color"
 
-	"github.com/reportportal/reportportal-mcp-server/internal/testdata"
+	"github.com/reportportal/reportportal-mcp-server/internal/integration/testdata"
 )
 
 const (
@@ -76,7 +76,7 @@ var (
 	mcpServerURL = flag.String("url", "http://localhost:8080/mcp", "MCP server URL")
 	testDataDir  = flag.String(
 		"dir",
-		"testdata",
+		"internal/integration/testdata",
 		"Test data directory (searched recursively for .json files)",
 	)
 	verbose = flag.Bool("v", false, "Verbose output")
@@ -408,7 +408,10 @@ func normalizeContentText(obj interface{}) {
 								// If it's valid JSON, normalize it and update
 								normalized, err := json.Marshal(textJSON)
 								if err != nil {
-									fmt.Printf("Warning: failed to marshal normalized JSON content: %v\n", err)
+									fmt.Printf(
+										"Warning: failed to marshal normalized JSON content: %v\n",
+										err,
+									)
 								} else {
 									contentItem["text"] = string(normalized)
 								}
@@ -545,7 +548,11 @@ func verifyTestCase(
 	}
 
 	// Validate response against expected response
-	if err := validateResponse(&mcpResp, resp.StatusCode, &testCase.LLMClientMock.ExpectedResponse); err != nil {
+	if err := validateResponse(
+		&mcpResp,
+		resp.StatusCode,
+		&testCase.LLMClientMock.ExpectedResponse,
+	); err != nil {
 		return false, fmt.Errorf("response validation failed: %w", err)
 	}
 

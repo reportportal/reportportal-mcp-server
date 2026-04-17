@@ -1,22 +1,27 @@
 package mcpreportportal
 
 import (
-	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"runtime"
 	"strings"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
-	"github.com/mark3labs/mcp-go/server"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/reportportal/goRP/v5/pkg/gorp"
+	"github.com/urfave/cli/v3"
+
+	"github.com/reportportal/reportportal-mcp-server/internal/config"
+	"github.com/reportportal/reportportal-mcp-server/internal/reportportal/analytics"
+	mcphandlers "github.com/reportportal/reportportal-mcp-server/internal/reportportal/mcp_handlers"
+	app_middleware "github.com/reportportal/reportportal-mcp-server/internal/reportportal/middleware"
 )
 
 // createHTTPClient creates a reusable HTTP client with optimal settings
@@ -52,16 +57,15 @@ type HTTPServerConfig struct {
 
 // HTTPServer is an enhanced MCP server with Chi router
 type HTTPServer struct {
-	mcpServer        *server.MCPServer
-	analytics        *Analytics
-	config           HTTPServerConfig
-	Router           chi.Router // Made public for CreateHTTPServerWithMiddleware
-	streamableServer *server.StreamableHTTPServer
-	httpClient       *http.Client // Direct HTTP client instead of ConnectionManager
+	mcpServer         *mcp.Server
+	AnalyticsInstance *analytics.Analytics
+	config            HTTPServerConfig
+	Router            chi.Router   // Made public for CreateHTTPServerWithMiddleware
+	mcpHTTPHandler    http.Handler // Official SDK HTTP handler
+	httpClient        *http.Client // Direct HTTP client instead of ConnectionManager
 
 	// State management
-	running    bool
-	runningMux sync.RWMutex
+	running atomic.Bool
 }
 
 // MCPRequestPayload represents the basic JSON-RPC structure of MCP requests
@@ -88,13 +92,14 @@ func NewHTTPServer(
 	}
 
 	// Create base MCP server
-	mcpServer := server.NewMCPServer(
-		"reportportal-mcp-server",
-		config.Version,
-		server.WithRecovery(),
-		server.WithLogging(),
-		server.WithResourceCapabilities(true, true),
-		server.WithToolCapabilities(true),
+	mcpServer := mcp.NewServer(
+		&mcp.Implementation{
+			Name:    "reportportal-mcp-server",
+			Version: config.Version,
+		},
+		&mcp.ServerOptions{
+			// Add server options as needed
+		},
 	)
 
 	// Create HTTP client
@@ -103,10 +108,10 @@ func NewHTTPServer(
 	// Initialize batch-based analytics
 	// Note: In HTTP mode, FallbackRPToken is always empty (tokens come from HTTP headers).
 	// Analytics uses UserID for identification in HTTP mode.
-	var analytics *Analytics
+	var analyticsInstance *analytics.Analytics
 	if config.AnalyticsOn && config.GA4Secret != "" {
 		var err error
-		analytics, err = NewAnalytics(
+		analyticsInstance, err = analytics.NewAnalytics(
 			config.UserID,
 			config.GA4Secret,
 			"",                      // FallbackRPToken is always empty in HTTP mode
@@ -122,10 +127,10 @@ func NewHTTPServer(
 	}
 
 	httpServer := &HTTPServer{
-		mcpServer:  mcpServer,
-		analytics:  analytics,
-		config:     config,
-		httpClient: httpClient,
+		mcpServer:         mcpServer,
+		AnalyticsInstance: analyticsInstance,
+		config:            config,
+		httpClient:        httpClient,
 	}
 
 	// Initialize tools and resources
@@ -143,41 +148,28 @@ func NewHTTPServer(
 func (hs *HTTPServer) initializeTools() error {
 	// Create ReportPortal client with empty token in HTTP mode
 	// The actual token will be injected per-request via QueryParamsMiddleware from HTTP headers
-	rpClient := gorp.NewClient(hs.config.HostURL, hs.config.FallbackRPToken)
+	rpClient := gorp.NewClient(
+		hs.config.HostURL,
+		gorp.WithApiKeyAuth(context.Background(), hs.config.FallbackRPToken),
+	)
 
 	// Use HTTP client
 	rpClient.APIClient.GetConfig().HTTPClient = hs.httpClient
-	rpClient.APIClient.GetConfig().Middleware = QueryParamsMiddleware
+	rpClient.APIClient.GetConfig().Middleware = app_middleware.QueryParamsMiddleware
 
-	// Add launch management tools with analytics
-	launches := NewLaunchResources(rpClient, hs.analytics, "")
+	// Register all launch-related tools and resources
+	mcphandlers.RegisterLaunchTools(hs.mcpServer, rpClient, "", hs.AnalyticsInstance)
 
-	hs.mcpServer.AddTool(launches.toolGetLaunches())
-	hs.mcpServer.AddTool(launches.toolGetLastLaunchByName())
-	hs.mcpServer.AddTool(launches.toolGetLaunchById())
-	hs.mcpServer.AddTool(launches.toolForceFinishLaunch())
-	hs.mcpServer.AddTool(launches.toolDeleteLaunch())
-	hs.mcpServer.AddTool(launches.toolRunAutoAnalysis())
-	hs.mcpServer.AddTool(launches.toolUniqueErrorAnalysis())
-	hs.mcpServer.AddTool(launches.toolRunQualityGate())
-
-	hs.mcpServer.AddResourceTemplate(launches.resourceLaunch())
-
-	// Add test item tools
-	testItems := NewTestItemResources(rpClient, hs.analytics, "")
-
-	hs.mcpServer.AddTool(testItems.toolGetTestItemById())
-	hs.mcpServer.AddTool(testItems.toolGetTestItemsByFilter())
-	hs.mcpServer.AddTool(testItems.toolGetTestItemLogsByFilter())
-	hs.mcpServer.AddTool(testItems.toolGetTestItemAttachment())
-	hs.mcpServer.AddTool(testItems.toolGetTestSuitesByFilter())
-	hs.mcpServer.AddTool(testItems.toolGetProjectDefectTypes())
-	hs.mcpServer.AddTool(testItems.toolUpdateDefectTypeForTestItems())
-
-	hs.mcpServer.AddResourceTemplate(testItems.resourceTestItem())
+	// Register all test item-related tools and resources
+	mcphandlers.RegisterTestItemTools(
+		hs.mcpServer,
+		rpClient,
+		"",
+		hs.AnalyticsInstance,
+	)
 
 	// Add prompts
-	prompts, err := readPrompts(promptFiles, "prompts")
+	prompts, err := mcphandlers.ReadPrompts(mcphandlers.PromptFiles, "prompts")
 	if err != nil {
 		return fmt.Errorf("failed to load prompts: %w", err)
 	}
@@ -189,23 +181,18 @@ func (hs *HTTPServer) initializeTools() error {
 	return nil
 }
 
-// HTTPServerWithMiddleware wraps StreamableHTTPServer with token middleware
+// HTTPServerWithMiddleware wraps HTTP server with token middleware
 type HTTPServerWithMiddleware struct {
-	*server.StreamableHTTPServer
 	Handler http.Handler
 	MCP     *HTTPServer // Keep reference to underlying MCP server for lifecycle management
 }
 
 // Start starts the HTTP server
 func (hs *HTTPServer) Start() error {
-	hs.runningMux.Lock()
-	defer hs.runningMux.Unlock()
-
-	if hs.running {
+	if !hs.running.CompareAndSwap(false, true) {
 		return fmt.Errorf("server is already running")
 	}
 
-	hs.running = true
 	slog.Info("HTTP server started successfully",
 		"connection_timeout", hs.config.ConnectionTimeout)
 
@@ -214,21 +201,17 @@ func (hs *HTTPServer) Start() error {
 
 // Stop gracefully shuts down the HTTP server
 func (hs *HTTPServer) Stop() error {
-	hs.runningMux.Lock()
-	defer hs.runningMux.Unlock()
-
-	if !hs.running {
+	if !hs.running.CompareAndSwap(true, false) {
 		return nil
 	}
 
 	slog.Info("Stopping HTTP server")
 
 	// Stop analytics
-	if hs.analytics != nil {
-		hs.analytics.Stop()
+	if hs.AnalyticsInstance != nil {
+		hs.AnalyticsInstance.Stop()
 	}
 
-	hs.running = false
 	slog.Info("HTTP server stopped successfully")
 	return nil
 }
@@ -236,7 +219,7 @@ func (hs *HTTPServer) Stop() error {
 // CreateHTTPServerWithMiddleware creates a complete HTTP server setup with middleware
 func CreateHTTPServerWithMiddleware(
 	config HTTPServerConfig,
-) (*HTTPServerWithMiddleware, *Analytics, error) {
+) (*HTTPServerWithMiddleware, *analytics.Analytics, error) {
 	// Create the MCP server with Chi router and middleware already configured
 	mcpServer, err := NewHTTPServer(config)
 	if err != nil {
@@ -246,9 +229,8 @@ func CreateHTTPServerWithMiddleware(
 	// Use the Chi router as the handler (middleware already applied in setupRoutes)
 	// The router includes HTTPTokenMiddleware for MCP routes and all other endpoints
 	wrapper := &HTTPServerWithMiddleware{
-		StreamableHTTPServer: mcpServer.streamableServer, // Use the existing streamable server
-		Handler:              mcpServer.Router,           // Use Chi router with all middleware
-		MCP:                  mcpServer,
+		Handler: mcpServer.Router, // Use Chi router with all middleware
+		MCP:     mcpServer,
 	}
 
 	slog.Info(
@@ -256,10 +238,10 @@ func CreateHTTPServerWithMiddleware(
 		"router", "chi",
 		"middleware", "HTTPTokenMiddleware+Throttle+Timeout",
 		"analytics_type", "batch",
-		"analytics_enabled", mcpServer.analytics != nil,
+		"analytics_enabled", mcpServer.AnalyticsInstance != nil,
 	)
 
-	return wrapper, mcpServer.analytics, nil
+	return wrapper, mcpServer.AnalyticsInstance, nil
 }
 
 // HTTPServerInfo provides typed information about HTTP server configuration
@@ -281,7 +263,7 @@ func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Set CORS headers
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
 		w.Header().
 			Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept, mcp-session-id")
 		w.Header().Set("Access-Control-Expose-Headers", "mcp-session-id")
@@ -329,8 +311,14 @@ func (hs *HTTPServer) setupChiRouter() {
 	// Add HTTP concurrency control
 	r.Use(middleware.Throttle(hs.config.MaxConcurrentRequests))
 
-	// Create streamable server for MCP functionality
-	hs.streamableServer = server.NewStreamableHTTPServer(hs.mcpServer)
+	// Create MCP HTTP handler using official SDK's StreamableHTTPHandler
+	// This properly dispatches to all registered tools, prompts, and resources
+	hs.mcpHTTPHandler = mcp.NewStreamableHTTPHandler(
+		func(r *http.Request) *mcp.Server {
+			return hs.mcpServer
+		},
+		nil, // Use default options
+	)
 
 	hs.Router = r
 
@@ -354,7 +342,7 @@ func (hs *HTTPServer) setupRoutes() {
 	hs.Router.Get("/info", hs.serverInfoHandler)
 
 	// Metrics endpoint (if analytics enabled)
-	if hs.analytics != nil {
+	if hs.AnalyticsInstance != nil {
 		hs.Router.Get("/metrics", hs.metricsHandler)
 	}
 
@@ -367,28 +355,28 @@ func (hs *HTTPServer) setupRoutes() {
 	// MCP endpoints using chi.Group pattern
 	hs.Router.Group(func(mcpRouter chi.Router) {
 		// Add MCP-specific middleware for token extraction and validation
-		mcpRouter.Use(HTTPTokenMiddleware)
+		mcpRouter.Use(app_middleware.HTTPTokenMiddleware)
 		mcpRouter.Use(hs.mcpMiddleware)
 
 		// Handle all MCP endpoints
-		mcpRouter.Handle("/mcp", hs.streamableServer)
-		mcpRouter.Handle("/api/mcp", hs.streamableServer)
-		mcpRouter.Handle("/mcp/*", hs.streamableServer)
-		mcpRouter.Handle("/api/mcp/*", hs.streamableServer)
+		mcpRouter.Handle("/mcp", hs.mcpHTTPHandler)
+		mcpRouter.Handle("/api/mcp", hs.mcpHTTPHandler)
+		mcpRouter.Handle("/mcp/*", hs.mcpHTTPHandler)
+		mcpRouter.Handle("/api/mcp/*", hs.mcpHTTPHandler)
 	})
 }
 
 // GetHTTPServerInfo returns information about the HTTP server configuration
-func GetHTTPServerInfo(analytics *Analytics) HTTPServerInfo {
+func GetHTTPServerInfo(analyticsInstance *analytics.Analytics) HTTPServerInfo {
 	info := HTTPServerInfo{
 		Type: "http_mcp_server",
 	}
 
-	if analytics != nil {
+	if analyticsInstance != nil {
 		info.Analytics = AnalyticsInfo{
 			Enabled:  true,
 			Type:     "batch",
-			Interval: batchSendInterval.String(),
+			Interval: analytics.BatchSendInterval.String(),
 		}
 	} else {
 		info.Analytics = AnalyticsInfo{
@@ -407,21 +395,22 @@ func (hs *HTTPServer) healthHandler(w http.ResponseWriter, r *http.Request) {
 		"version":   hs.config.Version,
 	}
 
-	if hs.running {
+	w.Header().Set("Content-Type", "application/json")
+
+	if hs.running.Load() {
 		health["server_status"] = "running"
 	} else {
 		health["server_status"] = "stopped"
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}
 
-	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(health)
 }
 
 // serverInfoHandler returns comprehensive server information (merged /info and /status)
 func (hs *HTTPServer) serverInfoHandler(w http.ResponseWriter, r *http.Request) {
 	// Merge info and status data into comprehensive response
-	info := GetHTTPServerInfo(hs.analytics)
+	info := GetHTTPServerInfo(hs.AnalyticsInstance)
 
 	// Server configuration
 	info.Version = hs.config.Version
@@ -430,8 +419,8 @@ func (hs *HTTPServer) serverInfoHandler(w http.ResponseWriter, r *http.Request) 
 	info.ConcurrencyModel = "chi_throttle"
 
 	// Runtime status
-	info.ServerRunning = hs.running
-	info.Analytics.Enabled = hs.analytics != nil
+	info.ServerRunning = hs.running.Load()
+	info.Analytics.Enabled = hs.AnalyticsInstance != nil
 	info.Timestamp = time.Now().UTC()
 
 	w.Header().Set("Content-Type", "application/json")
@@ -440,7 +429,7 @@ func (hs *HTTPServer) serverInfoHandler(w http.ResponseWriter, r *http.Request) 
 
 // metricsHandler returns analytics metrics (if available)
 func (hs *HTTPServer) metricsHandler(w http.ResponseWriter, r *http.Request) {
-	if hs.analytics == nil {
+	if hs.AnalyticsInstance == nil {
 		http.Error(w, "Analytics not enabled", http.StatusNotFound)
 		return
 	}
@@ -449,7 +438,7 @@ func (hs *HTTPServer) metricsHandler(w http.ResponseWriter, r *http.Request) {
 	metrics := AnalyticsInfo{
 		Enabled:  true,
 		Type:     "batch",
-		Interval: batchSendInterval.String(),
+		Interval: analytics.BatchSendInterval.String(),
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -481,8 +470,9 @@ func (hs *HTTPServer) rootHandler(w http.ResponseWriter, r *http.Request) {
 // mcpMiddleware is middleware specifically for MCP requests
 func (hs *HTTPServer) mcpMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Allow SSE stream requests (GET with Accept: text/event-stream)
-		// and regular MCP JSON-RPC requests (POST with application/json)
+		// Allow SSE stream requests (GET with Accept: text/event-stream),
+		// regular MCP JSON-RPC requests (POST with application/json),
+		// and MCP DELETE session-termination requests
 		if !hs.isMCPRequest(r) && !hs.isSSEStreamRequest(r) {
 			http.Error(w, "Invalid MCP request", http.StatusBadRequest)
 			return
@@ -517,99 +507,130 @@ func (hs *HTTPServer) isSSEStreamRequest(r *http.Request) bool {
 }
 
 // isMCPRequest determines if a request should be handled by MCP server
-// Uses strict detection to prevent misrouting non-MCP requests
+// Performs basic method and content-type checks without body validation
 func (hs *HTTPServer) isMCPRequest(r *http.Request) bool {
-	// MCP requests must be POST requests with JSON content type
-	if r.Method != "POST" {
-		return false
+	// MCP POST requests must have JSON content type
+	if r.Method == "POST" {
+		contentType := r.Header.Get("Content-Type")
+		if idx := strings.Index(contentType, ";"); idx != -1 {
+			contentType = contentType[:idx]
+		}
+		return strings.EqualFold(strings.TrimSpace(contentType), "application/json")
 	}
 
-	contentType := r.Header.Get("Content-Type")
-	if idx := strings.Index(contentType, ";"); idx != -1 {
-		contentType = contentType[:idx]
-	}
-	if !strings.EqualFold(strings.TrimSpace(contentType), "application/json") {
-		return false
+	// MCP DELETE requests for session termination
+	if r.Method == "DELETE" {
+		return true
 	}
 
-	return hs.validateMCPPayload(r)
-}
-
-// validateMCPPayload checks if the request body contains valid JSON-RPC structure
-// Supports both single requests and batch requests (arrays)
-func (hs *HTTPServer) validateMCPPayload(r *http.Request) bool {
-	// Read the request body
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		return false
-	}
-
-	// Restore the request body so it can be read again by the MCP handler
-	r.Body = io.NopCloser(bytes.NewBuffer(body))
-
-	// Check if it's valid JSON first
-	var rawJSON interface{}
-	if err := json.Unmarshal(body, &rawJSON); err != nil {
-		return false
-	}
-
-	// Handle batch requests (arrays)
-	if batchData, ok := rawJSON.([]interface{}); ok {
-		return hs.validateBatchRequest(batchData)
-	}
-
-	// Handle single request (object)
-	if objData, ok := rawJSON.(map[string]interface{}); ok {
-		return hs.validateSingleRequest(objData)
-	}
-
-	// Invalid JSON-RPC structure (neither object nor array)
 	return false
 }
 
-// validateSingleRequest validates a single JSON-RPC request object
-func (hs *HTTPServer) validateSingleRequest(data map[string]interface{}) bool {
-	// Check for required JSON-RPC 2.0 fields
-	jsonrpc, hasJSONRPC := data["jsonrpc"]
-	method, hasMethod := data["method"]
-
-	if !hasJSONRPC || !hasMethod {
-		return false
+// RunStreamingServer starts the ReportPortal MCP server in streaming mode with HTTP token extraction.
+func RunStreamingServer(ctx context.Context, cmd *cli.Command) error {
+	// Build HTTP server configuration from CLI flags with performance tuning
+	serverConfig, err := buildHTTPServerConfig(cmd)
+	if err != nil {
+		return fmt.Errorf("failed to build HTTP server config: %w", err)
 	}
 
-	// Validate JSON-RPC version
-	jsonrpcStr, ok := jsonrpc.(string)
-	if !ok || jsonrpcStr != "2.0" {
-		return false
+	serverHandler, analyticsInstance, err := CreateHTTPServerWithMiddleware(serverConfig)
+	if err != nil {
+		return fmt.Errorf("failed to create HTTP MCP server: %w", err)
+	}
+	// Build address from --port and --host
+	port := cmd.Int("port")
+	host := cmd.String("host")
+	addr := fmt.Sprintf("%s:%d", host, port)
+
+	// Create HTTP server with the Chi router as handler
+	// CRITICAL: Use MCP.Router directly to ensure Chi middleware and endpoints are active
+	httpServer := &http.Server{
+		Addr:              addr,
+		Handler:           serverHandler.MCP.Router, // Use Chi router directly with throttling/health/info/metrics
+		ReadHeaderTimeout: 10 * time.Second,         // Prevent Slowloris attacks
+		ReadTimeout:       30 * time.Second,         // Total time for reading request
+		WriteTimeout:      0,                        // Total time for writing response
+		IdleTimeout:       120 * time.Second,        // Time to wait for next request
 	}
 
-	// Validate method field
-	methodStr, ok := method.(string)
-	if !ok || methodStr == "" {
-		return false
+	// Start the HTTP server
+	if err := serverHandler.MCP.Start(); err != nil {
+		return fmt.Errorf("failed to start HTTP server: %w", err)
 	}
 
-	return true
+	// Start listening for messages in a separate goroutine
+	errC := make(chan error, 1)
+	go func() {
+		errC <- httpServer.ListenAndServe()
+	}()
+
+	// Log that the server is running
+	slog.Info("ReportPortal MCP Server running in streaming mode", "addr", addr)
+
+	// Wait for a shutdown signal or an error from the server
+	select {
+	case <-ctx.Done(): // Context canceled (e.g., SIGTERM received)
+		slog.Info("shutting down server...")
+		sCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := httpServer.Shutdown(sCtx); err != nil {
+			slog.Error("error during server shutdown", "error", err)
+		}
+		// Stop() handles analytics shutdown internally
+		if err := serverHandler.MCP.Stop(); err != nil {
+			slog.Error("error stopping HTTP server", "error", err)
+		}
+	case err := <-errC: // Error occurred while running the server
+		return analytics.HandleServerError(err, analyticsInstance, "http")
+	}
+
+	return nil
 }
 
-// validateBatchRequest validates a JSON-RPC batch request (array of requests)
-func (hs *HTTPServer) validateBatchRequest(batch []interface{}) bool {
-	// Batch requests cannot be empty
-	if len(batch) == 0 {
-		return false
+// buildHTTPServerConfig creates HTTPServerConfig from CLI flags with smart defaults.
+// This replaces the removed GetProductionConfig/GetHighTrafficConfig factory functions.
+func buildHTTPServerConfig(cmd *cli.Command) (HTTPServerConfig, error) {
+	// Retrieve required parameters from CLI flags
+	host := cmd.String("rp-host")
+	// Note: RP_API_TOKEN and --token flag are not available in HTTP mode
+	// Tokens MUST come from HTTP request headers (Authorization: Bearer <token>)
+	userID := cmd.String("user-id")
+	analyticsAPISecret := analytics.GetAnalyticArg()
+	analyticsOff := cmd.Bool("analytics-off")
+
+	// Performance tuning parameters with defaults
+	maxWorkers := cmd.Int("max-workers")
+	connectionTimeoutSec := cmd.Int("connection-timeout")
+
+	// Apply auto-detection for zero values
+	if maxWorkers <= 0 {
+		maxWorkers = runtime.NumCPU() * 2
 	}
 
-	// Validate each request in the batch
-	for _, item := range batch {
-		requestObj, ok := item.(map[string]interface{})
-		if !ok {
-			return false // Each item in batch must be an object
-		}
-
-		if !hs.validateSingleRequest(requestObj) {
-			return false // All requests in batch must be valid
-		}
+	hostUrl, err := url.Parse(host)
+	if err != nil {
+		return HTTPServerConfig{}, fmt.Errorf("invalid host URL: %w", err)
+	}
+	if hostUrl.Scheme == "" || hostUrl.Host == "" {
+		return HTTPServerConfig{}, fmt.Errorf(
+			"host URL must include scheme and host (e.g., https://reportportal.example.com)",
+		)
 	}
 
-	return true
+	return HTTPServerConfig{
+		Version: fmt.Sprintf(
+			"%s (%s) %s",
+			config.Version,
+			config.Commit,
+			config.Date,
+		),
+		HostURL:               hostUrl,
+		FallbackRPToken:       "", // Always empty - RP_API_TOKEN is not available in HTTP mode
+		UserID:                userID,
+		GA4Secret:             analyticsAPISecret,
+		AnalyticsOn:           !analyticsOff,
+		MaxConcurrentRequests: maxWorkers,
+		ConnectionTimeout:     time.Duration(connectionTimeoutSec) * time.Second,
+	}, nil
 }

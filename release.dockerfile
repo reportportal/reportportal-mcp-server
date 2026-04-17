@@ -1,5 +1,5 @@
 # Build stage
-FROM golang:1.24.4 AS builder
+FROM golang:1.25.0 AS builder
 
 WORKDIR /build
 
@@ -14,9 +14,10 @@ COPY . .
 ARG VERSION=dev
 ARG COMMIT=unknown
 ARG BUILD_DATE=unknown
+ARG VERSION_PKG="github.com/reportportal/reportportal-mcp-server/internal/config"
 
 # Build the binary
-RUN CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${BUILD_DATE}" -o reportportal-mcp-server ./cmd/reportportal-mcp-server
+RUN CGO_ENABLED=0 go build -ldflags="-s -w -X ${VERSION_PKG}.Version=${VERSION} -X ${VERSION_PKG}.Commit=${COMMIT} -X ${VERSION_PKG}.Date=${BUILD_DATE}" -o reportportal-mcp-server ./cmd/reportportal-mcp-server
 
 # Final stage
 FROM gcr.io/distroless/base-debian12

@@ -7,6 +7,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/reportportal/reportportal-mcp-server/internal/reportportal/analytics"
 )
 
 func TestNewHTTPServer_WithoutRPAPIToken(t *testing.T) {
@@ -50,7 +52,7 @@ func TestNewHTTPServer_WithoutRPAPIToken(t *testing.T) {
 		},
 		{
 			name: "server starts with valid RP_API_TOKEN",
-			config: HTTPServerConfig{
+			config: HTTPServerConfig{ //nolint:gosec // test UUID token, not a real credential
 				Version:               "1.0.0",
 				HostURL:               mustParseURL("https://reportportal.example.com"),
 				FallbackRPToken:       "550e8400-e29b-41d4-a716-446655440000", // Valid UUID token
@@ -80,7 +82,7 @@ func TestNewHTTPServer_WithoutRPAPIToken(t *testing.T) {
 		},
 		{
 			name: "server starts without GA4 secret",
-			config: HTTPServerConfig{
+			config: HTTPServerConfig{ //nolint:gosec // test UUID token, not a real credential
 				Version:               "1.0.0",
 				HostURL:               mustParseURL("https://reportportal.example.com"),
 				FallbackRPToken:       "550e8400-e29b-41d4-a716-446655440000",
@@ -127,15 +129,7 @@ func TestNewHTTPServer_WithoutRPAPIToken(t *testing.T) {
 			assert.NotNil(t, httpServer.mcpServer, "MCP server should be initialized")
 			assert.NotNil(t, httpServer.httpClient, "HTTP client should be initialized")
 			assert.NotNil(t, httpServer.Router, "Chi router should be initialized")
-			assert.NotNil(t, httpServer.streamableServer, "Streamable server should be initialized")
-
-			// Verify analytics initialization based on configuration
-			if tt.expectAnalytics {
-				assert.NotNil(t, httpServer.analytics, "Analytics should be initialized")
-			} else {
-				assert.Nil(t, httpServer.analytics, "Analytics should not be initialized")
-			}
-
+			assert.NotNil(t, httpServer.mcpHTTPHandler, "MCP HTTP handler should be initialized")
 			// Verify config defaults are applied
 			assert.NotZero(
 				t,
@@ -149,21 +143,21 @@ func TestNewHTTPServer_WithoutRPAPIToken(t *testing.T) {
 			)
 
 			// Verify server is not running by default
-			httpServer.runningMux.RLock()
 			assert.False(
 				t,
-				httpServer.running,
+				httpServer.running.Load(),
 				"Server should not be running immediately after creation",
 			)
-			httpServer.runningMux.RUnlock()
 
 			// Test server lifecycle
 			err = httpServer.Start()
 			assert.NoError(t, err, "Server should start successfully")
 
-			httpServer.runningMux.RLock()
-			assert.True(t, httpServer.running, "Server should be marked as running after Start()")
-			httpServer.runningMux.RUnlock()
+			assert.True(
+				t,
+				httpServer.running.Load(),
+				"Server should be marked as running after Start()",
+			)
 
 			// Verify we can't start an already running server
 			err = httpServer.Start()
@@ -174,9 +168,7 @@ func TestNewHTTPServer_WithoutRPAPIToken(t *testing.T) {
 			err = httpServer.Stop()
 			assert.NoError(t, err, "Server should stop successfully")
 
-			httpServer.runningMux.RLock()
-			assert.False(t, httpServer.running, "Server should not be running after Stop()")
-			httpServer.runningMux.RUnlock()
+			assert.False(t, httpServer.running.Load(), "Server should not be running after Stop()")
 		})
 	}
 }
@@ -206,7 +198,7 @@ func TestCreateHTTPServerWithMiddleware_WithoutRPAPIToken(t *testing.T) {
 		},
 		{
 			name: "server with middleware starts with valid token",
-			config: HTTPServerConfig{
+			config: HTTPServerConfig{ //nolint:gosec // test UUID token, not a real credential
 				Version:               "1.0.0",
 				HostURL:               mustParseURL("https://reportportal.example.com"),
 				FallbackRPToken:       "550e8400-e29b-41d4-a716-446655440000",
@@ -246,10 +238,10 @@ func TestCreateHTTPServerWithMiddleware_WithoutRPAPIToken(t *testing.T) {
 			// Verify analytics based on configuration
 			if tt.expectAnalytics {
 				assert.NotNil(t, analytics, "Analytics should be returned")
-				assert.NotNil(t, wrapper.MCP.analytics, "MCP server should have analytics")
+				assert.NotNil(t, wrapper.MCP.AnalyticsInstance, "MCP server should have analytics")
 			} else {
 				assert.Nil(t, analytics, "Analytics should not be returned")
-				assert.Nil(t, wrapper.MCP.analytics, "MCP server should not have analytics")
+				assert.Nil(t, wrapper.MCP.AnalyticsInstance, "MCP server should not have analytics")
 			}
 
 			// Verify routes are set up correctly
@@ -296,19 +288,23 @@ func TestHTTPServer_StartStop(t *testing.T) {
 		assert.NoError(t, err, "Server should start successfully on cycle %d", i)
 
 		// Verify server is running
-		httpServer.runningMux.RLock()
-		running := httpServer.running
-		httpServer.runningMux.RUnlock()
-		assert.True(t, running, "Server should be running after Start() on cycle %d", i)
+		assert.True(
+			t,
+			httpServer.running.Load(),
+			"Server should be running after Start() on cycle %d",
+			i,
+		)
 
 		err = httpServer.Stop()
 		assert.NoError(t, err, "Server should stop successfully on cycle %d", i)
 
 		// Verify server is stopped
-		httpServer.runningMux.RLock()
-		running = httpServer.running
-		httpServer.runningMux.RUnlock()
-		assert.False(t, running, "Server should not be running after Stop() on cycle %d", i)
+		assert.False(
+			t,
+			httpServer.running.Load(),
+			"Server should not be running after Stop() on cycle %d",
+			i,
+		)
 	}
 }
 
@@ -333,7 +329,7 @@ func TestHTTPServer_StopIdempotent(t *testing.T) {
 func TestGetHTTPServerInfo(t *testing.T) {
 	tests := []struct {
 		name             string
-		analytics        *Analytics
+		analytics        *analytics.Analytics
 		expectAnalytics  bool
 		expectedType     string
 		expectedInterval string
@@ -345,14 +341,14 @@ func TestGetHTTPServerInfo(t *testing.T) {
 		},
 		{
 			name: "server info with analytics",
-			analytics: &Analytics{
-				config: &AnalyticsConfig{
+			analytics: &analytics.Analytics{
+				Config: &analytics.AnalyticsConfig{
 					APISecret: "test-secret",
 				},
 			},
 			expectAnalytics:  true,
 			expectedType:     "batch",
-			expectedInterval: batchSendInterval.String(),
+			expectedInterval: analytics.BatchSendInterval.String(),
 		},
 	}
 

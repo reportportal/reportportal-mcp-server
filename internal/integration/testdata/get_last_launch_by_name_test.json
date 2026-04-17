@@ -1,0 +1,109 @@
+{
+  "name": "get_last_launch_by_name Test",
+  "description": "Integration test for MCP tool \"get_last_launch_by_name\"",
+  "reportPortalMock": {
+    "requestResponsePairs": [
+      {
+        "request": {
+          "method": "GET",
+          "header": [
+            {
+              "key": "Authorization",
+              "value": "Bearer test-token-1234567"
+            }
+          ],
+          "url": {
+            "raw": "http://localhost/api/v1/test-project/launch?filter.cnt.name=Demo+Api+Tests\u0026page.page=1\u0026page.size=50\u0026page.sort=startTime%2Cnumber%2CDESC",
+            "protocol": "http",
+            "host": [
+              "localhost"
+            ],
+            "path": [
+              "api",
+              "v1",
+              "test-project",
+              "launch"
+            ],
+            "query": [
+              {
+                "key": "filter.cnt.name",
+                "value": "Demo Api Tests"
+              },
+              {
+                "key": "page.page",
+                "value": "1"
+              },
+              {
+                "key": "page.size",
+                "value": "50"
+              },
+              {
+                "key": "page.sort",
+                "value": "startTime,number,DESC"
+              }
+            ]
+          }
+        },
+        "response": {
+          "name": "",
+          "originalRequest": {
+            "method": "",
+            "url": {}
+          },
+          "code": 200,
+          "header": [
+            {
+              "key": "Content-Type",
+              "value": "application/json"
+            }
+          ],
+          "body": "{\"content\":[{\"owner\":\"rp_user\",\"description\":\"### **Demonstration launch.**\\nA typical *Launch structure* comprises the following elements: Suite \u003e Test \u003e Step \u003e Log.\\nLaunch contains *randomly* generated `suites`, `tests`, `steps` with:\\n* random issues and statuses,\\n* logs,\\n* attachments with different formats.\",\"id\":9683163,\"uuid\":\"82bfa22a-abaa-4f79-93b0-049d8a37d216\",\"name\":\"Demo Api Tests\",\"number\":24,\"startTime\":\"2026-03-09T09:31:57.285955Z\",\"endTime\":\"2026-03-09T09:32:00.405129Z\",\"lastModified\":\"2026-03-09T09:32:00.407097Z\",\"status\":\"FAILED\",\"statistics\":{\"executions\":{\"total\":25,\"failed\":5,\"passed\":20},\"defects\":{\"product_bug\":{\"total\":4,\"pb001\":4},\"to_investigate\":{\"total\":1,\"ti001\":1},\"automation_bug\":{\"total\":1,\"ab001\":1}}},\"attributes\":[{\"key\":\"build\",\"value\":\"3.9.9.31.57\"},{\"key\":\"\",\"value\":\"demo\"},{\"key\":\"platform\",\"value\":\"windows\"}],\"mode\":\"DEFAULT\",\"analysing\":[],\"approximateDuration\":2.184606,\"hasRetries\":true,\"rerun\":false,\"metadata\":{\"rp.cluster.lastRun\":\"1773048722322\"},\"retentionPolicy\":\"REGULAR\"},{\"owner\":\"rp_user\",\"description\":\"### **Demonstration launch.**\\nA typical *Launch structure* comprises the following elements: Suite \u003e Test \u003e Step \u003e Log.\\nLaunch contains *randomly* generated `suites`, `tests`, `steps` with:\\n* random issues and statuses,\\n* logs,\\n* attachments with different formats.\",\"id\":9683162,\"uuid\":\"36b70ba8-4002-484d-ae12-a1c06b2aa47a\",\"name\":\"Demo Api Tests\",\"number\":23,\"startTime\":\"2026-03-09T09:31:55.006247Z\",\"endTime\":\"2026-03-09T09:31:57.279497Z\",\"lastModified\":\"2026-03-09T09:31:57.281521Z\",\"status\":\"FAILED\",\"statistics\":{\"executions\":{\"total\":20,\"failed\":8,\"passed\":10,\"skipped\":2},\"defects\":{\"system_issue\":{\"total\":1,\"si001\":1},\"product_bug\":{\"total\":4,\"pb001\":4},\"to_investigate\":{\"total\":7,\"ti001\":7},\"automation_bug\":{\"total\":4,\"ab001\":4}}},\"attributes\":[{\"key\":\"build\",\"value\":\"3.9.9.31.55\"},{\"key\":\"\",\"value\":\"demo\"},{\"key\":\"platform\",\"value\":\"mint\"}],\"mode\":\"DEFAULT\",\"analysing\":[],\"approximateDuration\":2.140284,\"hasRetries\":true,\"rerun\":false,\"metadata\":{\"rp.cluster.lastRun\":\"1773048721839\"},\"retentionPolicy\":\"REGULAR\"},{\"owner\":\"rp_user\",\"description\":\"### **Demonstration launch.**\\nA typical *Launch structure* comprises the following elements: Suite \u003e Test \u003e Step \u003e Log.\\nLaunch contains *randomly* generated `suites`, `tests`, `steps` with:\\n* random issues and statuses,\\n* logs,\\n* attachments with different formats.\",\"id\":9683161,\"uuid\":\"641f4857-089d-45d9-b541-6055cc1d472f\",\"name\":\"Demo Api Tests\",\"number\":22,\"startTime\":\"2026-03-09T09:31:52.606576Z\",\"endTime\":\"2026-03-09T09:31:54.945757Z\",\"lastModified\":\"2026-03-09T09:31:54.947756Z\",\"status\":\"FAILED\",\"statistics\":{\"executions\":{\"total\":15,\"passed\":5,\"failed\":9,\"skipped\":1},\"defects\":{\"system_issue\":{\"total\":5,\"si001\":5},\"product_bug\":{\"total\":1,\"pb001\":1},\"to_investigate\":{\"total\":5,\"ti001\":5},\"automation_bug\":{\"total\":5,\"ab001\":5}}},\"attributes\":[{\"key\":\"build\",\"value\":\"3.9.9.31.52\"},{\"key\":\"\",\"value\":\"demo\"},{\"key\":\"platform\",\"value\":\"arch\"}],\"mode\":\"DEFAULT\",\"analysing\":[],\"approximateDuration\":1.941386,\"hasRetries\":true,\"rerun\":false,\"metadata\":{\"rp.cluster.lastRun\":\"1773760739099\"},\"retentionPolicy\":\"REGULAR\"},{\"owner\":\"rp_user\",\"description\":\"### **Demonstration launch.**\\nA typical *Launch structure* comprises the following elements: Suite \u003e Test \u003e Step \u003e Log.\\nLaunch contains *randomly* generated `suites`, `tests`, `steps` with:\\n* random issues and statuses,\\n* logs,\\n* attachments with different formats.\",\"id\":9683158,\"uuid\":\"1cdeb718-db70-423f-9f69-363d774f4275\",\"name\":\"Demo Api Tests\",\"number\":21,\"startTime\":\"2026-03-09T09:31:50.617158Z\",\"endTime\":\"2026-03-09T09:31:52.558544Z\",\"lastModified\":\"2026-03-09T09:31:52.560475Z\",\"status\":\"FAILED\",\"statistics\":{\"executions\":{\"total\":10,\"failed\":9,\"passed\":1},\"defects\":{\"system_issue\":{\"total\":10,\"si001\":10},\"to_investigate\":{\"total\":2,\"ti001\":2},\"automation_bug\":{\"total\":1,\"ab001\":1}}},\"attributes\":[{\"key\":\"build\",\"value\":\"3.9.9.31.50\"},{\"key\":\"\",\"value\":\"demo\"},{\"key\":\"platform\",\"value\":\"arch\"}],\"mode\":\"DEFAULT\",\"analysing\":[],\"approximateDuration\":0.0,\"hasRetries\":true,\"rerun\":false,\"metadata\":{\"rp.cluster.lastRun\":\"1773048715948\"},\"retentionPolicy\":\"REGULAR\"}],\"page\":{\"number\":1,\"size\":50,\"totalElements\":4,\"totalPages\":1}}"
+        }
+      }
+    ]
+  },
+  "llmClientMock": {
+    "request": {
+      "method": "POST",
+      "header": [
+        {
+          "key": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "key": "Authorization",
+          "value": "Bearer test-token-1234567"
+        },
+        {
+          "key": "X-Project",
+          "value": "test-project"
+        }
+      ],
+      "body": {
+        "mode": "raw",
+        "raw": "{\n  \"id\": 1,\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"arguments\": {\n      \"launch\": \"Demo Api Tests\"\n    },\n    \"name\": \"get_last_launch_by_name\"\n  }\n}"
+      },
+      "url": {
+        "raw": "/mcp",
+        "path": [
+          "mcp"
+        ]
+      }
+    },
+    "expectedResponse": {
+      "name": "MCP get_last_launch_by_name Response",
+      "originalRequest": {
+        "method": "",
+        "url": {}
+      },
+      "code": 200,
+      "header": [
+        {
+          "key": "Content-Type",
+          "value": "text/event-stream"
+        }
+      ],
+      "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"analysing\\\":[],\\\"approximateDuration\\\":2.184606,\\\"attributes\\\":[{\\\"key\\\":\\\"build\\\",\\\"value\\\":\\\"3.9.9.31.57\\\"},{\\\"key\\\":\\\"\\\",\\\"value\\\":\\\"demo\\\"},{\\\"key\\\":\\\"platform\\\",\\\"value\\\":\\\"windows\\\"}],\\\"description\\\":\\\"### **Demonstration launch.**\\\\nA typical *Launch structure* comprises the following elements: Suite \\\\u003e Test \\\\u003e Step \\\\u003e Log.\\\\nLaunch contains *randomly* generated `suites`, `tests`, `steps` with:\\\\n* random issues and statuses,\\\\n* logs,\\\\n* attachments with different formats.\\\",\\\"endTime\\\":\\\"2026-03-09T09:32:00.405129Z\\\",\\\"hasRetries\\\":true,\\\"id\\\":9683163,\\\"lastModified\\\":\\\"2026-03-09T09:32:00.407097Z\\\",\\\"metadata\\\":{\\\"rp.cluster.lastRun\\\":\\\"1773048722322\\\"},\\\"mode\\\":\\\"DEFAULT\\\",\\\"name\\\":\\\"Demo Api Tests\\\",\\\"number\\\":24,\\\"owner\\\":\\\"rp_user\\\",\\\"rerun\\\":false,\\\"retentionPolicy\\\":\\\"REGULAR\\\",\\\"startTime\\\":\\\"2026-03-09T09:31:57.285955Z\\\",\\\"statistics\\\":{\\\"defects\\\":{\\\"automation_bug\\\":{\\\"ab001\\\":1,\\\"total\\\":1},\\\"product_bug\\\":{\\\"pb001\\\":4,\\\"total\\\":4},\\\"to_investigate\\\":{\\\"ti001\\\":1,\\\"total\\\":1}},\\\"executions\\\":{\\\"failed\\\":5,\\\"passed\\\":20,\\\"total\\\":25}},\\\"status\\\":\\\"FAILED\\\",\\\"uuid\\\":\\\"82bfa22a-abaa-4f79-93b0-049d8a37d216\\\"}\"}]}}\n"
+    }
+  }
+}

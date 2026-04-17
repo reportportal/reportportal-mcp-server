@@ -1,8 +1,10 @@
 ARG APP_VERSION="develop"
+ARG VERSION_PKG="github.com/reportportal/reportportal-mcp-server/internal/config"
 
-FROM golang:1.24.4 AS build
+FROM golang:1.25.0 AS build
 # allow this step access to build arg
 ARG APP_VERSION
+ARG VERSION_PKG
 # Set the working directory
 WORKDIR /build
 
@@ -14,7 +16,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build go mod download
 
 COPY . ./
 # Build the server
-RUN --mount=type=cache,target=/root/.cache/go-build CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=${APP_VERSION} -X main.commit=$(git rev-parse HEAD) -X main.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+RUN --mount=type=cache,target=/root/.cache/go-build CGO_ENABLED=0 go build -ldflags="-s -w -X ${VERSION_PKG}.Version=${APP_VERSION} -X ${VERSION_PKG}.Commit=$(git rev-parse HEAD) -X ${VERSION_PKG}.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     -o reportportal-mcp-server cmd/reportportal-mcp-server/main.go
 
 # Make a stage to run the app

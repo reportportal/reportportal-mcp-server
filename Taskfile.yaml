@@ -10,7 +10,8 @@ version: '3'
 # task docker:run MCP_MODE=http MCP_SERVER_PORT=9000  # Docker HTTP mode on port 9000
 
 vars:
-  GOLANGCI_LINT_VERSION: 'v2.1.6'
+  # >= v2.4 required for go.mod `go 1.25` (see golangci-lint changelog / FAQ)
+  GOLANGCI_LINT_VERSION: 'v2.11.4'
   GOLANG_CI: "docker run --rm -v $(pwd):/app -w /app golangci/golangci-lint:{{.GOLANGCI_LINT_VERSION}} golangci-lint"
   IMAGE_NAME: "reportportal-mcp-server"
   IMAGE_NAME_DEBUG: "reportportal-mcp-server-debug"
@@ -121,5 +122,5 @@ tasks:
       {{end}}
 
   verify:testdata:
-    desc: "Verifies all JSON test fixtures in testdata/ (recursively) against running MCP server at http://localhost:{{.MCP_SERVER_PORT}}/mcp (requires server to be running, RP_API_TOKEN and RP_PROJECT env vars)"
-    cmd: go run cmd/verify-testdata/main.go -url "http://localhost:{{.MCP_SERVER_PORT}}/mcp" -dir testdata
+    desc: "Verifies all JSON test fixtures in internal/integration/testdata/ (recursively) against running MCP server at http://localhost:{{.MCP_SERVER_PORT}}/mcp (requires server to be running, RP_API_TOKEN and RP_PROJECT env vars)"
+    cmd: go run cmd/verify-testdata/main.go -url "http://localhost:{{.MCP_SERVER_PORT}}/mcp"

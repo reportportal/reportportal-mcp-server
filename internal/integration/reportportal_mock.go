@@ -8,12 +8,14 @@ import (
 	neturl "net/url"
 	"strings"
 	"sync"
+
+	"github.com/reportportal/reportportal-mcp-server/internal/integration/testdata"
 )
 
 // ReportPortalMockServer is a mock HTTP server that simulates ReportPortal API
 type ReportPortalMockServer struct {
 	server       *httptest.Server
-	requestPairs []RequestResponsePair
+	requestPairs []testdata.RequestResponsePair
 	mutex        sync.RWMutex
 	requestLog   []MockRequestLog
 	matchedCount int // tracks successfully matched requests
@@ -30,7 +32,9 @@ type MockRequestLog struct {
 }
 
 // NewReportPortalMockServer creates a new ReportPortal mock server
-func NewReportPortalMockServer(requestPairs []RequestResponsePair) *ReportPortalMockServer {
+func NewReportPortalMockServer(
+	requestPairs []testdata.RequestResponsePair,
+) *ReportPortalMockServer {
 	mock := &ReportPortalMockServer{
 		requestPairs: requestPairs,
 		requestLog:   make([]MockRequestLog, 0),
@@ -93,9 +97,9 @@ func (m *ReportPortalMockServer) handleRequest(w http.ResponseWriter, r *http.Re
 	// Find matching request/response pair
 	m.mutex.RLock()
 	slog.Debug("Requesting pairs", "pairs", m.requestPairs)
-	var matchedPair *RequestResponsePair
+	var matchedPair *testdata.RequestResponsePair
 	for i, pair := range m.requestPairs {
-		slog.Debug(
+		slog.Debug( //nolint:gosec // structured log with literal message; r.Method/r.URL.Path are value args only
 			"Trying to match request",
 			"pairIndex",
 			i,
@@ -150,7 +154,7 @@ func (m *ReportPortalMockServer) handleRequest(w http.ResponseWriter, r *http.Re
 	}
 
 	// No matching request found
-	slog.Warn(
+	slog.Warn( //nolint:gosec // structured log with literal message; r.Method/r.URL.Path are value args only
 		"No matching request found",
 		"method",
 		r.Method,
@@ -204,18 +208,30 @@ func (m *ReportPortalMockServer) markRequestAsMatched(index int) {
 func (m *ReportPortalMockServer) matchesRequest(
 	r *http.Request,
 	body string,
-	expected PostmanRequest,
+	expected testdata.PostmanRequest,
 ) bool {
 	// Check HTTP method
 	if !strings.EqualFold(expected.Method, r.Method) {
-		slog.Debug("Method mismatch", "expected", expected.Method, "got", r.Method)
+		slog.Debug( //nolint:gosec // structured log with literal message; values are structured args only
+			"Method mismatch",
+			"expected",
+			expected.Method,
+			"got",
+			r.Method,
+		)
 		return false
 	}
 
 	// Check URL path
 	expectedPath := m.buildPath(expected.URL)
 	if expectedPath != r.URL.Path {
-		slog.Debug("Path mismatch", "expected", expectedPath, "got", r.URL.Path)
+		slog.Debug( //nolint:gosec // structured log with literal message; values are structured args only
+			"Path mismatch",
+			"expected",
+			expectedPath,
+			"got",
+			r.URL.Path,
+		) //nolint:gosec // structured log with literal message; values are structured args only
 		return false
 	}
 
@@ -253,7 +269,7 @@ func (m *ReportPortalMockServer) matchesRequest(
 }
 
 // buildPath constructs the path from PostmanURL
-func (m *ReportPortalMockServer) buildPath(url PostmanURL) string {
+func (m *ReportPortalMockServer) buildPath(url testdata.PostmanURL) string {
 	// If path segments are provided, use them (more reliable)
 	if len(url.Path) > 0 {
 		return "/" + strings.Join(url.Path, "/")
@@ -278,7 +294,7 @@ func (m *ReportPortalMockServer) buildPath(url PostmanURL) string {
 // matchesQueryParams checks if query parameters match
 func (m *ReportPortalMockServer) matchesQueryParams(
 	r *http.Request,
-	expected []PostmanQueryParam,
+	expected []testdata.PostmanQueryParam,
 ) bool {
 	if len(expected) == 0 {
 		return true
@@ -308,7 +324,7 @@ func (m *ReportPortalMockServer) matchesQueryParams(
 			}
 		}
 		if !found {
-			slog.Debug(
+			slog.Debug( //nolint:gosec // structured log with literal message; values are structured args only
 				"Query parameter value mismatch",
 				"key",
 				param.Key,
@@ -325,7 +341,10 @@ func (m *ReportPortalMockServer) matchesQueryParams(
 }
 
 // matchesHeaders checks if headers match
-func (m *ReportPortalMockServer) matchesHeaders(r *http.Request, expected []PostmanHeader) bool {
+func (m *ReportPortalMockServer) matchesHeaders(
+	r *http.Request,
+	expected []testdata.PostmanHeader,
+) bool {
 	if len(expected) == 0 {
 		return true
 	}
@@ -336,7 +355,7 @@ func (m *ReportPortalMockServer) matchesHeaders(r *http.Request, expected []Post
 		}
 		value := r.Header.Get(header.Key)
 		if value != header.Value {
-			slog.Debug(
+			slog.Debug( //nolint:gosec // structured log with literal message; values are structured args only
 				"Header mismatch",
 				"key",
 				header.Key,
@@ -358,14 +377,14 @@ func (m *ReportPortalMockServer) matchesBody(actual, expected string) bool {
 }
 
 // AddRequestPair adds a new request/response pair dynamically
-func (m *ReportPortalMockServer) AddRequestPair(pair RequestResponsePair) {
+func (m *ReportPortalMockServer) AddRequestPair(pair testdata.RequestResponsePair) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 	m.requestPairs = append(m.requestPairs, pair)
 }
 
 // Reset resets the mock server with new request pairs
-func (m *ReportPortalMockServer) Reset(requestPairs []RequestResponsePair) {
+func (m *ReportPortalMockServer) Reset(requestPairs []testdata.RequestResponsePair) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 	m.requestPairs = requestPairs
