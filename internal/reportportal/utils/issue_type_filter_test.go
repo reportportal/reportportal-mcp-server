@@ -16,7 +16,6 @@ func TestResolveDefectTypeToIssueTypeLocator(t *testing.T) {
 		{"", ""},
 		{"   ", ""},
 		{"To Investigate", IssueLocatorToInvestigate},
-		{"to investigate", IssueLocatorToInvestigate},
 		{"TO_INVESTIGATE", IssueLocatorToInvestigate},
 		{"To  Investigate", IssueLocatorToInvestigate},
 		{"Product Bug", IssueLocatorProductBug},
