@@ -4,18 +4,23 @@
 
 # ReportPortal MCP Server
 
+> **Documentation note:** This README reflects the current development branch. For the available up-to-date list of tools and capabilities, check the [README on the `main` branch](https://github.com/reportportal/reportportal-mcp-server/blob/main/README.md).
+
 ## What is the ReportPortal MCP Server?
 
 The ReportPortal MCP Server is a bridge between your ReportPortal instance and AI chat assistants (such as Claude Desktop, GitHub Copilot, Cursor). In simple terms, it lets you ask questions in plain English about your test runs and get answers directly from ReportPortal. It follows the official [MCP](https://modelcontextprotocol.io/overview) guidelines.
 
-For example, instead of logging into the ReportPortal UI, you could ask your AI assistant "What tests failed in the last run?" or "List the 5 most recent test runs," and it will fetch that information from ReportPortal for you. This makes it easy for QA testers and managers to query test results using natural language, speeding up analysis and reporting.
+Starting with version 2.x, the server also integrates with the **ReportPortal Test Case Management System (TMS)** — test cases, folders, milestones, and test plans — so you can browse and manage test design data through the same chat interface.
+
+For example, instead of logging into the ReportPortal UI, you could ask your AI assistant "What tests failed in the last run?" or "List the 5 most recent test runs," and it will fetch that information from ReportPortal for you. <br/> With TMS support, you can also ask things like "List test cases in the Smoke folder" or "Create a test plan for the current sprint milestone." This makes it easy for QA testers and managers to manage test cases, query test results and test assets using natural language, speeding up planning, analysis and reporting.
 
 ## Why Use It?
 
 - **Quick Test Insights**: Instantly retrieve summaries of test runs, failure counts, or error details without writing code or navigating the UI.
+- **TMS from Chat**: Browse, create, and update test cases, folders, milestones, and test plans in ReportPortal TMS without leaving your AI assistant.
 - **Chat-Based Queries**: Use your favourite AI assistant (Claude, Cursor, etc.) to converse with ReportPortal data. It's like having a smart test-reporting helper in your chat window.
 - **Integration Flexibility**: Works with any MCP-compatible AI tool. You simply point the tool at this server and it can run ReportPortal queries under the hood.
-- **No Custom Scripts Needed**: Common queries (listing runs, getting failures, analysis) are built-in as simple "commands" you invoke via chat.
+- **No Custom Scripts Needed**: Common queries (listing runs, getting failures, analysis, TMS lookups) are built-in as simple "commands" you invoke via chat.
 
 ## Prerequisites
 
@@ -31,13 +36,11 @@ The URL of your ReportPortal instance:
 
 This value is optional. When set, it defines the default project key used for all requests; individual tools can still override it per call via the `projectKey` argument.
 
-The project key is the **URL-safe identifier** for your project — not its display name. Find it by looking at the ReportPortal URL after you open a project:
+The project key is the **unique project identifier** within the ReportPortal instance, do not use the project display name as project key. Find this on the ReportPortal general settings page:
 
 ```text
-https://your-rp-instance.com/ui/#PROJECT_KEY/…
+https://your-rp-instance.com/ui/#organizations/{your-organization}/projects/{your_project}/settings/general
 ```
-
-The segment after `#` is the project key to use. It is passed to the ReportPortal API as-is (only leading/trailing whitespace is trimmed; no other transformation is applied).
 
 ### API Token (`RP_API_TOKEN`)
 
@@ -94,7 +97,7 @@ Configuration:
     "env": {
       "RP_API_TOKEN": "your-api-token",
       "RP_HOST": "https://your-reportportal-instance.com",
-      "RP_PROJECT": "YourProjectInReportPortal"
+      "RP_PROJECT": "YourProjectKeyFromReportPortal"
     }
   }
 }
@@ -113,7 +116,7 @@ Configuration:
     "env": {
       "RP_API_TOKEN": "your-api-token",
       "RP_HOST": "https://your-reportportal-instance.com",
-      "RP_PROJECT": "YourProjectInReportPortal"
+      "RP_PROJECT": "YourProjectKeyFromReportPortal"
     }
   }
 }
@@ -133,7 +136,7 @@ If the ReportPortal MCP Server is already **deployed** and accessible via HTTP, 
     "url": "http://your-mcp-server-host:port/mcp",
     "headers": {
       "Authorization": "Bearer ${RP_API_TOKEN}",
-      "X-Project": "YourProjectInReportPortal"
+      "X-Project": "YourProjectKeyFromReportPortal"
     }
   }
 }
@@ -142,7 +145,7 @@ If the ReportPortal MCP Server is already **deployed** and accessible via HTTP, 
 **Configuration Parameters:**
 - `url`: The HTTP endpoint URL of the remote MCP server (use `/mcp` or `/api/mcp`)
 - `headers.Authorization`: Bearer token for authentication (required)
-- `headers.X-Project`: The ReportPortal project key — the URL segment identifier, not the display name (optional)
+- `headers.X-Project`: The ReportPortal project key — the unique project identifier, not the display name (optional)
 
 ## AI Tool Setup
 
@@ -184,7 +187,7 @@ Or follow the next steps:
       "url": "http://your-mcp-server-host:port/mcp/",
       "headers": {
         "Authorization": "Bearer ${RP_API_TOKEN}",
-        "X-Project": "YourProjectInReportPortal"
+        "X-Project": "YourProjectKeyFromReportPortal"
       }
     }
   }
@@ -227,7 +230,7 @@ Documentation: [Cursor MCP](https://cursor.com/en-US/docs/context/mcp).
       "requestInit": {
         "headers": {
           "Authorization": "Bearer ${RP_API_TOKEN}",
-          "X-Project": "YourProjectInReportPortal"
+          "X-Project": "YourProjectKeyFromReportPortal"
         }
       }
     }
@@ -269,7 +272,7 @@ Documentation: [VS Code Copilot Guide](https://code.visualstudio.com/docs/copilo
       "requestInit": {
         "headers": {
           "Authorization": "Bearer ${RP_API_TOKEN}",
-          "X-Project": "YourProjectInReportPortal"
+          "X-Project": "YourProjectKeyFromReportPortal"
         }
       }
     }
@@ -312,7 +315,7 @@ Claude Desktop does not natively support direct Server-Sent Events (SSE) transpo
 
 **For local installation (Docker):**
 ```bash
-claude mcp add-json reportportal '{"command": "docker", "args": ["run", "-i", "--rm", "-e", "RP_API_TOKEN", "-e", "RP_HOST", "-e", "RP_PROJECT", "reportportal/mcp-server"], "env": {"RP_API_TOKEN": "${RP_API_TOKEN}", "RP_HOST": "https://your-reportportal-instance.com", "RP_PROJECT": "YourProjectInReportPortal"}}'
+claude mcp add-json reportportal '{"command": "docker", "args": ["run", "-i", "--rm", "-e", "RP_API_TOKEN", "-e", "RP_HOST", "-e", "RP_PROJECT", "reportportal/mcp-server"], "env": {"RP_API_TOKEN": "${RP_API_TOKEN}", "RP_HOST": "https://your-reportportal-instance.com", "RP_PROJECT": "YourProjectKeyFromReportPortal"}}'
 ```
 
 **For remote server:**
@@ -320,7 +323,7 @@ claude mcp add-json reportportal '{"command": "docker", "args": ["run", "-i", "-
 > **Note:** The remote server must be **deployed and running** in HTTP mode before connecting.
 
 ```bash
-claude mcp add-json reportportal '{"url": "http://your-mcp-server-host:port/mcp/", "headers": {"Authorization": "Bearer ${RP_API_TOKEN}", "X-Project": "YourProjectInReportPortal"}}'
+claude mcp add-json reportportal '{"url": "http://your-mcp-server-host:port/mcp/", "headers": {"Authorization": "Bearer ${RP_API_TOKEN}", "X-Project": "YourProjectKeyFromReportPortal"}}'
 ```
 
 **Configuration Options:**
@@ -343,7 +346,7 @@ The ReportPortal MCP Server is compatible with any MCP-compatible coding agent. 
     "env": {
       "RP_API_TOKEN": "your-api-token",
       "RP_HOST": "https://your-reportportal-instance.com",
-      "RP_PROJECT": "YourProjectInReportPortal"
+      "RP_PROJECT": "YourProjectKeyFromReportPortal"
     }
   }
 }
@@ -359,7 +362,7 @@ The ReportPortal MCP Server is compatible with any MCP-compatible coding agent. 
     "url": "http://your-mcp-server-host:port/mcp/",
     "headers": {
       "Authorization": "Bearer your-api-token",
-      "X-Project": "YourProjectInReportPortal"
+      "X-Project": "YourProjectKeyFromReportPortal"
     }
   }
 }
@@ -377,6 +380,8 @@ It is strongly recommended to use the **latest versions** of ReportPortal.
 
 The version 1.x of this MCP server supports ReportPortal product versions from [25.1](https://github.com/reportportal/reportportal/releases/tag/25.1) (where the API service version not lower than [5.14.0](https://github.com/reportportal/service-api/releases/tag/5.14.0)).\
 Compatibility with older versions has not been tested and may result in incorrect work of the MCP server.
+
+Version **2.x** (currently in development) adds ReportPortal TMS tools and requires ReportPortal product version **26.1+**, where the Test Case Management API is available.
 
 ## Features
 
@@ -404,7 +409,21 @@ The ReportPortal MCP server provides a comprehensive set of capabilities for int
 - Analyze launches to get detailed test execution insights
 - Generate structured reports with statistics and failure analysis
 
+### Test Case Management (TMS)
+
+Available from MCP server version 2.x (requires ReportPortal 26.1+).
+
+- Browse milestones, test plans, test folders, and test cases with optional filters
+- Create and organize test folders (including nested subfolders)
+- Create, update, and delete manual test cases (`TEXT` scenario type with instructions and expected results)
+- Create milestones and test plans, then assign test cases to plans
+- Retrieve test cases linked to a specific test plan
+
+> **Note:** TMS write tools (`create_*`, `update_*`, `delete_*`, `add_test_cases_to_test_plan`) mutate data in ReportPortal. Use them with care in production projects.
+
 ### Available Tools (commands)
+
+#### Tools. Test results
 
 | Tool Name                  | Description                                      | Parameters                                                                                                    |
 |----------------------------|--------------------------------------------------|---------------------------------------------------------------------------------------------------------------|
@@ -418,7 +437,6 @@ The ReportPortal MCP server provides a comprehensive set of capabilities for int
 | Force Finish Launch        | Forces a launch to finish                        | `launch_id` (required)                                                                                                   |
 | Delete Launch              | Deletes a specific launch                        | `launch_id` (required)                                                                                                   |
 | Import Launch from File    | Imports a launch from a file using a ReportPortal import plugin. Supported file formats depend on the plugins installed on the server (e.g. JUnit XML, Allure ZIP). Available plugins and their accepted MIME types can be discovered via `GET /api/v1/plugin` (filter by `groupType: "IMPORT"`). The handler enforces a decoded upload limit of up to 50 MiB by default, and may apply a lower cap when the selected plugin advertises a smaller `details.maxFileSize`; base64-encoded uploads are measured after decoding. Imports exceeding the effective limit are rejected — split the file or pre-compress it before upload. | `plugin_name` (required), `file_name` (required, e.g. `results.xml`), `file_content` (required, raw text for text formats or base64 for binary), `content_encoding` (optional, `"none"` (default) or `"base64"`), `project` (optional) |
-
 | Get Suites by filter  | Lists test suites for a specific launch           | `launch-id` (required), `name`, `description`, `start_time_from`, `start_time_to`, `attributes`, `parent_id`, `sort`, `page`, `page-size` (all optional)                                                        |
 | Get Test Items by filter  | Lists test items for a specific launch or saved filter           | `launch-id` or `filter-name` (one required), `include-before-after-hooks`, `name`, `description`, `status`, `has_retries`, `start_time_from`, `start_time_to`, `attributes`, `parent_id`, `defect_comment`, `auto_analyzed`, `ignored_in_aa`, `pattern_name`, `ticket_id`, `filter-eq-defect-type` (optional defect/issue type locator from `get_project_defect_types`), `sort`, `page`, `page-size` (all optional)                                                        |
 | Get Logs by filter  | Lists logs for a specific test item or nested step          | `parent-item-id` (required), `log_level`, `log_content`, `logs_with_attachments`, `status`, `sort`, `page`, `page-size` (all optional)                                                        |
@@ -427,19 +445,26 @@ The ReportPortal MCP server provides a comprehensive set of capabilities for int
 | Get Project Defect Types        | Retrieves available defect types for the specific project        | None                                                                                              |
 | Update defect types by item ids        | Updates defect types for multiple test items        |`test_items_ids` (required), `defect_type_id` (required), `defect_type_comment` (optional)                                                                                               |
 | Get Test Items History | Retrieves execution history of test items for a specific launch or parent suite | `filter-eq-launchId` or `filter-eq-parentId` (one required), `historyDepth`, `type`, `name`, `description`, `status`, `start_time_from`, `start_time_to`, `attributes`, `has_retries`, `defect_comment`, `auto_analyzed`, `ignored_in_aa`, `ticket_id`, `pattern_name`, `page`, `page-size`, `page-sort` (all optional) |
-| Get Milestones by filter | Lists TMS milestones for a project, optionally filtered by name or ID | `projectKey` (required), `filter-name` (optional), `filter-id` (optional) |
-| Get Test Plan by ID | Retrieves a TMS test plan by its ID | `projectKey` (required), `id` (required) |
-| Get Test Cases for Test Plan | Lists test cases assigned to a TMS test plan | `projectKey` (required), `test-plan-id` (required) |
-| Get Test Folders by Filter | Lists TMS test folders for a project. All filters are optional; without filters returns the first page. To detect truncation compare `page.totalElements` with `len(content)` and narrow results with `filter-eq-parentId`, `filter-eq-name`, or `filter-cnt-name`. | `projectKey` (required), `filter-eq-id` (optional, integer ≥ 1), `filter-eq-parentId` (optional, integer ≥ 1), `filter-eq-name` (optional), `filter-cnt-name` (optional) |
-| Get Test Cases by Filter | Lists TMS test cases for a project. All filters are optional; without filters returns the first page. To detect truncation compare `page.totalElements` with `len(content)` and narrow results with `filter-eq-testFolderId`, `filter-cnt-name`, `filter-eq-id`, `filter-has-attributeKey`, or `filter-in-priority`. | `projectKey` (required), `filter-eq-id` (optional, integer ≥ 1), `filter-eq-testFolderId` (optional, integer ≥ 1), `filter-cnt-name` (optional), `filter-has-attributeKey` (optional), `filter-in-priority` (optional, enum array: `BLOCKER` \| `CRITICAL` \| `HIGH` \| `LOW` \| `MEDIUM` \| `UNSPECIFIED`) |
-| Create Folder | Creates a new test folder (or subfolder) in the TMS. **Mutates TMS data.** | `projectKey` (required), `name` (required), `description` (optional), `parent-test-folder-id` (optional, integer ≥ 1) |
-| Delete Folder | Deletes a test folder by its ID from the TMS. **Mutates TMS data. Irreversible.** | `projectKey` (required), `folderId` (required, integer ≥ 1) |
-| Create Test Case | Creates a new test case with a TEXT manual scenario type. **Mutates TMS data.** | `projectKey` (required), `name` (required), `description` (optional), `priority` (optional, enum: `LOW` \| `MEDIUM` \| `HIGH` \| `CRITICAL` \| `BLOCKER` \| `UNSPECIFIED`), `test-folder-id` (optional, integer ≥ 1), `instructions` (optional), `expected-result` (optional) |
-| Update Test Case | Updates an existing test case; only provided fields are changed. **Mutates TMS data.** | `projectKey` (required), `testCaseId` (required, integer ≥ 1), `name` (optional), `description` (optional), `priority` (optional, enum: `LOW` \| `MEDIUM` \| `HIGH` \| `CRITICAL` \| `BLOCKER` \| `UNSPECIFIED`), `test-folder-id` (optional, integer ≥ 1), `instructions` (optional), `expected-result` (optional) |
-| Delete Test Case | Deletes a test case by its ID from the TMS. **Mutates TMS data. Irreversible.** | `projectKey` (required), `testCaseId` (required, integer ≥ 1) |
-| Create Milestone | Creates a new milestone in the TMS. **Mutates TMS data.** Dates must be RFC3339 (e.g. `2026-01-01T00:00:00Z`); `end-date` must not precede `start-date`. | `projectKey` (required), `name` (required), `type` (required, enum: `SPRINT` \| `RELEASE` \| `OTHER`), `start-date` (required, RFC3339), `end-date` (required, RFC3339), `status` (optional, enum: `ACTIVE` \| `CLOSED`) |
-| Create Test Plan | Creates a new test plan linked to an existing milestone. **Mutates TMS data.** | `projectKey` (required), `name` (required), `milestone-id` (required, integer ≥ 1), `description` (optional) |
-| Add Test Cases to Test Plan | Adds one or more test cases to an existing TMS test plan. **Mutates TMS data.** | `projectKey` (required), `test-plan-id` (required, integer ≥ 1), `test-case-ids` (required, non-empty array of integers) |
+
+#### Tools. Test Case Management
+
+Available from MCP server version 2.x. Requires ReportPortal 26.1+ with TMS enabled.
+
+| Tool Name                  | Description                                      | Parameters                                                                                                    |
+|----------------------------|--------------------------------------------------|---------------------------------------------------------------------------------------------------------------|
+| Get Milestones by filter | Lists TMS milestones for a project, optionally filtered by name or ID | `filter-name` (optional), `filter-id` (optional) |
+| Get Test Plan by ID | Retrieves a TMS test plan by its ID | `id` (required) |
+| Get Test Cases for Test Plan | Lists test cases assigned to a TMS test plan | `test-plan-id` (required) |
+| Get Test Folders by Filter | Lists TMS test folders for a project. All filters are optional; without filters returns the first page. To detect truncation compare `page.totalElements` with `len(content)` and narrow results with `filter-eq-parentId`, `filter-eq-name`, or `filter-cnt-name`. | `filter-eq-id` (optional, integer ≥ 1), `filter-eq-parentId` (optional, integer ≥ 1), `filter-eq-name` (optional), `filter-cnt-name` (optional) |
+| Get Test Cases by Filter | Lists TMS test cases for a project. All filters are optional; without filters returns the first page. To detect truncation compare `page.totalElements` with `len(content)` and narrow results with `filter-eq-testFolderId`, `filter-cnt-name`, `filter-eq-id`, `filter-has-attributeKey`, or `filter-in-priority`. | `filter-eq-id` (optional, integer ≥ 1), `filter-eq-testFolderId` (optional, integer ≥ 1), `filter-cnt-name` (optional), `filter-has-attributeKey` (optional), `filter-in-priority` (optional, enum array: `BLOCKER` \| `CRITICAL` \| `HIGH` \| `LOW` \| `MEDIUM` \| `UNSPECIFIED`) |
+| Create Folder | Creates a new test folder (or subfolder) in the TMS. **Mutates TMS data.** | `name` (required), `description` (optional), `parent-test-folder-id` (optional, integer ≥ 1) |
+| Delete Folder | Deletes a test folder by its ID from the TMS. **Mutates TMS data. Irreversible.** | `folderId` (required, integer ≥ 1) |
+| Create Test Case | Creates a new test case with a TEXT manual scenario type. **Mutates TMS data.** | `name` (required), `description` (optional), `priority` (optional, enum: `LOW` \| `MEDIUM` \| `HIGH` \| `CRITICAL` \| `BLOCKER` \| `UNSPECIFIED`), `test-folder-id` (optional, integer ≥ 1), `instructions` (optional), `expected-result` (optional) |
+| Update Test Case | Updates an existing test case; only provided fields are changed. **Mutates TMS data.** | `testCaseId` (required, integer ≥ 1), `name` (optional), `description` (optional), `priority` (optional, enum: `LOW` \| `MEDIUM` \| `HIGH` \| `CRITICAL` \| `BLOCKER` \| `UNSPECIFIED`), `test-folder-id` (optional, integer ≥ 1), `instructions` (optional), `expected-result` (optional) |
+| Delete Test Case | Deletes a test case by its ID from the TMS. **Mutates TMS data. Irreversible.** | `testCaseId` (required, integer ≥ 1) |
+| Create Milestone | Creates a new milestone in the TMS. **Mutates TMS data.** Dates must be RFC3339 (e.g. `2026-01-01T00:00:00Z`); `end-date` must not precede `start-date`. | `name` (required), `type` (required, enum: `SPRINT` \| `RELEASE` \| `OTHER`), `start-date` (required, RFC3339), `end-date` (required, RFC3339), `status` (optional, enum: `ACTIVE` \| `CLOSED`) |
+| Create Test Plan | Creates a new test plan linked to an existing milestone. **Mutates TMS data.** | `name` (required), `milestone-id` (required, integer ≥ 1), `description` (optional) |
+| Add Test Cases to Test Plan | Adds one or more test cases to an existing TMS test plan. **Mutates TMS data.** | `test-plan-id` (required, integer ≥ 1), `test-case-ids` (required, non-empty array of integers) |
 
 ### Available Prompts
 
@@ -495,17 +520,17 @@ The server needs to know where your ReportPortal is and how to authenticate. Set
 
 **For stdio mode (default):**
 
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `RP_HOST` | The URL of your ReportPortal (e.g. https://myreportportal.example.com) | Yes |
-| `RP_PROJECT` | Your default project key in ReportPortal (URL-safe identifier, e.g. `my_project`) | Optional |
-| `RP_API_TOKEN` | Your ReportPortal API token (for access) | Yes |
+| Variable | Description                                                                                                                            | Required |
+|----------|----------------------------------------------------------------------------------------------------------------------------------------|----------|
+| `RP_HOST` | The URL of your ReportPortal installation (e.g. https://myreportportal.example.com)                                                    | Yes      |
+| `RP_PROJECT` | Your default project key in ReportPortal (unique project identifier within the ReportPortal instance, e.g. `myorganization_myproject`) | No       |
+| `RP_API_TOKEN` | Your ReportPortal API token (for access)                                                                                               | Yes      |
 
 **For HTTP mode:**
 
 Set `MCP_MODE=http` and configure the following:
 - `RP_HOST`: Required - The URL of your ReportPortal
-- `RP_PROJECT`: Optional - Your default project key (URL-safe identifier)
+- `RP_PROJECT`: Optional - Your default project key (unique project identifier within the ReportPortal instance)
 - `MCP_SERVER_PORT`: Optional - HTTP server port (default: 8080)
 - `MCP_SERVER_HOST`: Optional - HTTP bind host (default: empty)
 - Authentication tokens must be passed per-request via `Authorization: Bearer <token>` header
@@ -515,7 +540,7 @@ Set `MCP_MODE=http` and configure the following:
 
 ```bash
 export RP_HOST="https://your-reportportal-instance.com"
-export RP_PROJECT="YourProjectInReportPortal"
+export RP_PROJECT="YourProjectKeyFromReportPortal"
 export RP_API_TOKEN="your-api-token"
 ./reportportal-mcp-server
 ```
@@ -525,7 +550,7 @@ export RP_API_TOKEN="your-api-token"
 ```bash
 export MCP_MODE=http
 export RP_HOST="https://your-reportportal-instance.com"
-export RP_PROJECT="YourProjectInReportPortal"
+export RP_PROJECT="YourProjectKeyFromReportPortal"
 export MCP_SERVER_PORT=8080
 ./reportportal-mcp-server
 # Tokens are passed per-request via HTTP Authorization header
@@ -706,7 +731,7 @@ curl -I https://your-reportportal-instance.com
 
 # Test API access with your token
 curl -H "Authorization: Bearer your-api-token" \
-     https://your-reportportal-instance.com/api/v1/YourProject/launch
+     https://your-reportportal-instance.com/api/v1/YourProjectKey/launch
 ```
 
 **Via PowerShell:**
@@ -719,7 +744,7 @@ Invoke-WebRequest -Uri "https://your-reportportal-instance.com" -Method Head
 $headers = @{
     "Authorization" = "Bearer your-api-token"
 }
-Invoke-RestMethod -Uri "https://your-reportportal-instance.com/api/v1/YourProject/launch" -Headers $headers
+Invoke-RestMethod -Uri "https://your-reportportal-instance.com/api/v1/YourProjectKey/launch" -Headers $headers
 ```
 
 **Expected Results:**
@@ -756,7 +781,7 @@ curl http://your-mcp-server-host:port/info
 curl -X POST http://your-mcp-server-host:port/mcp \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer your-api-token" \
-  -H "X-Project: YourProject" \
+  -H "X-Project: YourProjectKey" \
   -d '{
     "jsonrpc": "2.0",
     "method": "tools/list",
@@ -774,7 +799,7 @@ Invoke-RestMethod -Uri "http://your-mcp-server-host:port/health"
 $headers = @{
     "Content-Type" = "application/json"
     "Authorization" = "Bearer your-api-token"
-    "X-Project" = "YourProject"
+    "X-Project" = "YourProjectKey"
 }
 $body = @{
     jsonrpc = "2.0"
@@ -857,20 +882,20 @@ tail -f server.log
 INFO: MCP server started
 INFO: Received request: tools/list
 INFO: Processing tool call: get_launches
-DEBUG: Calling ReportPortal API: /api/v1/project/launch
+DEBUG: Calling ReportPortal API: /api/v1/projectKey/launch
 ```
 
 ### 4. Common Verification Issues
 
-| Issue | Cause | Solution |
-|-------|-------|----------|
-| AI shows no ReportPortal tools | MCP server not connected | Check configuration file syntax, restart AI assistant |
-| "Connection refused" error | Server not running or wrong port | Verify server is running: `docker ps` or check process |
-| "401 Unauthorized" | Invalid API token | Regenerate token in ReportPortal profile |
-| "403 Forbidden" | Token valid but no project access | Check `RP_PROJECT` key (must match the URL segment, not the display name), verify user has access |
-| "404 Not Found" | Wrong endpoint URL | Ensure remote URL ends with `/mcp/` |
-| Empty results from queries | No data in ReportPortal | Run some tests first to populate data |
-| Timeout errors | Network issues or slow ReportPortal | Check network connectivity, ReportPortal performance |
+| Issue | Cause | Solution                                                                                            |
+|-------|-------|-----------------------------------------------------------------------------------------------------|
+| AI shows no ReportPortal tools | MCP server not connected | Check configuration file syntax, restart AI assistant                                               |
+| "Connection refused" error | Server not running or wrong port | Verify server is running: `docker ps` or check process                                              |
+| "401 Unauthorized" | Invalid API token | Regenerate token in ReportPortal profile                                                            |
+| "403 Forbidden" | Token valid but no project access | Check `RP_PROJECT` key (must match the `Project KEY`, not the display name), verify user has access |
+| "404 Not Found" | Wrong endpoint URL | Ensure remote URL ends with `/mcp/`                                                                 |
+| Empty results from queries | No data in ReportPortal | Run some tests first to populate data                                                               |
+| Timeout errors | Network issues or slow ReportPortal | Check network connectivity, ReportPortal performance                                                |
 
 ## Troubleshooting
 
@@ -918,7 +943,7 @@ Solutions:
 
 Solutions:
 1. Verify user has access to the specified project
-2. Check project key (`RP_PROJECT`) matches exactly (case-sensitive, must be the URL segment, not the display name)
+2. Check project key (`RP_PROJECT`) matches exactly (case-sensitive, must be the `Project Key`, not the display name)
 3. Verify user role has sufficient permissions
 4. For remote servers, check `X-Project` header is set correctly
 
