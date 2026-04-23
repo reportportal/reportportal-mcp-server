@@ -272,7 +272,6 @@ func (lr *TestItemResources) toolGetTestItemsByFilter() (*mcp.Tool, ToolHandler[
 		Description: "Filters results to test items with this defect/issue type locator (maps to filter.eq.issueType). " +
 			"Use get_project_defect_types to retrieve the valid locator values for your project " +
 			"(e.g. ti001, pb001, ab001, si001, nd001 for the built-in types, or project-specific subtypes like ab002). " +
-			"All possible values can be received from the tool get_project_defect_types. " +
 			"Example: {\"NO_DEFECT\": { \"locator\": \"nd001\" }} (where NO_DEFECT is the defect type name, nd001 is the defect type unique id)",
 	}
 
