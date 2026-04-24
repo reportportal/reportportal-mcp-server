@@ -117,7 +117,7 @@ type PostmanResponse struct {
 type TestCase struct {
 	Name         string `json:"name"`
 	Description  string `json:"description,omitempty"`
-	EndpointPath string `json:"endpointPath,omitempty"` // ReportPortal API endpoint path pattern (e.g., "/v1/{projectName}/item/{itemId}")
+	EndpointPath string `json:"endpointPath,omitempty"` // ReportPortal API endpoint path pattern (e.g., "/v1/{projectKey}/item/{itemId}")
 
 	// ReportPortal Mock configuration
 	ReportPortalMock ReportPortalMockConfig `json:"reportPortalMock"`

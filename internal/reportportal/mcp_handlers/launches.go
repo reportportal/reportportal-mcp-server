@@ -744,7 +744,7 @@ func (lr *LaunchResources) toolRunAutoAnalysis() (*mcp.Tool, ToolHandler[RunAuto
 
 				rs, response, err := lr.client.LaunchAPI.
 					StartLaunchAnalyzer(ctx, project).
-					AnalyzeLaunchRQ(openapi.AnalyzeLaunchRQ{
+					ComEpamReportportalBaseModelLaunchAnalyzeLaunchRQ(openapi.ComEpamReportportalBaseModelLaunchAnalyzeLaunchRQ{
 						LaunchId:         int64(args.LaunchID),
 						AnalyzerMode:     strings.ToUpper(args.AnalyzerMode),
 						AnalyzerTypeName: strings.ToUpper(args.AnalyzerType),
@@ -809,7 +809,7 @@ func (lr *LaunchResources) toolUniqueErrorAnalysis() (*mcp.Tool, ToolHandler[Uni
 
 				rs, response, err := lr.client.LaunchAPI.
 					CreateClusters(ctx, project).
-					CreateClustersRQ(openapi.CreateClustersRQ{
+					ComEpamReportportalBaseModelLaunchClusterCreateClustersRQ(openapi.ComEpamReportportalBaseModelLaunchClusterCreateClustersRQ{
 						LaunchId:      int64(args.LaunchID),
 						RemoveNumbers: openapi.PtrBool(args.RemoveNumbers),
 					}).
@@ -900,12 +900,16 @@ func (lr *LaunchResources) toolUpdateLaunch() (*mcp.Tool, ToolHandler[UpdateLaun
 					)
 				}
 
-				updateRQ := openapi.UpdateLaunchRQ{}
+				updateRQ := openapi.ComEpamReportportalBaseModelLaunchUpdateLaunchRQ{}
 				if args.Description != nil {
 					updateRQ.SetDescription(*args.Description)
 				}
 				if args.Attributes != nil {
-					attrs := make([]openapi.ItemAttributeResource, 0, len(args.Attributes))
+					attrs := make(
+						[]openapi.ComEpamReportportalBaseReportingItemAttributeResource,
+						0,
+						len(args.Attributes),
+					)
 					for i, a := range args.Attributes {
 						if strings.TrimSpace(a.Value) == "" {
 							if trimmedKey := strings.TrimSpace(a.Key); trimmedKey != "" {
@@ -917,7 +921,9 @@ func (lr *LaunchResources) toolUpdateLaunch() (*mcp.Tool, ToolHandler[UpdateLaun
 							}
 							return nil, nil, fmt.Errorf("attribute[%d] has empty value", i)
 						}
-						attr := openapi.ItemAttributeResource{Value: a.Value}
+						attr := openapi.ComEpamReportportalBaseReportingItemAttributeResource{
+							Value: a.Value,
+						}
 						if trimmedKey := strings.TrimSpace(a.Key); trimmedKey != "" {
 							attr.SetKey(trimmedKey)
 						}
@@ -928,7 +934,7 @@ func (lr *LaunchResources) toolUpdateLaunch() (*mcp.Tool, ToolHandler[UpdateLaun
 
 				rs, response, err := lr.client.LaunchAPI.
 					UpdateLaunch(ctx, int64(args.LaunchID), project).
-					UpdateLaunchRQ(updateRQ).
+					ComEpamReportportalBaseModelLaunchUpdateLaunchRQ(updateRQ).
 					Execute()
 				if err != nil {
 					return nil, nil, fmt.Errorf(

@@ -1,7 +1,7 @@
 {
   "name": "Get Test Item By ID - Extended Test",
   "description": "Test case for getting a test item by ID from ReportPortal via MCP Server using extended API response format",
-  "endpointPath": "/v1/{projectName}/item/{itemId}",
+  "endpointPath": "/v1/{projectKey}/item/{itemId}",
   "reportPortalMock": {
     "requestResponsePairs": [
       {
