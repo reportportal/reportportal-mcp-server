@@ -19,23 +19,14 @@ import (
 	"github.com/reportportal/reportportal-mcp-server/internal/reportportal/utils"
 )
 
-// projectSchema returns a JSON schema for the project parameter
-func (lr *TestItemResources) projectSchema() *jsonschema.Schema {
-	return &jsonschema.Schema{
-		Type:        "string",
-		Description: "Project name",
-		Default:     mustMarshalJSON(lr.defaultProject),
-	}
-}
-
 // RegisterTestItemTools registers all test item-related tools and resources with the MCP server
 func RegisterTestItemTools(
 	s *mcp.Server,
 	rpClient *gorp.Client,
-	defaultProject string,
+	defaultProjectKey string,
 	analyticsClient *analytics.Analytics,
 ) {
-	testItems := NewTestItemResources(rpClient, analyticsClient, defaultProject)
+	testItems := NewTestItemResources(rpClient, analyticsClient, defaultProjectKey)
 
 	registerTool(s, testItems.toolGetTestItemById)
 	registerTool(s, testItems.toolGetTestItemsByFilter)
@@ -51,25 +42,25 @@ func RegisterTestItemTools(
 
 // TestItemResources is a struct that encapsulates the ReportPortal client.
 type TestItemResources struct {
-	client         *gorp.Client // Client to interact with the ReportPortal API
-	defaultProject string       // Default project name
-	analytics      *analytics.Analytics
+	client            *gorp.Client // Client to interact with the ReportPortal API
+	defaultProjectKey string       // Default project key
+	analytics         *analytics.Analytics
 }
 
 func NewTestItemResources(
 	client *gorp.Client,
 	analytics *analytics.Analytics,
-	project string,
+	projectKey string,
 ) *TestItemResources {
 	return &TestItemResources{
-		client:         client,
-		defaultProject: project,
-		analytics:      analytics,
+		client:            client,
+		defaultProjectKey: projectKey,
+		analytics:         analytics,
 	}
 }
 
 // resolveSavedFilterIDByName returns the numeric filter ID for the filterId query parameter
-// using GET /v1/{projectName}/filter with filter.eq.name.
+// using GET /v1/{projectKey}/filter with filter.eq.name.
 func (lr *TestItemResources) resolveSavedFilterIDByName(
 	ctx context.Context,
 	project, filterName string,
@@ -139,7 +130,7 @@ func (lr *TestItemResources) resolveFilterIDForProvider(
 
 // GetTestItemsByFilterArgs holds filter and pagination params for get_test_items_by_filter.
 type GetTestItemsByFilterArgs struct {
-	Project                     string `json:"project"`
+	ProjectKey                  string `json:"projectKey"`
 	LaunchID                    int32  `json:"launch-id"`
 	Page                        uint   `json:"page"`
 	PageSize                    uint   `json:"page-size"`
@@ -172,7 +163,7 @@ func (lr *TestItemResources) toolGetTestItemsByFilter() (*mcp.Tool, ToolHandler[
 	properties := make(map[string]*jsonschema.Schema)
 
 	// Required parameters
-	properties["project"] = lr.projectSchema()
+	properties[utils.ProjectKeyField] = utils.ProjectKeySchema(lr.defaultProjectKey)
 
 	// Conditionally required parameters
 	properties["launch-id"] = &jsonschema.Schema{
@@ -281,11 +272,11 @@ func (lr *TestItemResources) toolGetTestItemsByFilter() (*mcp.Tool, ToolHandler[
 			InputSchema: &jsonschema.Schema{
 				Type:       "object",
 				Properties: properties,
-				Required:   []string{"project"},
+				Required:   utils.RequiredFields(),
 			},
 		}, utils.WithAnalytics(lr.analytics, "get_test_items_by_filter", func(ctx context.Context, request *mcp.CallToolRequest, args GetTestItemsByFilterArgs) (*mcp.CallToolResult, any, error) {
 			slog.Debug("START PROCESSING")
-			project, err := utils.ExtractProject(ctx, args.Project)
+			project, err := utils.ExtractProject(ctx, args.ProjectKey)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -439,14 +430,14 @@ func (lr *TestItemResources) toolGetTestItemsByFilter() (*mcp.Tool, ToolHandler[
 
 // GetTestItemByIdArgs holds params for get_test_item_by_id.
 type GetTestItemByIdArgs struct {
-	Project    string `json:"project"`
+	ProjectKey string `json:"projectKey"`
 	TestItemID string `json:"test_item_id"`
 }
 
 // toolGetTestItemById creates a tool to retrieve a test item by its ID.
 func (lr *TestItemResources) toolGetTestItemById() (*mcp.Tool, ToolHandler[GetTestItemByIdArgs, any]) {
 	properties := make(map[string]*jsonschema.Schema)
-	properties["project"] = lr.projectSchema()
+	properties[utils.ProjectKeyField] = utils.ProjectKeySchema(lr.defaultProjectKey)
 	properties["test_item_id"] = &jsonschema.Schema{
 		Type:        "string",
 		Description: "Test Item ID",
@@ -458,10 +449,10 @@ func (lr *TestItemResources) toolGetTestItemById() (*mcp.Tool, ToolHandler[GetTe
 			InputSchema: &jsonschema.Schema{
 				Type:       "object",
 				Properties: properties,
-				Required:   []string{"project", "test_item_id"},
+				Required:   utils.RequiredFields("test_item_id"),
 			},
 		}, utils.WithAnalytics(lr.analytics, "get_test_item_by_id", func(ctx context.Context, request *mcp.CallToolRequest, args GetTestItemByIdArgs) (*mcp.CallToolResult, any, error) {
-			project, err := utils.ExtractProject(ctx, args.Project)
+			project, err := utils.ExtractProject(ctx, args.ProjectKey)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -490,9 +481,9 @@ func (lr *TestItemResources) toolGetTestItemById() (*mcp.Tool, ToolHandler[GetTe
 func (lr *TestItemResources) resourceTestItem() (*mcp.ResourceTemplate, mcp.ResourceHandler) {
 	return &mcp.ResourceTemplate{
 			Name:        "reportportal-test-item-by-id",
-			Description: "Access ReportPortal test items by URI (reportportal://{project}/testitem/{testItemId})",
+			Description: "Access ReportPortal test items by URI (reportportal://{projectKey}/testitem/{testItemId})",
 			MIMEType:    "application/json",
-			URITemplate: "reportportal://{project}/testitem/{testItemId}",
+			URITemplate: "reportportal://{projectKey}/testitem/{testItemId}",
 		}, func(ctx context.Context, request *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
 			// Parse the URI to extract parameters
 			uri := request.Params.URI
@@ -527,7 +518,7 @@ func (lr *TestItemResources) resourceTestItem() (*mcp.ResourceTemplate, mcp.Reso
 		}
 }
 
-// parseTestItemURI parses a URI like "reportportal://{project}/testitem/{testItemId}"
+// parseTestItemURI parses a URI like "reportportal://{projectKey}/testitem/{testItemId}"
 // and extracts the project and testItemId parameters.
 func parseTestItemURI(uri string) (project, testItemId string, err error) {
 	return utils.ParseReportPortalURI(uri, "testitem")
@@ -535,13 +526,13 @@ func parseTestItemURI(uri string) (project, testItemId string, err error) {
 
 // GetTestItemAttachmentArgs holds params for get_test_item_attachment_by_id.
 type GetTestItemAttachmentArgs struct {
-	Project             string `json:"project"`
+	ProjectKey          string `json:"projectKey"`
 	AttachmentContentID string `json:"attachment-content-id"`
 }
 
 func (lr *TestItemResources) toolGetTestItemAttachment() (*mcp.Tool, ToolHandler[GetTestItemAttachmentArgs, any]) {
 	properties := make(map[string]*jsonschema.Schema)
-	properties["project"] = lr.projectSchema()
+	properties[utils.ProjectKeyField] = utils.ProjectKeySchema(lr.defaultProjectKey)
 	properties["attachment-content-id"] = &jsonschema.Schema{
 		Type:        "string",
 		Description: "Attachment binary content ID",
@@ -553,10 +544,10 @@ func (lr *TestItemResources) toolGetTestItemAttachment() (*mcp.Tool, ToolHandler
 			InputSchema: &jsonschema.Schema{
 				Type:       "object",
 				Properties: properties,
-				Required:   []string{"project", "attachment-content-id"},
+				Required:   utils.RequiredFields("attachment-content-id"),
 			},
 		}, utils.WithAnalytics(lr.analytics, "get_test_item_attachment_by_id", func(ctx context.Context, request *mcp.CallToolRequest, args GetTestItemAttachmentArgs) (*mcp.CallToolResult, any, error) {
-			project, err := utils.ExtractProject(ctx, args.Project)
+			project, err := utils.ExtractProject(ctx, args.ProjectKey)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -625,7 +616,7 @@ func (lr *TestItemResources) toolGetTestItemAttachment() (*mcp.Tool, ToolHandler
 
 // GetTestItemLogsByFilterArgs holds filter and pagination params for get_test_item_logs_by_filter.
 type GetTestItemLogsByFilterArgs struct {
-	Project               string `json:"project"`
+	ProjectKey            string `json:"projectKey"`
 	ParentItemID          string `json:"parent-item-id"`
 	Page                  uint   `json:"page"`
 	PageSize              uint   `json:"page-size"`
@@ -639,7 +630,7 @@ type GetTestItemLogsByFilterArgs struct {
 // toolGetTestItemLogsByFilter creates a tool to get test items logs for a specific launch.
 func (lr *TestItemResources) toolGetTestItemLogsByFilter() (*mcp.Tool, ToolHandler[GetTestItemLogsByFilterArgs, any]) {
 	properties := make(map[string]*jsonschema.Schema)
-	properties["project"] = lr.projectSchema()
+	properties[utils.ProjectKeyField] = utils.ProjectKeySchema(lr.defaultProjectKey)
 	properties["parent-item-id"] = &jsonschema.Schema{
 		Type:        "string",
 		Description: "Items with specific Parent Item ID, this is a required parameter",
@@ -685,11 +676,11 @@ func (lr *TestItemResources) toolGetTestItemLogsByFilter() (*mcp.Tool, ToolHandl
 			InputSchema: &jsonschema.Schema{
 				Type:       "object",
 				Properties: properties,
-				Required:   []string{"project", "parent-item-id"},
+				Required:   utils.RequiredFields("parent-item-id"),
 			},
 		}, utils.WithAnalytics(lr.analytics, "get_test_item_logs_by_filter", func(ctx context.Context, request *mcp.CallToolRequest, args GetTestItemLogsByFilterArgs) (*mcp.CallToolResult, any, error) {
 			slog.Debug("START PROCESSING")
-			project, err := utils.ExtractProject(ctx, args.Project)
+			project, err := utils.ExtractProject(ctx, args.ProjectKey)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -756,7 +747,7 @@ func (lr *TestItemResources) toolGetTestItemLogsByFilter() (*mcp.Tool, ToolHandl
 
 // GetTestSuitesByFilterArgs holds filter and pagination params for get_test_suites_by_filter.
 type GetTestSuitesByFilterArgs struct {
-	Project                     string `json:"project"`
+	ProjectKey                  string `json:"projectKey"`
 	LaunchID                    uint32 `json:"launch-id"`
 	Page                        uint   `json:"page"`
 	PageSize                    uint   `json:"page-size"`
@@ -773,7 +764,7 @@ type GetTestSuitesByFilterArgs struct {
 // toolGetTestSuitesByFilter creates a tool to get test suites for a specific launch.
 func (lr *TestItemResources) toolGetTestSuitesByFilter() (*mcp.Tool, ToolHandler[GetTestSuitesByFilterArgs, any]) {
 	properties := make(map[string]*jsonschema.Schema)
-	properties["project"] = lr.projectSchema()
+	properties[utils.ProjectKeyField] = utils.ProjectKeySchema(lr.defaultProjectKey)
 	properties["launch-id"] = &jsonschema.Schema{
 		Type:        "integer",
 		Description: "Suites with specific Launch ID, this is a required parameter",
@@ -821,11 +812,11 @@ func (lr *TestItemResources) toolGetTestSuitesByFilter() (*mcp.Tool, ToolHandler
 			InputSchema: &jsonschema.Schema{
 				Type:       "object",
 				Properties: properties,
-				Required:   []string{"project", "launch-id"},
+				Required:   utils.RequiredFields("launch-id"),
 			},
 		}, utils.WithAnalytics(lr.analytics, "get_test_suites_by_filter", func(ctx context.Context, request *mcp.CallToolRequest, args GetTestSuitesByFilterArgs) (*mcp.CallToolResult, any, error) {
 			slog.Debug("START PROCESSING")
-			project, err := utils.ExtractProject(ctx, args.Project)
+			project, err := utils.ExtractProject(ctx, args.ProjectKey)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -940,15 +931,15 @@ func getDefectTypesFromJson(rawBody []byte) (string, error) {
 	return string(subtypesJSON), nil
 }
 
-// ProjectArgs holds just the project parameter.
-type ProjectArgs struct {
-	Project string `json:"project"`
+// ProjectKeyArgs holds just the projectKey parameter.
+type ProjectKeyArgs struct {
+	ProjectKey string `json:"projectKey"`
 }
 
 // toolGetProjectDefectTypes creates a tool to retrieve all defect types for a specific project.
-func (lr *TestItemResources) toolGetProjectDefectTypes() (*mcp.Tool, ToolHandler[ProjectArgs, any]) {
+func (lr *TestItemResources) toolGetProjectDefectTypes() (*mcp.Tool, ToolHandler[ProjectKeyArgs, any]) {
 	properties := make(map[string]*jsonschema.Schema)
-	properties["project"] = lr.projectSchema()
+	properties[utils.ProjectKeyField] = utils.ProjectKeySchema(lr.defaultProjectKey)
 
 	return &mcp.Tool{
 			Name:        "get_project_defect_types",
@@ -956,10 +947,10 @@ func (lr *TestItemResources) toolGetProjectDefectTypes() (*mcp.Tool, ToolHandler
 			InputSchema: &jsonschema.Schema{
 				Type:       "object",
 				Properties: properties,
-				Required:   []string{"project"},
+				Required:   utils.RequiredFields(),
 			},
-		}, utils.WithAnalytics(lr.analytics, "get_project_defect_types", func(ctx context.Context, request *mcp.CallToolRequest, args ProjectArgs) (*mcp.CallToolResult, any, error) {
-			project, err := utils.ExtractProject(ctx, args.Project)
+		}, utils.WithAnalytics(lr.analytics, "get_project_defect_types", func(ctx context.Context, request *mcp.CallToolRequest, args ProjectKeyArgs) (*mcp.CallToolResult, any, error) {
+			project, err := utils.ExtractProject(ctx, args.ProjectKey)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -998,7 +989,7 @@ func (lr *TestItemResources) toolGetProjectDefectTypes() (*mcp.Tool, ToolHandler
 
 // UpdateDefectTypeArgs holds params for update_defect_type_for_test_items.
 type UpdateDefectTypeArgs struct {
-	Project           string   `json:"project"`
+	ProjectKey        string   `json:"projectKey"`
 	TestItemsIDs      []string `json:"test_items_ids"`
 	DefectTypeID      string   `json:"defect_type_id"`
 	DefectTypeComment string   `json:"defect_type_comment"`
@@ -1007,7 +998,7 @@ type UpdateDefectTypeArgs struct {
 // toolUpdateDefectTypeForTestItems creates a tool to update the defect type for a list of specific test items.
 func (lr *TestItemResources) toolUpdateDefectTypeForTestItems() (*mcp.Tool, ToolHandler[UpdateDefectTypeArgs, any]) {
 	properties := make(map[string]*jsonschema.Schema)
-	properties["project"] = lr.projectSchema()
+	properties[utils.ProjectKeyField] = utils.ProjectKeySchema(lr.defaultProjectKey)
 	properties["test_items_ids"] = &jsonschema.Schema{
 		Type:        "array",
 		Description: "Array of test items IDs",
@@ -1030,10 +1021,13 @@ func (lr *TestItemResources) toolUpdateDefectTypeForTestItems() (*mcp.Tool, Tool
 			InputSchema: &jsonschema.Schema{
 				Type:       "object",
 				Properties: properties,
-				Required:   []string{"project", "test_items_ids", "defect_type_id"},
+				Required: utils.RequiredFields(
+					"test_items_ids",
+					"defect_type_id",
+				),
 			},
 		}, utils.WithAnalytics(lr.analytics, "update_defect_type_for_test_items", func(ctx context.Context, request *mcp.CallToolRequest, args UpdateDefectTypeArgs) (*mcp.CallToolResult, any, error) {
-			project, err := utils.ExtractProject(ctx, args.Project)
+			project, err := utils.ExtractProject(ctx, args.ProjectKey)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -1050,7 +1044,11 @@ func (lr *TestItemResources) toolUpdateDefectTypeForTestItems() (*mcp.Tool, Tool
 			}
 
 			// Build the list of issues
-			issues := make([]openapi.IssueDefinition, 0, len(args.TestItemsIDs))
+			issues := make(
+				[]openapi.ComEpamReportportalBaseModelIssueIssueDefinition,
+				0,
+				len(args.TestItemsIDs),
+			)
 			var commentPtr *string
 			if args.DefectTypeComment != "" {
 				commentPtr = &args.DefectTypeComment
@@ -1066,9 +1064,9 @@ func (lr *TestItemResources) toolUpdateDefectTypeForTestItems() (*mcp.Tool, Tool
 						testItemIdStr,
 					)
 				}
-				issues = append(issues, openapi.IssueDefinition{
+				issues = append(issues, openapi.ComEpamReportportalBaseModelIssueIssueDefinition{
 					TestItemId: testItemId,
-					Issue: openapi.Issue{
+					Issue: openapi.ComEpamReportportalBaseReportingIssue{
 						IssueType:    args.DefectTypeID,
 						AutoAnalyzed: openapi.PtrBool(false),
 						Comment:      commentPtr,
@@ -1077,7 +1075,7 @@ func (lr *TestItemResources) toolUpdateDefectTypeForTestItems() (*mcp.Tool, Tool
 			}
 
 			apiRequest := lr.client.TestItemAPI.DefineTestItemIssueType(ctx, project).
-				DefineIssueRQ(openapi.DefineIssueRQ{
+				ComEpamReportportalBaseModelIssueDefineIssueRQ(openapi.ComEpamReportportalBaseModelIssueDefineIssueRQ{
 					Issues: issues,
 				})
 
@@ -1098,7 +1096,7 @@ func (lr *TestItemResources) toolUpdateDefectTypeForTestItems() (*mcp.Tool, Tool
 
 // GetTestItemsHistoryArgs holds filter and pagination params for get_test_items_history.
 type GetTestItemsHistoryArgs struct {
-	Project                     string   `json:"project"`
+	ProjectKey                  string   `json:"projectKey"`
 	FilterEqLaunchId            int32    `json:"filter-eq-launchId"`
 	FilterEqParentId            uint64   `json:"filter-eq-parentId"`
 	Page                        uint     `json:"page"`
@@ -1124,7 +1122,7 @@ type GetTestItemsHistoryArgs struct {
 // toolGetTestItemsHistory creates a tool to retrieve history of test items.
 func (lr *TestItemResources) toolGetTestItemsHistory() (*mcp.Tool, ToolHandler[GetTestItemsHistoryArgs, any]) {
 	properties := make(map[string]*jsonschema.Schema)
-	properties["project"] = lr.projectSchema()
+	properties[utils.ProjectKeyField] = utils.ProjectKeySchema(lr.defaultProjectKey)
 	properties["filter-eq-launchId"] = &jsonschema.Schema{
 		Type:        "integer",
 		Description: "Filter by Launch ID. Conditionally required if Parent ID is not provided.",
@@ -1225,11 +1223,11 @@ func (lr *TestItemResources) toolGetTestItemsHistory() (*mcp.Tool, ToolHandler[G
 			InputSchema: &jsonschema.Schema{
 				Type:       "object",
 				Properties: properties,
-				Required:   []string{"project"},
+				Required:   utils.RequiredFields(),
 			},
 		}, utils.WithAnalytics(lr.analytics, "get_test_items_history", func(ctx context.Context, request *mcp.CallToolRequest, args GetTestItemsHistoryArgs) (*mcp.CallToolResult, any, error) {
 			slog.Debug("START PROCESSING")
-			project, err := utils.ExtractProject(ctx, args.Project)
+			project, err := utils.ExtractProject(ctx, args.ProjectKey)
 			if err != nil {
 				return nil, nil, err
 			}

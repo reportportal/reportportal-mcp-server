@@ -81,7 +81,7 @@
       ],
       "body": {
         "mode": "raw",
-        "raw": "{\n  \"id\": 1,\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"arguments\": {\n      \"launch\": \"Demo Api Tests\"\n    },\n    \"name\": \"get_last_launch_by_name\"\n  }\n}"
+        "raw": "{\n  \"id\": 1,\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"arguments\": {\n      \"projectKey\": \"test-project\",\n      \"launch\": \"Demo Api Tests\"\n    },\n    \"name\": \"get_last_launch_by_name\"\n  }\n}"
       },
       "url": {
         "raw": "/mcp",

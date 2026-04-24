@@ -64,7 +64,7 @@
       ],
       "body": {
         "mode": "raw",
-        "raw": "{\n  \"id\": 1,\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"arguments\": {\n      \"project\": \"\",\n      \"test_item_id\": \"5638608055\"\n    },\n    \"name\": \"get_test_item_by_id\"\n  }\n}"
+        "raw": "{\n  \"id\": 1,\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"arguments\": {\n      \"projectKey\": \"test-project\",\n      \"test_item_id\": \"5638608055\"\n    },\n    \"name\": \"get_test_item_by_id\"\n  }\n}"
       },
       "url": {
         "raw": "/mcp",

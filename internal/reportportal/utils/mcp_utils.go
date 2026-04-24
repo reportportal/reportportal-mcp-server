@@ -2,12 +2,55 @@ package utils
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"strings"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+// ProjectKeyField is the MCP parameter name for the ReportPortal project identifier.
+// Struct JSON tags (e.g. `json:"projectKey"`) must remain string literals and cannot
+// reference this constant.
+const ProjectKeyField = "projectKey"
+
+// RequiredFields builds the Required slice for a tool's InputSchema.
+// ProjectKeyField is always included first: in HTTP mode there is no env-var
+// fallback so it must be supplied by the caller; in stdio mode it still
+// appears in Required (the schema carries a default value so clients can
+// pre-fill it) so the field is consistently visible across both modes.
+// Duplicates in others are silently dropped.
+func RequiredFields(others ...string) []string {
+	result := []string{ProjectKeyField}
+	seen := map[string]bool{ProjectKeyField: true}
+	for _, f := range others {
+		if !seen[f] {
+			seen[f] = true
+			result = append(result, f)
+		}
+	}
+	return result
+}
+
+// ProjectKeySchema returns a JSON schema for the projectKey MCP tool parameter.
+// Default is set only when defaultProjectKey is non-empty (JSON default is omitted otherwise).
+func ProjectKeySchema(defaultProjectKey string) *jsonschema.Schema {
+	s := &jsonschema.Schema{
+		Type: "string",
+		Description: "URL-safe project key: the identifier from ReportPortal URLs after the '#' " +
+			"(not the project display name).",
+	}
+	if defaultProjectKey != "" {
+		b, err := json.Marshal(defaultProjectKey)
+		if err != nil {
+			panic(fmt.Sprintf("failed to marshal JSON: %v", err))
+		}
+		s.Default = b
+	}
+	return s
+}
 
 // ApplyPaginationOptions applies pagination to an API request from typed values.
 // Zero values for page and pageSize fall back to defaults.

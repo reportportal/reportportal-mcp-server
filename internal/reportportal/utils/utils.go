@@ -303,7 +303,7 @@ func ReadResponseBody(response *http.Response) (*mcp.CallToolResult, any, error)
 //   - expectedSegment: The expected middle segment (e.g., "testitem", "launch")
 //
 // Returns:
-//   - part0: The first path segment (typically the project name)
+//   - part0: The first path segment (typically the projectKey)
 //   - part2: The third path segment (typically an ID)
 //   - err: Error if the URI format is invalid
 func ParseReportPortalURI(uri, expectedSegment string) (part0, part2 string, err error) {
