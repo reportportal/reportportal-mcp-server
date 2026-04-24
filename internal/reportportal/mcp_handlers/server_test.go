@@ -77,7 +77,7 @@ func TestNewServer_BearerTokenSentWithTLSConfig(t *testing.T) {
 	// We discard the tool result; the assertion is on the auth header captured above.
 	_, err = cs.CallTool(context.Background(), &mcp.CallToolParams{
 		Name:      "get_launches",
-		Arguments: map[string]any{"project": project},
+		Arguments: map[string]any{"projectKey": project},
 	})
 	require.NoError(t, err, "CallTool returned protocol error")
 
@@ -114,7 +114,7 @@ func TestNewServer_BearerTokenSentWithoutTLS(t *testing.T) {
 
 	_, err = cs.CallTool(context.Background(), &mcp.CallToolParams{
 		Name:      "get_launches",
-		Arguments: map[string]any{"project": project},
+		Arguments: map[string]any{"projectKey": project},
 	})
 	require.NoError(t, err, "CallTool returned protocol error")
 

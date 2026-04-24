@@ -21,7 +21,7 @@ func TestGetDefectTypesFromJson(t *testing.T) {
 			name: "valid project JSON with defect types",
 			rawBody: []byte(`{
 				"projectId": 123,
-				"projectName": "test_project",
+				"projectKey": "test_project",
 				"entryType": "INTERNAL",
 				"configuration": {
 					"subTypes": {
@@ -55,7 +55,7 @@ func TestGetDefectTypesFromJson(t *testing.T) {
 			name: "missing configuration field",
 			rawBody: []byte(`{
 				"projectId": 1,
-				"projectName": "test_project"
+				"projectKey": "test_project"
 			}`),
 			expectError: true,
 			errorMsg:    "configuration field not found or invalid in response",

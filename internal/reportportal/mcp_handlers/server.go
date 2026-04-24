@@ -147,7 +147,7 @@ func newMCPServer(cmd *cli.Command) (*mcp.Server, *analytics.Analytics, error) {
 	token := cmd.String("token")                     // API token
 	host := cmd.String("rp-host")                    // ReportPortal host URL
 	userID := cmd.String("user-id")                  // Unified user ID for analytics
-	project := cmd.String("project")                 // ReportPortal project name
+	project := cmd.String("project")                 // ReportPortal project key
 	analyticsAPISecret := analytics.GetAnalyticArg() // Analytics API secret
 	analyticsOff := cmd.Bool("analytics-off")        // Disable analytics flag
 
@@ -205,7 +205,7 @@ func RunStdioServer(ctx context.Context, cmd *cli.Command) error {
 
 	rpProject := cmd.String("project")
 	if rpProject != "" {
-		// Add project to request context default project name from Environment variable
+		// Store the default project key in context; used as fallback when a tool call omits projectKey.
 		ctx = utils.WithProjectInContext(ctx, rpProject)
 	}
 	mcpServer, analyticsInstance, err := newMCPServer(cmd)
