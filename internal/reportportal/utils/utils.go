@@ -119,12 +119,21 @@ func parseTimestampToEpoch(timestampStr string) (int64, error) {
 			}
 		}
 	}
-	// Try parsing as RFC3339 format
+	// Try parsing as RFC3339 format (offset with colon, e.g. +00:00 or Z)
 	if t, err := time.Parse(time.RFC3339, timestampStr); err == nil {
+		return t.UnixMilli(), nil
+	}
+	// Try parsing as RFC3339Nano (RFC3339 with sub-second precision)
+	if t, err := time.Parse(time.RFC3339Nano, timestampStr); err == nil {
 		return t.UnixMilli(), nil
 	}
 	// Try parsing as other common formats
 	formats := []string{
+		// ISO8601 with numeric timezone offset but no colon (e.g. +0000, -0500)
+		// Go's RFC3339 requires a colon; these handle the colon-less variant.
+		"2006-01-02T15:04:05.999-0700",
+		"2006-01-02T15:04:05-0700",
+		// Timezone-less formats (assumed UTC)
 		"2006-01-02T15:04:05",
 		"2006-01-02 15:04:05",
 		"2006-01-02",
