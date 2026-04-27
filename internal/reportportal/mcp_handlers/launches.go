@@ -870,10 +870,6 @@ func (lr *LaunchResources) toolUpdateLaunch() (*mcp.Tool, ToolHandler[UpdateLaun
 					},
 				},
 				Required: []string{"launch_id"},
-				AnyOf: []*jsonschema.Schema{
-					{Required: []string{"description"}},
-					{Required: []string{"attributes"}},
-				},
 			},
 		},
 		utils.WithAnalytics(
