@@ -2,12 +2,15 @@ package mcphandlers
 
 import (
 	"context"
+	"crypto/tls"
 	"embed"
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"net/http"
 	"net/url"
 	"path/filepath"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/reportportal/goRP/v5/pkg/gorp"
@@ -29,6 +32,7 @@ func NewServer(
 	token,
 	userID, project, analyticsAPISecret string,
 	analyticsOn bool,
+	tlsCfg *tls.Config,
 ) (*mcp.Server, *analytics.Analytics, error) {
 	s := mcp.NewServer(
 		&mcp.Implementation{
@@ -40,9 +44,13 @@ func NewServer(
 		},
 	)
 
+	// Build a shared HTTP client for this server instance (used by both gorp and analytics).
+	httpClient := buildHTTPClient(tlsCfg)
+
 	// Create a new ReportPortal client
 	rpClient := gorp.NewClient(hostUrl, gorp.WithApiKeyAuth(context.Background(), token))
 	rpClient.APIClient.GetConfig().Middleware = middleware.QueryParamsMiddleware
+	rpClient.APIClient.GetConfig().HTTPClient = httpClient
 
 	// Initialize analytics (disabled if analyticsOff is true)
 	var analyticsInstance *analytics.Analytics
@@ -55,6 +63,7 @@ func NewServer(
 			analyticsAPISecret,
 			token,
 			hostUrl.String(),
+			tlsCfg,
 		)
 		if err != nil {
 			slog.Warn("Failed to initialize analytics", "error", err)
@@ -62,7 +71,7 @@ func NewServer(
 	}
 
 	// Register all launch-related tools and resources
-	RegisterLaunchTools(s, rpClient, project, analyticsInstance)
+	RegisterLaunchTools(s, rpClient, project, analyticsInstance, httpClient)
 
 	// Register all test item-related tools and resources
 	RegisterTestItemTools(s, rpClient, project, analyticsInstance)
@@ -104,6 +113,20 @@ func ReadPrompts(files embed.FS, dir string) ([]promptreader.PromptHandlerPair, 
 	return handlers, nil
 }
 
+// buildHTTPClient creates an *http.Client with a 30 s timeout and optional TLS config.
+// When tlsCfg is nil the default transport is used unchanged, preserving HTTP_PROXY and
+// other default behaviours. When tlsCfg is non-nil the default transport is cloned and
+// its TLSClientConfig is replaced so that proxy and dial settings are still inherited.
+func buildHTTPClient(tlsCfg *tls.Config) *http.Client {
+	client := &http.Client{Timeout: 30 * time.Second}
+	if tlsCfg != nil {
+		t := http.DefaultTransport.(*http.Transport).Clone()
+		t.TLSClientConfig = tlsCfg
+		client.Transport = t
+	}
+	return client
+}
+
 func newMCPServer(cmd *cli.Command) (*mcp.Server, *analytics.Analytics, error) {
 	// Retrieve required parameters from the command flags
 	token := cmd.String("token")                     // API token
@@ -112,6 +135,10 @@ func newMCPServer(cmd *cli.Command) (*mcp.Server, *analytics.Analytics, error) {
 	project := cmd.String("project")                 // ReportPortal project name
 	analyticsAPISecret := analytics.GetAnalyticArg() // Analytics API secret
 	analyticsOff := cmd.Bool("analytics-off")        // Disable analytics flag
+
+	// TLS settings
+	insecureTLS := cmd.Bool("insecure")
+	tlsCACert := cmd.String("tls-ca-cert")
 
 	hostUrl, err := url.Parse(host)
 	if err != nil {
@@ -122,6 +149,11 @@ func newMCPServer(cmd *cli.Command) (*mcp.Server, *analytics.Analytics, error) {
 			"invalid host URL %q: scheme and host are required (e.g., https://reportportal.example.com)",
 			host,
 		)
+	}
+
+	tlsCfg, err := config.BuildTLSConfig(insecureTLS, tlsCACert)
+	if err != nil {
+		return nil, nil, fmt.Errorf("build TLS config: %w", err)
 	}
 
 	// Create a new stdio server using the ReportPortal client
@@ -138,6 +170,7 @@ func newMCPServer(cmd *cli.Command) (*mcp.Server, *analytics.Analytics, error) {
 		project,
 		analyticsAPISecret,
 		!analyticsOff, // Convert analyticsOff to analyticsOn
+		tlsCfg,
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create ReportPortal MCP server: %w", err)

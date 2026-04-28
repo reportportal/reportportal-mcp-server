@@ -73,14 +73,17 @@ func mustMarshalJSON(v any) json.RawMessage {
 	return b
 }
 
-// RegisterLaunchTools registers all launch-related tools and resources with the MCP server
+// RegisterLaunchTools registers all launch-related tools and resources with the MCP server.
+// httpClient is an optional pre-configured HTTP client used for the import-launch multipart
+// upload.  When nil a default client with a 30 s timeout is created.
 func RegisterLaunchTools(
 	s *mcp.Server,
 	rpClient *gorp.Client,
 	defaultProject string,
 	analyticsClient *analytics.Analytics,
+	httpClient *http.Client,
 ) {
-	launches := NewLaunchResources(rpClient, analyticsClient, defaultProject)
+	launches := NewLaunchResources(rpClient, analyticsClient, defaultProject, httpClient)
 
 	registerTool(s, launches.toolGetLaunches)
 	registerTool(s, launches.toolGetLastLaunchByName)
@@ -239,17 +242,23 @@ type LaunchResources struct {
 	defaultProject string       // Default project name
 	analytics      *analytics.Analytics
 	importPlugins  importPluginCache
+	httpClient     *http.Client // HTTP client for import multipart upload
 }
 
 func NewLaunchResources(
 	client *gorp.Client,
-	analytics *analytics.Analytics,
+	analyticsClient *analytics.Analytics,
 	project string,
+	httpClient *http.Client,
 ) *LaunchResources {
+	if httpClient == nil {
+		httpClient = &http.Client{Timeout: importHTTPClientTimeout}
+	}
 	return &LaunchResources{
 		client:         client,
 		defaultProject: project,
-		analytics:      analytics,
+		analytics:      analyticsClient,
+		httpClient:     httpClient,
 	}
 }
 
@@ -1202,7 +1211,7 @@ func (lr *LaunchResources) toolImportLaunchFromFile() (*mcp.Tool, ToolHandler[Im
 
 				httpClient := localHTTPClient
 				if httpClient == nil {
-					httpClient = &http.Client{Timeout: importHTTPClientTimeout}
+					httpClient = lr.httpClient
 				}
 				resp, err := httpClient.Do(httpReq)
 				if err != nil {

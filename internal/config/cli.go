@@ -20,8 +20,14 @@ var (
 const ServerDescription = `ReportPortal MCP Server
 
 ENVIRONMENT VARIABLES:
-   MCP_MODE    Server mode: "stdio" (default) or "http"
-               Controls which server type to run and which flags are available
+   MCP_MODE          Server mode: "stdio" (default) or "http"
+                     Controls which server type to run and which flags are available
+   RP_INSECURE_TLS   Skip TLS certificate verification (boolean, default false)
+                     Equivalent to --insecure flag; use for self-signed or mismatched certs
+                     Example: RP_INSECURE_TLS=true
+   RP_TLS_CA_CERT    Path to a PEM file containing trusted CA certificate(s) for TLS verification
+                     Equivalent to --tls-ca-cert flag; appended to the system cert pool
+                     Example: RP_TLS_CA_CERT=/etc/ssl/certs/my-ca.pem
 
 AUTHENTICATION:
    stdio mode: RP_API_TOKEN is REQUIRED (must be set via environment variable or --token flag)
@@ -69,6 +75,19 @@ func GetCommonFlags() []cli.Flag {
 			Sources:  cli.EnvVars("RP_MCP_ANALYTICS_OFF"),
 			Usage:    "Disable Google Analytics tracking",
 			Value:    false,
+		},
+		&cli.BoolFlag{
+			Name:     "insecure",
+			Required: false,
+			Sources:  cli.EnvVars("RP_INSECURE_TLS"),
+			Usage:    "Skip TLS certificate verification (use for self-signed or mismatched certs)",
+			Value:    false,
+		},
+		&cli.StringFlag{
+			Name:     "tls-ca-cert",
+			Required: false,
+			Sources:  cli.EnvVars("RP_TLS_CA_CERT"),
+			Usage:    "Path to a PEM file containing trusted CA certificate(s) for TLS verification",
 		},
 	}
 }

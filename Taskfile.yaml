@@ -8,6 +8,8 @@ version: '3'
 # task docker:run                    # Runs in stdio mode (default)
 # task docker:run MCP_MODE=http      # Runs in HTTP mode
 # task docker:run MCP_MODE=http MCP_SERVER_PORT=9000  # Docker HTTP mode on port 9000
+# task docker:run RP_TLS_CA_CERT=/path/to/ca.pem      # Trust custom CA (mounts PEM into container at fixed path)
+# task docker:run RP_INSECURE_TLS=true               # Skip TLS certificate verification (do not combine with RP_TLS_CA_CERT)
 
 vars:
   # >= v2.4 required for go.mod `go 1.25` (see golangci-lint changelog / FAQ)
@@ -20,7 +22,9 @@ vars:
   MCP_MODE: '{{.MCP_MODE | default "stdio"}}'
   MCP_SERVER_PORT: '{{.MCP_SERVER_PORT | default "8080"}}'
   MCP_SERVER_HOST: '{{.MCP_SERVER_HOST | default ""}}'
-  
+  RP_INSECURE_TLS: '{{.RP_INSECURE_TLS | default "false"}}'
+  RP_TLS_CA_CERT: '{{.RP_TLS_CA_CERT | default ""}}'
+
 dotenv: [ '.env' ]
 tasks:
   fmt:
@@ -96,9 +100,9 @@ tasks:
     deps: [ docker:build ]
     cmd: >
       {{if eq .MCP_MODE "http"}}
-      docker run -i --rm -p {{.MCP_SERVER_PORT}}:{{.MCP_SERVER_PORT}} -e "RP_API_TOKEN=$RP_API_TOKEN" -e "RP_PROJECT=$RP_PROJECT" -e "RP_HOST=$RP_HOST" {{if .MCP_SERVER_HOST}}-e "MCP_SERVER_HOST={{.MCP_SERVER_HOST}}"{{end}} -e "MCP_SERVER_PORT={{.MCP_SERVER_PORT}}" -e "MCP_MODE={{.MCP_MODE}}" {{.IMAGE_NAME}}
+      docker run -i --rm -p {{.MCP_SERVER_PORT}}:{{.MCP_SERVER_PORT}} -e "RP_API_TOKEN=$RP_API_TOKEN" -e "RP_PROJECT=$RP_PROJECT" -e "RP_HOST=$RP_HOST" {{if .MCP_SERVER_HOST}}-e "MCP_SERVER_HOST={{.MCP_SERVER_HOST}}"{{end}} -e "MCP_SERVER_PORT={{.MCP_SERVER_PORT}}" -e "MCP_MODE={{.MCP_MODE}}" {{if .RP_TLS_CA_CERT}}-v "{{.RP_TLS_CA_CERT}}:/etc/ssl/certs/rp-custom-ca.pem:ro" -e "RP_TLS_CA_CERT=/etc/ssl/certs/rp-custom-ca.pem" {{end}}-e "RP_INSECURE_TLS={{.RP_INSECURE_TLS}}" {{.IMAGE_NAME}}
       {{else}}
-      docker run -i --rm -e "RP_API_TOKEN=$RP_API_TOKEN" -e "RP_PROJECT=$RP_PROJECT" -e "RP_HOST=$RP_HOST" -e "MCP_MODE={{.MCP_MODE}}" {{.IMAGE_NAME}}
+      docker run -i --rm -e "RP_API_TOKEN=$RP_API_TOKEN" -e "RP_PROJECT=$RP_PROJECT" -e "RP_HOST=$RP_HOST" -e "MCP_MODE={{.MCP_MODE}}" {{if .RP_TLS_CA_CERT}}-v "{{.RP_TLS_CA_CERT}}:/etc/ssl/certs/rp-custom-ca.pem:ro" -e "RP_TLS_CA_CERT=/etc/ssl/certs/rp-custom-ca.pem" {{end}}-e "RP_INSECURE_TLS={{.RP_INSECURE_TLS}}" {{.IMAGE_NAME}}
       {{end}}
 
   inspector:
@@ -106,9 +110,9 @@ tasks:
     deps: [ docker:build ]
     cmd: >
       {{if eq .MCP_MODE "http"}}
-      {{.INSPECTOR}} -- docker run -i --rm -p {{.MCP_SERVER_PORT}}:{{.MCP_SERVER_PORT}} -e "RP_API_TOKEN=$RP_API_TOKEN" -e "RP_PROJECT=$RP_PROJECT" -e "RP_HOST=$RP_HOST" {{if .MCP_SERVER_HOST}}-e "MCP_SERVER_HOST={{.MCP_SERVER_HOST}}"{{end}} -e "MCP_SERVER_PORT={{.MCP_SERVER_PORT}}" -e "MCP_MODE={{.MCP_MODE}}" {{.IMAGE_NAME}}
+      {{.INSPECTOR}} -- docker run -i --rm -p {{.MCP_SERVER_PORT}}:{{.MCP_SERVER_PORT}} -e "RP_API_TOKEN=$RP_API_TOKEN" -e "RP_PROJECT=$RP_PROJECT" -e "RP_HOST=$RP_HOST" {{if .MCP_SERVER_HOST}}-e "MCP_SERVER_HOST={{.MCP_SERVER_HOST}}"{{end}} -e "MCP_SERVER_PORT={{.MCP_SERVER_PORT}}" -e "MCP_MODE={{.MCP_MODE}}" {{if .RP_TLS_CA_CERT}}-v "{{.RP_TLS_CA_CERT}}:/etc/ssl/certs/rp-custom-ca.pem:ro" -e "RP_TLS_CA_CERT=/etc/ssl/certs/rp-custom-ca.pem" {{end}}-e "RP_INSECURE_TLS={{.RP_INSECURE_TLS}}" {{.IMAGE_NAME}}
       {{else}}
-      {{.INSPECTOR}} -- docker run -i --rm -e "RP_API_TOKEN=$RP_API_TOKEN" -e "RP_PROJECT=$RP_PROJECT" -e "RP_HOST=$RP_HOST" -e "MCP_MODE={{.MCP_MODE}}" {{.IMAGE_NAME}}
+      {{.INSPECTOR}} -- docker run -i --rm -e "RP_API_TOKEN=$RP_API_TOKEN" -e "RP_PROJECT=$RP_PROJECT" -e "RP_HOST=$RP_HOST" -e "MCP_MODE={{.MCP_MODE}}" {{if .RP_TLS_CA_CERT}}-v "{{.RP_TLS_CA_CERT}}:/etc/ssl/certs/rp-custom-ca.pem:ro" -e "RP_TLS_CA_CERT=/etc/ssl/certs/rp-custom-ca.pem" {{end}}-e "RP_INSECURE_TLS={{.RP_INSECURE_TLS}}" {{.IMAGE_NAME}}
       {{end}}
 
   inspector-debug:
@@ -116,9 +120,9 @@ tasks:
     deps: [ docker:build-debug ]
     cmd: >
       {{if eq .MCP_MODE "http"}}
-      {{.INSPECTOR}} -- docker run -p {{.DLV_PORT}}:{{.DLV_PORT}} -p {{.MCP_SERVER_PORT}}:{{.MCP_SERVER_PORT}} -i --rm -e "RP_API_TOKEN=$RP_API_TOKEN" -e "RP_PROJECT=$RP_PROJECT" -e "RP_HOST=$RP_HOST" {{if .MCP_SERVER_HOST}}-e "MCP_SERVER_HOST={{.MCP_SERVER_HOST}}"{{end}} -e "MCP_SERVER_PORT={{.MCP_SERVER_PORT}}" -e "MCP_MODE={{.MCP_MODE}}" {{.IMAGE_NAME_DEBUG}}
+      {{.INSPECTOR}} -- docker run -p {{.DLV_PORT}}:{{.DLV_PORT}} -p {{.MCP_SERVER_PORT}}:{{.MCP_SERVER_PORT}} -i --rm -e "RP_API_TOKEN=$RP_API_TOKEN" -e "RP_PROJECT=$RP_PROJECT" -e "RP_HOST=$RP_HOST" {{if .MCP_SERVER_HOST}}-e "MCP_SERVER_HOST={{.MCP_SERVER_HOST}}"{{end}} -e "MCP_SERVER_PORT={{.MCP_SERVER_PORT}}" -e "MCP_MODE={{.MCP_MODE}}" {{if .RP_TLS_CA_CERT}}-v "{{.RP_TLS_CA_CERT}}:/etc/ssl/certs/rp-custom-ca.pem:ro" -e "RP_TLS_CA_CERT=/etc/ssl/certs/rp-custom-ca.pem" {{end}}-e "RP_INSECURE_TLS={{.RP_INSECURE_TLS}}" {{.IMAGE_NAME_DEBUG}}
       {{else}}
-      {{.INSPECTOR}} -- docker run -p {{.DLV_PORT}}:{{.DLV_PORT}} -i --rm -e "RP_API_TOKEN=$RP_API_TOKEN" -e "RP_PROJECT=$RP_PROJECT" -e "RP_HOST=$RP_HOST" -e "MCP_MODE={{.MCP_MODE}}" {{.IMAGE_NAME_DEBUG}}
+      {{.INSPECTOR}} -- docker run -p {{.DLV_PORT}}:{{.DLV_PORT}} -i --rm -e "RP_API_TOKEN=$RP_API_TOKEN" -e "RP_PROJECT=$RP_PROJECT" -e "RP_HOST=$RP_HOST" -e "MCP_MODE={{.MCP_MODE}}" {{if .RP_TLS_CA_CERT}}-v "{{.RP_TLS_CA_CERT}}:/etc/ssl/certs/rp-custom-ca.pem:ro" -e "RP_TLS_CA_CERT=/etc/ssl/certs/rp-custom-ca.pem" {{end}}-e "RP_INSECURE_TLS={{.RP_INSECURE_TLS}}" {{.IMAGE_NAME_DEBUG}}
       {{end}}
 
   verify:testdata:
