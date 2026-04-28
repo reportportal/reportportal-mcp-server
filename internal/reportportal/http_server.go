@@ -2,6 +2,7 @@ package mcpreportportal
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -24,15 +25,16 @@ import (
 	app_middleware "github.com/reportportal/reportportal-mcp-server/internal/reportportal/middleware"
 )
 
-// createHTTPClient creates a reusable HTTP client with optimal settings
-func createHTTPClient(timeout time.Duration) *http.Client {
-	transport := &http.Transport{
-		MaxIdleConns:        100,
-		MaxIdleConnsPerHost: 10,
-		IdleConnTimeout:     timeout,
-		DisableCompression:  false,
-		ForceAttemptHTTP2:   true, // HTTP/2 always enabled for optimal performance
-	}
+// createHTTPClient creates a reusable HTTP client with optimal settings.
+// tlsCfg may be nil, in which case the Go default TLS behaviour is used.
+func createHTTPClient(timeout time.Duration, tlsCfg *tls.Config) *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.MaxIdleConns = 100
+	transport.MaxIdleConnsPerHost = 10
+	transport.IdleConnTimeout = timeout
+	transport.DisableCompression = false
+	transport.ForceAttemptHTTP2 = true // HTTP/2 always enabled for optimal performance
+	transport.TLSClientConfig = tlsCfg
 
 	return &http.Client{
 		Transport: transport,
@@ -52,6 +54,7 @@ type HTTPServerConfig struct {
 	// HTTP settings
 	MaxConcurrentRequests int           // Chi Throttle limit
 	ConnectionTimeout     time.Duration // Request timeout
+	TLSConfig             *tls.Config   // Optional TLS config (nil = system defaults)
 	// HTTP/2 is always enabled for optimal performance
 }
 
@@ -103,7 +106,7 @@ func NewHTTPServer(
 	)
 
 	// Create HTTP client
-	httpClient := createHTTPClient(config.ConnectionTimeout)
+	httpClient := createHTTPClient(config.ConnectionTimeout, config.TLSConfig)
 
 	// Initialize batch-based analytics
 	// Note: In HTTP mode, FallbackRPToken is always empty (tokens come from HTTP headers).
@@ -116,6 +119,7 @@ func NewHTTPServer(
 			config.GA4Secret,
 			"",                      // FallbackRPToken is always empty in HTTP mode
 			config.HostURL.String(), // ReportPortal host URL for instance ID
+			config.TLSConfig,
 		)
 		if err != nil {
 			slog.Warn("Failed to initialize analytics", "error", err)
@@ -158,7 +162,7 @@ func (hs *HTTPServer) initializeTools() error {
 	rpClient.APIClient.GetConfig().Middleware = app_middleware.QueryParamsMiddleware
 
 	// Register all launch-related tools and resources
-	mcphandlers.RegisterLaunchTools(hs.mcpServer, rpClient, "", hs.AnalyticsInstance)
+	mcphandlers.RegisterLaunchTools(hs.mcpServer, rpClient, "", hs.AnalyticsInstance, hs.httpClient)
 
 	// Register all test item-related tools and resources
 	mcphandlers.RegisterTestItemTools(
@@ -603,6 +607,10 @@ func buildHTTPServerConfig(cmd *cli.Command) (HTTPServerConfig, error) {
 	maxWorkers := cmd.Int("max-workers")
 	connectionTimeoutSec := cmd.Int("connection-timeout")
 
+	// TLS settings
+	insecureTLS := cmd.Bool("insecure")
+	tlsCACert := cmd.String("tls-ca-cert")
+
 	// Apply auto-detection for zero values
 	if maxWorkers <= 0 {
 		maxWorkers = runtime.NumCPU() * 2
@@ -616,6 +624,11 @@ func buildHTTPServerConfig(cmd *cli.Command) (HTTPServerConfig, error) {
 		return HTTPServerConfig{}, fmt.Errorf(
 			"host URL must include scheme and host (e.g., https://reportportal.example.com)",
 		)
+	}
+
+	tlsCfg, err := config.BuildTLSConfig(insecureTLS, tlsCACert)
+	if err != nil {
+		return HTTPServerConfig{}, fmt.Errorf("build TLS config: %w", err)
 	}
 
 	return HTTPServerConfig{
@@ -632,5 +645,6 @@ func buildHTTPServerConfig(cmd *cli.Command) (HTTPServerConfig, error) {
 		AnalyticsOn:           !analyticsOff,
 		MaxConcurrentRequests: maxWorkers,
 		ConnectionTimeout:     time.Duration(connectionTimeoutSec) * time.Second,
+		TLSConfig:             tlsCfg,
 	}, nil
 }

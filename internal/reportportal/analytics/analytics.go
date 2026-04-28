@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -102,7 +103,8 @@ type GAPayload struct {
 // Analytics handles Google Analytics tracking with batched metrics
 type Analytics struct {
 	Config     *AnalyticsConfig
-	httpClient *http.Client
+	httpClient *http.Client // GA4 (Measurement Protocol); always uses default certificate verification
+	rpClient   *http.Client // ReportPortal /api/info only; uses tlsCfg when non-nil
 
 	// ReportPortal instance ID (fetched lazily on first use, retried until successful)
 	instanceID        string      // ReportPortal instance ID from /api/info endpoint
@@ -150,7 +152,11 @@ func (a *Analytics) ensureInstanceID(ctx context.Context) {
 	}
 
 	// Attempt to fetch instance ID
-	fetchedID := fetchInstanceID(ctx, a.rpHostURL, a.httpClient)
+	rpHTTP := a.rpClient
+	if rpHTTP == nil {
+		rpHTTP = a.httpClient
+	}
+	fetchedID := fetchInstanceID(ctx, a.rpHostURL, rpHTTP)
 	if fetchedID != "" {
 		a.instanceID = fetchedID
 		a.instanceIDFetched.Store(true) // Mark as fetched
@@ -247,6 +253,8 @@ func fetchInstanceID(ctx context.Context, hostURL string, httpClient *http.Clien
 //   - apiSecret: Google Analytics 4 API secret for authentication (required)
 //   - rpAPIToken: ReportPortal API token for secure hashing (optional, used when available)
 //   - rpHostURL: ReportPortal host URL for fetching instance ID (optional)
+//   - tlsCfg: Optional TLS configuration for ReportPortal /api/info only (nil = system defaults).
+//     GA4 requests always use default certificate verification and never use this config.
 //
 // Returns error if apiSecret is empty
 func NewAnalytics(
@@ -254,6 +262,7 @@ func NewAnalytics(
 	apiSecret string,
 	rpAPIToken string,
 	rpHostURL string,
+	tlsCfg *tls.Config,
 ) (*Analytics, error) {
 	// Analytics enablement is now controlled by the caller (CLI flags)
 	slog.Debug("Initializing analytics",
@@ -297,6 +306,17 @@ func NewAnalytics(
 	httpClient := &http.Client{
 		Timeout: 10 * time.Second,
 	}
+	var rpClient *http.Client
+	if tlsCfg != nil {
+		t := http.DefaultTransport.(*http.Transport).Clone()
+		t.TLSClientConfig = tlsCfg
+		rpClient = &http.Client{
+			Timeout:   10 * time.Second,
+			Transport: t,
+		}
+	} else {
+		rpClient = httpClient
+	}
 
 	ctx, cancel := context.WithCancel( //nolint:gosec // cancel is stored in the struct and called via analytics.cancel
 		context.Background(),
@@ -305,6 +325,7 @@ func NewAnalytics(
 	analytics := &Analytics{
 		Config:     config,
 		httpClient: httpClient,
+		rpClient:   rpClient,
 		rpHostURL:  rpHostURL,                          // Store for lazy fetching
 		instanceID: "",                                 // Will be fetched lazily on first use
 		metrics:    make(map[string]map[string]*int64), // userID -> toolName -> counter
