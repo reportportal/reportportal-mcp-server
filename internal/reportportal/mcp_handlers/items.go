@@ -69,7 +69,7 @@ func NewTestItemResources(
 }
 
 // resolveSavedFilterIDByName returns the numeric filter ID for the filterId query parameter
-// using GET /v1/{projectName}/filter with filter.eq.name.
+// using GET /v1/{projectKey}/filter with filter.eq.name.
 func (lr *TestItemResources) resolveSavedFilterIDByName(
 	ctx context.Context,
 	project, filterName string,
@@ -1050,7 +1050,11 @@ func (lr *TestItemResources) toolUpdateDefectTypeForTestItems() (*mcp.Tool, Tool
 			}
 
 			// Build the list of issues
-			issues := make([]openapi.IssueDefinition, 0, len(args.TestItemsIDs))
+			issues := make(
+				[]openapi.ComEpamReportportalBaseModelIssueIssueDefinition,
+				0,
+				len(args.TestItemsIDs),
+			)
 			var commentPtr *string
 			if args.DefectTypeComment != "" {
 				commentPtr = &args.DefectTypeComment
@@ -1066,9 +1070,9 @@ func (lr *TestItemResources) toolUpdateDefectTypeForTestItems() (*mcp.Tool, Tool
 						testItemIdStr,
 					)
 				}
-				issues = append(issues, openapi.IssueDefinition{
+				issues = append(issues, openapi.ComEpamReportportalBaseModelIssueIssueDefinition{
 					TestItemId: testItemId,
-					Issue: openapi.Issue{
+					Issue: openapi.ComEpamReportportalBaseReportingIssue{
 						IssueType:    args.DefectTypeID,
 						AutoAnalyzed: openapi.PtrBool(false),
 						Comment:      commentPtr,
@@ -1077,7 +1081,7 @@ func (lr *TestItemResources) toolUpdateDefectTypeForTestItems() (*mcp.Tool, Tool
 			}
 
 			apiRequest := lr.client.TestItemAPI.DefineTestItemIssueType(ctx, project).
-				DefineIssueRQ(openapi.DefineIssueRQ{
+				ComEpamReportportalBaseModelIssueDefineIssueRQ(openapi.ComEpamReportportalBaseModelIssueDefineIssueRQ{
 					Issues: issues,
 				})
 

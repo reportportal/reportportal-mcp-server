@@ -26,8 +26,8 @@ github.com/modelcontextprotocol/go-sdk v1.4.1 h1:M4x9GyIPj+HoIlHNGpK2hq5o3BFhC+7
 github.com/modelcontextprotocol/go-sdk v1.4.1/go.mod h1:Bo/mS87hPQqHSRkMv4dQq1XCu6zv4INdXnFZabkNU6s=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
-github.com/reportportal/goRP/v5 v5.2.1 h1:Q43jR+CYtt+Fe6JfgXKaLcdh7gVVgspfzgqEJuKO7R4=
-github.com/reportportal/goRP/v5 v5.2.1/go.mod h1:URbr0JVYGj2MzmPw2HU/FMvdZWGxh7Gv72PFoFHhzI8=
+github.com/reportportal/goRP/v5 v5.2.2-0.20260424100151-29f034a5a7ec h1:NMzqvbZuT0HLsa0gpr27TEV1149jUGIn74c5PJLJ5Fw=
+github.com/reportportal/goRP/v5 v5.2.2-0.20260424100151-29f034a5a7ec/go.mod h1:URbr0JVYGj2MzmPw2HU/FMvdZWGxh7Gv72PFoFHhzI8=
 github.com/rogpeppe/go-internal v1.11.0 h1:cWPaGQEPrBb5/AsnsZesgZZ9yb1OQ+GOISoDNXVBh4M=
 github.com/rogpeppe/go-internal v1.11.0/go.mod h1:ddIwULY96R17DhadqLgMfk9H9tvdUzkipdSkR5nkCZA=
 github.com/segmentio/asm v1.1.3 h1:WM03sfUOENvvKexOLp+pCqgb/WDjsi7EK8gIsICtzhc=
