@@ -1209,12 +1209,13 @@ func (lr *LaunchResources) toolImportLaunchFromFile() (*mcp.Tool, ToolHandler[Im
 					localMw(httpReq)
 				}
 
-				httpClient := localHTTPClient
-				if httpClient == nil {
-					copyClient := *lr.httpClient
-					copyClient.Timeout = importHTTPClientTimeout
-					httpClient = &copyClient
+				srcClient := localHTTPClient
+				if srcClient == nil {
+					srcClient = lr.httpClient
 				}
+				copyClient := *srcClient
+				copyClient.Timeout = max(copyClient.Timeout, importHTTPClientTimeout)
+				httpClient := &copyClient
 				resp, err := httpClient.Do(httpReq)
 				if err != nil {
 					return nil, nil, fmt.Errorf("import request failed: %w", err)

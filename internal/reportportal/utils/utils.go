@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -349,4 +350,27 @@ func ParseReportPortalURI(uri, expectedSegment string) (part0, part2 string, err
 	}
 
 	return part0, part2, nil
+}
+
+// NewBaseTransport returns a fresh, independent *http.Transport ready for
+// further configuration. When http.DefaultTransport is a *http.Transport it is
+// cloned so process-wide defaults (proxy env vars, dial settings, etc.) are
+// inherited without risking mutation of the global transport. When the
+// assertion fails an equivalent transport is constructed explicitly.
+func NewBaseTransport() *http.Transport {
+	if t, ok := http.DefaultTransport.(*http.Transport); ok {
+		return t.Clone()
+	}
+	return &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
 }
