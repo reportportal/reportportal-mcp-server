@@ -1211,7 +1211,9 @@ func (lr *LaunchResources) toolImportLaunchFromFile() (*mcp.Tool, ToolHandler[Im
 
 				httpClient := localHTTPClient
 				if httpClient == nil {
-					httpClient = lr.httpClient
+					copyClient := *lr.httpClient
+					copyClient.Timeout = importHTTPClientTimeout
+					httpClient = &copyClient
 				}
 				resp, err := httpClient.Do(httpReq)
 				if err != nil {

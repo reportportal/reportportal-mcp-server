@@ -308,11 +308,16 @@ func NewAnalytics(
 	}
 	var rpClient *http.Client
 	if tlsCfg != nil {
-		t := http.DefaultTransport.(*http.Transport).Clone()
-		t.TLSClientConfig = tlsCfg
+		var transport *http.Transport
+		if tr, ok := http.DefaultTransport.(*http.Transport); ok {
+			transport = tr.Clone()
+		} else {
+			transport = &http.Transport{}
+		}
+		transport.TLSClientConfig = tlsCfg
 		rpClient = &http.Client{
 			Timeout:   10 * time.Second,
-			Transport: t,
+			Transport: transport,
 		}
 	} else {
 		rpClient = httpClient
