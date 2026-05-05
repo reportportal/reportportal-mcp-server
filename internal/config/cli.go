@@ -24,9 +24,11 @@ ENVIRONMENT VARIABLES:
                      Controls which server type to run and which flags are available
    RP_INSECURE_TLS   Skip TLS certificate verification (boolean, default false)
                      Equivalent to --insecure flag; use for self-signed or mismatched certs
+                     Mutually exclusive with RP_TLS_CA_CERT / --tls-ca-cert (cannot set both)
                      Example: RP_INSECURE_TLS=true
    RP_TLS_CA_CERT    Path to a PEM file containing trusted CA certificate(s) for TLS verification
                      Equivalent to --tls-ca-cert flag; appended to the system cert pool
+                     Mutually exclusive with RP_INSECURE_TLS / --insecure (cannot set both)
                      Example: RP_TLS_CA_CERT=/etc/ssl/certs/my-ca.pem
 
 AUTHENTICATION:
@@ -80,14 +82,14 @@ func GetCommonFlags() []cli.Flag {
 			Name:     "insecure",
 			Required: false,
 			Sources:  cli.EnvVars("RP_INSECURE_TLS"),
-			Usage:    "Skip TLS certificate verification (use for self-signed or mismatched certs)",
+			Usage:    "Skip TLS certificate verification (use for self-signed or mismatched certs). Mutually exclusive with --tls-ca-cert",
 			Value:    false,
 		},
 		&cli.StringFlag{
 			Name:     "tls-ca-cert",
 			Required: false,
 			Sources:  cli.EnvVars("RP_TLS_CA_CERT"),
-			Usage:    "Path to a PEM file containing trusted CA certificate(s) for TLS verification",
+			Usage:    "Path to a PEM file containing trusted CA certificate(s) for TLS verification (appended to the system cert pool). Mutually exclusive with --insecure",
 		},
 	}
 }
