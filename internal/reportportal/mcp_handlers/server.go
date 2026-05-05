@@ -120,7 +120,7 @@ func ReadPrompts(files embed.FS, dir string) ([]promptreader.PromptHandlerPair, 
 func buildHTTPClient(tlsCfg *tls.Config) *http.Client {
 	client := &http.Client{Timeout: 30 * time.Second}
 	if tlsCfg != nil {
-		t := http.DefaultTransport.(*http.Transport).Clone()
+		t := utils.NewBaseTransport()
 		t.TLSClientConfig = tlsCfg
 		client.Transport = t
 	}

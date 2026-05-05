@@ -23,12 +23,13 @@ import (
 	"github.com/reportportal/reportportal-mcp-server/internal/reportportal/analytics"
 	mcphandlers "github.com/reportportal/reportportal-mcp-server/internal/reportportal/mcp_handlers"
 	app_middleware "github.com/reportportal/reportportal-mcp-server/internal/reportportal/middleware"
+	"github.com/reportportal/reportportal-mcp-server/internal/reportportal/utils"
 )
 
 // createHTTPClient creates a reusable HTTP client with optimal settings.
 // tlsCfg may be nil, in which case the Go default TLS behaviour is used.
 func createHTTPClient(timeout time.Duration, tlsCfg *tls.Config) *http.Client {
-	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport := utils.NewBaseTransport()
 	transport.MaxIdleConns = 100
 	transport.MaxIdleConnsPerHost = 10
 	transport.IdleConnTimeout = timeout

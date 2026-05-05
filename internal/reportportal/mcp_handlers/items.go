@@ -275,7 +275,7 @@ func (lr *TestItemResources) toolGetTestItemsByFilter() (*mcp.Tool, ToolHandler[
 
 	return &mcp.Tool{
 			Name:        "get_test_items_by_filter",
-			Description: "Get list of test items with optional filters, using a launch (filter.eq.launchId) or saved filter (filter.eq.name). Either launch-id or filter-name must be provided. Optional filter-eq-defect-type narrows items by defect/issue type.",
+			Description: "Get list of test items with optional filters. Accepts top-level query parameters launchId and filterId (not filter.eq.launchId / filter.eq.name). Either launchId (via launch-id) or filterId (via filter-name) is required; filter-name may be supplied as a saved filter name and the handler will resolve it to a numeric filterId. Optional filter-eq-defect-type narrows items by defect/issue type.",
 			InputSchema: &jsonschema.Schema{
 				Type:       "object",
 				Properties: properties,
