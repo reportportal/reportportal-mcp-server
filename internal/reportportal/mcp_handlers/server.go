@@ -15,6 +15,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/reportportal/goRP/v5/pkg/gorp"
 	"github.com/urfave/cli/v3"
+	"golang.org/x/oauth2"
 
 	"github.com/reportportal/reportportal-mcp-server/internal/config"
 	"github.com/reportportal/reportportal-mcp-server/internal/promptreader"
@@ -44,13 +45,22 @@ func NewServer(
 		},
 	)
 
-	// Build a shared HTTP client for this server instance (used by both gorp and analytics).
+	// Build an HTTP client for analytics and import operations.
+	// Bearer token injection is not needed here; the oauth2 transport handles
+	// that separately for the ReportPortal API client.
 	httpClient := buildHTTPClient(tlsCfg)
 
+	// Always thread httpClient into the oauth2 context so the oauth2 transport
+	// uses it for every outbound RP call — this preserves both Bearer token
+	// injection and the 30 s request timeout defined in buildHTTPClient,
+	// regardless of whether a custom TLS config is present.
+	// Never overwrite rpClient.APIClient.GetConfig().HTTPClient after the client
+	// is created with auth, as that drops the Bearer token injection.
+	authCtx := context.WithValue(context.Background(), oauth2.HTTPClient, httpClient)
+
 	// Create a new ReportPortal client
-	rpClient := gorp.NewClient(hostUrl, gorp.WithApiKeyAuth(context.Background(), token))
+	rpClient := gorp.NewClient(hostUrl, gorp.WithApiKeyAuth(authCtx, token))
 	rpClient.APIClient.GetConfig().Middleware = middleware.QueryParamsMiddleware
-	rpClient.APIClient.GetConfig().HTTPClient = httpClient
 
 	// Initialize analytics (disabled if analyticsOff is true)
 	var analyticsInstance *analytics.Analytics
