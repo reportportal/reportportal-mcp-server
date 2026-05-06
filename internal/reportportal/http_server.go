@@ -32,7 +32,7 @@ func createHTTPClient(timeout time.Duration, tlsCfg *tls.Config) *http.Client {
 	transport := utils.NewBaseTransport()
 	transport.MaxIdleConns = 100
 	transport.MaxIdleConnsPerHost = 10
-	transport.IdleConnTimeout = timeout
+	transport.IdleConnTimeout = 90 * time.Second
 	transport.DisableCompression = false
 	transport.ForceAttemptHTTP2 = true // HTTP/2 always enabled for optimal performance
 	transport.TLSClientConfig = tlsCfg

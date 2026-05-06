@@ -203,6 +203,12 @@ func InitAppConfig(
 		Description: ServerDescription,
 		Flags:       allFlags,
 		Action: func(ctx context.Context, cmd *cli.Command) error {
+			if cmd.Bool("insecure") && cmd.String("tls-ca-cert") != "" {
+				return fmt.Errorf(
+					"--insecure and --tls-ca-cert are mutually exclusive: use one or the other, not both",
+				)
+			}
+
 			// Check mcpMode and run appropriate server
 			switch mcpMode {
 			case "http":
