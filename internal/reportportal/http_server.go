@@ -26,13 +26,17 @@ import (
 	"github.com/reportportal/reportportal-mcp-server/internal/reportportal/utils"
 )
 
-// createHTTPClient creates a reusable HTTP client with optimal settings.
+// createHTTPClient creates a reusable HTTP client for the HTTP server path.
+// Unlike buildHTTPClient in server.go (which targets single-user stdio mode),
+// this function tunes the connection pool for concurrent multi-user traffic:
+// MaxIdleConns=100, MaxIdleConnsPerHost=10, IdleConnTimeout=90s, HTTP/2 forced.
+// The timeout parameter is the per-request deadline and comes from --connection-timeout.
 // tlsCfg may be nil, in which case the Go default TLS behaviour is used.
 func createHTTPClient(timeout time.Duration, tlsCfg *tls.Config) *http.Client {
 	transport := utils.NewBaseTransport()
 	transport.MaxIdleConns = 100
 	transport.MaxIdleConnsPerHost = 10
-	transport.IdleConnTimeout = timeout
+	transport.IdleConnTimeout = 90 * time.Second
 	transport.DisableCompression = false
 	transport.ForceAttemptHTTP2 = true // HTTP/2 always enabled for optimal performance
 	transport.TLSClientConfig = tlsCfg

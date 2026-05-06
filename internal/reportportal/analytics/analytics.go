@@ -151,12 +151,8 @@ func (a *Analytics) ensureInstanceID(ctx context.Context) {
 		return
 	}
 
-	// Attempt to fetch instance ID
-	rpHTTP := a.rpClient
-	if rpHTTP == nil {
-		rpHTTP = a.httpClient
-	}
-	fetchedID := fetchInstanceID(ctx, a.rpHostURL, rpHTTP)
+	// Attempt to fetch instance ID using the RP-specific client (always non-nil).
+	fetchedID := fetchInstanceID(ctx, a.rpHostURL, a.rpClient)
 	if fetchedID != "" {
 		a.instanceID = fetchedID
 		a.instanceIDFetched.Store(true) // Mark as fetched
@@ -306,6 +302,11 @@ func NewAnalytics(
 	httpClient := &http.Client{
 		Timeout: 10 * time.Second,
 	}
+	// rpClient is used exclusively for ReportPortal /api/info calls so that a
+	// custom TLS config (e.g. corporate CA) is applied only there, not to GA4.
+	// When no TLS override is requested it is set equal to httpClient so that
+	// rpClient is always non-nil; ensureInstanceID can therefore use it directly
+	// without a nil-guard.
 	var rpClient *http.Client
 	if tlsCfg != nil {
 		transport := utils.NewBaseTransport()

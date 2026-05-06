@@ -113,10 +113,15 @@ func ReadPrompts(files embed.FS, dir string) ([]promptreader.PromptHandlerPair, 
 	return handlers, nil
 }
 
-// buildHTTPClient creates an *http.Client with a 30 s timeout and optional TLS config.
-// When tlsCfg is nil the default transport is used unchanged, preserving HTTP_PROXY and
-// other default behaviours. When tlsCfg is non-nil the default transport is cloned and
-// its TLSClientConfig is replaced so that proxy and dial settings are still inherited.
+// buildHTTPClient creates an *http.Client for the stdio server path.
+// It uses a fixed 30 s timeout with no extra connection-pool tuning because
+// stdio mode serves a single user and does not need concurrent connection reuse.
+// For the HTTP server path (many concurrent users) see createHTTPClient in
+// http_server.go, which tunes MaxIdleConns, MaxIdleConnsPerHost, and HTTP/2.
+// When tlsCfg is nil the default transport is used unchanged, preserving
+// HTTP_PROXY and other default behaviours. When non-nil the default transport
+// is cloned and its TLSClientConfig replaced so proxy/dial settings are still
+// inherited.
 func buildHTTPClient(tlsCfg *tls.Config) *http.Client {
 	client := &http.Client{Timeout: 30 * time.Second}
 	if tlsCfg != nil {

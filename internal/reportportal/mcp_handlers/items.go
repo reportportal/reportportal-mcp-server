@@ -184,7 +184,9 @@ func (lr *TestItemResources) toolGetTestItemsByFilter() (*mcp.Tool, ToolHandler[
 	}
 	properties["filter-name"] = &jsonschema.Schema{
 		Type: "string",
-		Description: "Maps to filterId (numeric saved filter ID, e.g. 197496). When set, providerType is filter. " +
+		Description: "Accepts either a saved filter name (string) or a numeric filterId (e.g. 197496); " +
+			"the handler resolves a saved filter name to a numeric filterId automatically. " +
+			"When set, providerType is filter. " +
 			"Conditionally required if launch-id is not provided.",
 	}
 

@@ -108,8 +108,8 @@ func parseTimestampToEpoch(timestampStr string) (int64, error) {
 	}
 	// Try parsing as Unix epoch first (if it's all digits)
 	if epoch, err := strconv.ParseInt(timestampStr, 10, 64); err == nil {
-		// If it's a reasonable Unix timestamp (after 1970 and before year 3000)
-		if epoch > 0 { // roughly year 3000
+		// If it's a valid Unix timestamp (positive value)
+		if epoch > 0 {
 			// If it looks like seconds, convert to milliseconds
 			if epoch < 10000000000 { // less than year 2286 in seconds
 				return epoch * 1000, nil
