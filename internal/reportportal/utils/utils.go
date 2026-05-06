@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -107,8 +108,8 @@ func parseTimestampToEpoch(timestampStr string) (int64, error) {
 	}
 	// Try parsing as Unix epoch first (if it's all digits)
 	if epoch, err := strconv.ParseInt(timestampStr, 10, 64); err == nil {
-		// If it's a reasonable Unix timestamp (after 1970 and before year 3000)
-		if epoch > 0 { // roughly year 3000
+		// If it's a valid Unix timestamp (positive value)
+		if epoch > 0 {
 			// If it looks like seconds, convert to milliseconds
 			if epoch < 10000000000 { // less than year 2286 in seconds
 				return epoch * 1000, nil
@@ -119,12 +120,21 @@ func parseTimestampToEpoch(timestampStr string) (int64, error) {
 			}
 		}
 	}
-	// Try parsing as RFC3339 format
+	// Try parsing as RFC3339 format (offset with colon, e.g. +00:00 or Z)
 	if t, err := time.Parse(time.RFC3339, timestampStr); err == nil {
+		return t.UnixMilli(), nil
+	}
+	// Try parsing as RFC3339Nano (RFC3339 with sub-second precision)
+	if t, err := time.Parse(time.RFC3339Nano, timestampStr); err == nil {
 		return t.UnixMilli(), nil
 	}
 	// Try parsing as other common formats
 	formats := []string{
+		// ISO8601 with numeric timezone offset but no colon (e.g. +0000, -0500)
+		// Go's RFC3339 requires a colon; these handle the colon-less variant.
+		"2006-01-02T15:04:05.999-0700",
+		"2006-01-02T15:04:05-0700",
+		// Timezone-less formats (assumed UTC)
 		"2006-01-02T15:04:05",
 		"2006-01-02 15:04:05",
 		"2006-01-02",
@@ -340,4 +350,27 @@ func ParseReportPortalURI(uri, expectedSegment string) (part0, part2 string, err
 	}
 
 	return part0, part2, nil
+}
+
+// NewBaseTransport returns a fresh, independent *http.Transport ready for
+// further configuration. When http.DefaultTransport is a *http.Transport it is
+// cloned so process-wide defaults (proxy env vars, dial settings, etc.) are
+// inherited without risking mutation of the global transport. When the
+// assertion fails an equivalent transport is constructed explicitly.
+func NewBaseTransport() *http.Transport {
+	if t, ok := http.DefaultTransport.(*http.Transport); ok {
+		return t.Clone()
+	}
+	return &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
 }

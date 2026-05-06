@@ -20,8 +20,16 @@ var (
 const ServerDescription = `ReportPortal MCP Server
 
 ENVIRONMENT VARIABLES:
-   MCP_MODE    Server mode: "stdio" (default) or "http"
-               Controls which server type to run and which flags are available
+   MCP_MODE          Server mode: "stdio" (default) or "http"
+                     Controls which server type to run and which flags are available
+   RP_INSECURE_TLS   Skip TLS certificate verification (boolean, default false)
+                     Equivalent to --insecure flag; use for self-signed or mismatched certs
+                     Mutually exclusive with RP_TLS_CA_CERT / --tls-ca-cert (cannot set both)
+                     Example: RP_INSECURE_TLS=true
+   RP_TLS_CA_CERT    Path to a PEM file containing trusted CA certificate(s) for TLS verification
+                     Equivalent to --tls-ca-cert flag; appended to the system cert pool
+                     Mutually exclusive with RP_INSECURE_TLS / --insecure (cannot set both)
+                     Example: RP_TLS_CA_CERT=/etc/ssl/certs/my-ca.pem
 
 AUTHENTICATION:
    stdio mode: RP_API_TOKEN is REQUIRED (must be set via environment variable or --token flag)
@@ -69,6 +77,19 @@ func GetCommonFlags() []cli.Flag {
 			Sources:  cli.EnvVars("RP_MCP_ANALYTICS_OFF"),
 			Usage:    "Disable Google Analytics tracking",
 			Value:    false,
+		},
+		&cli.BoolFlag{
+			Name:     "insecure",
+			Required: false,
+			Sources:  cli.EnvVars("RP_INSECURE_TLS"),
+			Usage:    "Skip TLS certificate verification (use for self-signed or mismatched certs). Mutually exclusive with --tls-ca-cert",
+			Value:    false,
+		},
+		&cli.StringFlag{
+			Name:     "tls-ca-cert",
+			Required: false,
+			Sources:  cli.EnvVars("RP_TLS_CA_CERT"),
+			Usage:    "Path to a PEM file containing trusted CA certificate(s) for TLS verification (appended to the system cert pool). Mutually exclusive with --insecure",
 		},
 	}
 }
@@ -161,8 +182,6 @@ func InitLogger() func(ctx context.Context, command *cli.Command) (context.Conte
 func InitAppConfig(
 	runHTTPServer, runStdioServer func(context.Context, *cli.Command) error,
 ) *cli.Command {
-	InitLogger()
-
 	// Get MCP mode from environment variable, default to stdio
 	mcpMode := GetMCPMode()
 
@@ -181,7 +200,14 @@ func InitAppConfig(
 		Version:     fmt.Sprintf("%s (%s) %s", Version, Commit, Date),
 		Description: ServerDescription,
 		Flags:       allFlags,
+		Before:      InitLogger(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
+			if cmd.Bool("insecure") && cmd.String("tls-ca-cert") != "" {
+				return fmt.Errorf(
+					"--insecure and --tls-ca-cert are mutually exclusive: use one or the other, not both",
+				)
+			}
+
 			// Check mcpMode and run appropriate server
 			switch mcpMode {
 			case "http":

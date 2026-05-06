@@ -3,7 +3,128 @@ package utils
 import (
 	"strings"
 	"testing"
+	"time"
 )
+
+func ms(layout, value string) int64 {
+	t, err := time.Parse(layout, value)
+	if err != nil {
+		panic("ms: bad fixture: " + err.Error())
+	}
+	return t.UnixMilli()
+}
+
+func TestParseTimestampToEpoch(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantMs    int64
+		wantError bool
+	}{
+		// Unix epoch – seconds
+		{
+			name:   "unix epoch seconds",
+			input:  "1704110400",
+			wantMs: 1704110400 * 1000,
+		},
+		// Unix epoch – milliseconds
+		{
+			name:   "unix epoch milliseconds",
+			input:  "1704110400000",
+			wantMs: 1704110400000,
+		},
+		// RFC3339 with Z
+		{
+			name:   "RFC3339 Z offset",
+			input:  "2024-01-01T12:00:00Z",
+			wantMs: ms(time.RFC3339, "2024-01-01T12:00:00Z"),
+		},
+		// RFC3339 with colon offset
+		{
+			name:   "RFC3339 colon offset +05:30",
+			input:  "2024-01-01T12:00:00+05:30",
+			wantMs: ms(time.RFC3339, "2024-01-01T12:00:00+05:30"),
+		},
+		// RFC3339Nano with Z
+		{
+			name:   "RFC3339Nano sub-second Z",
+			input:  "2024-01-01T12:00:00.123Z",
+			wantMs: ms(time.RFC3339Nano, "2024-01-01T12:00:00.123Z"),
+		},
+		// ISO8601 colon-less offset – the "Date Bug" cases from issue #98
+		{
+			name:   "ISO8601 no-colon offset +0000",
+			input:  "2024-01-01T12:00:00+0000",
+			wantMs: ms(time.RFC3339, "2024-01-01T12:00:00Z"),
+		},
+		{
+			name:   "ISO8601 no-colon offset -0500",
+			input:  "2024-01-01T12:00:00-0500",
+			wantMs: ms(time.RFC3339, "2024-01-01T12:00:00-05:00"),
+		},
+		{
+			name:   "ISO8601 no-colon offset with milliseconds",
+			input:  "2024-01-01T12:00:00.456+0000",
+			wantMs: ms(time.RFC3339Nano, "2024-01-01T12:00:00.456Z"),
+		},
+		{
+			name:   "ISO8601 no-colon offset with milliseconds negative zone",
+			input:  "2024-06-15T08:30:00.000-0300",
+			wantMs: ms(time.RFC3339Nano, "2024-06-15T08:30:00.000-03:00"),
+		},
+		// Timezone-less formats
+		{
+			name:   "datetime without timezone",
+			input:  "2024-01-01T12:00:00",
+			wantMs: ms("2006-01-02T15:04:05", "2024-01-01T12:00:00"),
+		},
+		{
+			name:   "datetime with space separator",
+			input:  "2024-01-01 12:00:00",
+			wantMs: ms("2006-01-02 15:04:05", "2024-01-01 12:00:00"),
+		},
+		{
+			name:   "date only",
+			input:  "2024-01-01",
+			wantMs: ms("2006-01-02", "2024-01-01"),
+		},
+		// Error cases
+		{
+			name:      "empty string",
+			input:     "",
+			wantError: true,
+		},
+		{
+			name:      "invalid string",
+			input:     "not-a-date",
+			wantError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseTimestampToEpoch(tt.input)
+			if tt.wantError {
+				if err == nil {
+					t.Errorf(
+						"parseTimestampToEpoch(%q) expected error, got nil (result=%d)",
+						tt.input,
+						got,
+					)
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("parseTimestampToEpoch(%q) unexpected error: %v", tt.input, err)
+				return
+			}
+			if got != tt.wantMs {
+				t.Errorf("parseTimestampToEpoch(%q) = %d, want %d (diff=%d ms)",
+					tt.input, got, tt.wantMs, got-tt.wantMs)
+			}
+		})
+	}
+}
 
 func TestProcessAttributeKeys(t *testing.T) {
 	tests := []struct {

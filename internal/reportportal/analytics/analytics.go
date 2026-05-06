@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -102,7 +103,8 @@ type GAPayload struct {
 // Analytics handles Google Analytics tracking with batched metrics
 type Analytics struct {
 	Config     *AnalyticsConfig
-	httpClient *http.Client
+	httpClient *http.Client // GA4 (Measurement Protocol); always uses default certificate verification
+	rpClient   *http.Client // ReportPortal /api/info only; uses tlsCfg when non-nil
 
 	// ReportPortal instance ID (fetched lazily on first use, retried until successful)
 	instanceID        string      // ReportPortal instance ID from /api/info endpoint
@@ -149,8 +151,8 @@ func (a *Analytics) ensureInstanceID(ctx context.Context) {
 		return
 	}
 
-	// Attempt to fetch instance ID
-	fetchedID := fetchInstanceID(ctx, a.rpHostURL, a.httpClient)
+	// Attempt to fetch instance ID using the RP-specific client (always non-nil).
+	fetchedID := fetchInstanceID(ctx, a.rpHostURL, a.rpClient)
 	if fetchedID != "" {
 		a.instanceID = fetchedID
 		a.instanceIDFetched.Store(true) // Mark as fetched
@@ -247,6 +249,8 @@ func fetchInstanceID(ctx context.Context, hostURL string, httpClient *http.Clien
 //   - apiSecret: Google Analytics 4 API secret for authentication (required)
 //   - rpAPIToken: ReportPortal API token for secure hashing (optional, used when available)
 //   - rpHostURL: ReportPortal host URL for fetching instance ID (optional)
+//   - tlsCfg: Optional TLS configuration for ReportPortal /api/info only (nil = system defaults).
+//     GA4 requests always use default certificate verification and never use this config.
 //
 // Returns error if apiSecret is empty
 func NewAnalytics(
@@ -254,6 +258,7 @@ func NewAnalytics(
 	apiSecret string,
 	rpAPIToken string,
 	rpHostURL string,
+	tlsCfg *tls.Config,
 ) (*Analytics, error) {
 	// Analytics enablement is now controlled by the caller (CLI flags)
 	slog.Debug("Initializing analytics",
@@ -297,6 +302,22 @@ func NewAnalytics(
 	httpClient := &http.Client{
 		Timeout: 10 * time.Second,
 	}
+	// rpClient is used exclusively for ReportPortal /api/info calls so that a
+	// custom TLS config (e.g. corporate CA) is applied only there, not to GA4.
+	// When no TLS override is requested it is set equal to httpClient so that
+	// rpClient is always non-nil; ensureInstanceID can therefore use it directly
+	// without a nil-guard.
+	var rpClient *http.Client
+	if tlsCfg != nil {
+		transport := utils.NewBaseTransport()
+		transport.TLSClientConfig = tlsCfg
+		rpClient = &http.Client{
+			Timeout:   10 * time.Second,
+			Transport: transport,
+		}
+	} else {
+		rpClient = httpClient
+	}
 
 	ctx, cancel := context.WithCancel( //nolint:gosec // cancel is stored in the struct and called via analytics.cancel
 		context.Background(),
@@ -305,6 +326,7 @@ func NewAnalytics(
 	analytics := &Analytics{
 		Config:     config,
 		httpClient: httpClient,
+		rpClient:   rpClient,
 		rpHostURL:  rpHostURL,                          // Store for lazy fetching
 		instanceID: "",                                 // Will be fetched lazily on first use
 		metrics:    make(map[string]map[string]*int64), // userID -> toolName -> counter

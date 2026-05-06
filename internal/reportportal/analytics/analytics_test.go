@@ -3,6 +3,7 @@ package analytics
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -152,7 +153,7 @@ func TestNewAnalytics(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			analytics, err := NewAnalytics(tt.userID, tt.apiSecret, tt.rpAPIToken, "")
+			analytics, err := NewAnalytics(tt.userID, tt.apiSecret, tt.rpAPIToken, "", nil)
 
 			if tt.wantErr {
 				assert.Error(t, err)
@@ -160,13 +161,45 @@ func TestNewAnalytics(t *testing.T) {
 			} else {
 				assert.NoError(t, err)
 				assert.NotNil(t, analytics)
+				if analytics != nil {
+					defer analytics.Stop()
+				}
 
 				// Analytics should be created when API secret is provided
 				assert.NotNil(t, analytics.Config)
 				assert.NotNil(t, analytics.httpClient)
+				assert.NotNil(t, analytics.rpClient)
 			}
 		})
 	}
+}
+
+func TestNewAnalytics_AppliesTLSConfig(t *testing.T) {
+	tlsCfg := &tls.Config{
+		InsecureSkipVerify: true, //nolint:gosec // intentional for test assertion only
+		MinVersion:         tls.VersionTLS12,
+	}
+
+	a, err := NewAnalytics("test-user", "test-secret", "", "", tlsCfg)
+	require.NoError(t, err)
+	require.NotNil(t, a)
+	if a != nil {
+		defer a.Stop()
+	}
+
+	assert.Nil(t, a.httpClient.Transport,
+		"GA4 client should keep default transport (verified TLS to Google)")
+
+	rpTransport, ok := a.rpClient.Transport.(*http.Transport)
+	require.True(t, ok, "expected rpClient.Transport to be *http.Transport")
+	require.NotNil(
+		t,
+		rpTransport.TLSClientConfig,
+		"expected TLSClientConfig on ReportPortal client transport",
+	)
+
+	assert.Equal(t, tlsCfg, rpTransport.TLSClientConfig,
+		"rpClient transport should use the *tls.Config passed to NewAnalytics for /api/info only")
 }
 
 func TestGetAnalyticArg(t *testing.T) {
@@ -408,7 +441,7 @@ func TestAnalyticsGracefulShutdown(t *testing.T) {
 		// never responds — the worst-case scenario that used to cause a ~15 s hang.
 		transport := &hangingRoundTripper{requestReceived: make(chan struct{})}
 
-		a, err := NewAnalytics("test-user", "test-secret", "", "")
+		a, err := NewAnalytics("test-user", "test-secret", "", "", nil)
 		require.NoError(t, err)
 		require.NotNil(t, a)
 
@@ -474,7 +507,7 @@ func TestAnalyticsGracefulShutdown(t *testing.T) {
 		)
 		defer rpServer.Close()
 
-		a, err := NewAnalytics("test-user", "test-secret", "", rpServer.URL)
+		a, err := NewAnalytics("test-user", "test-secret", "", rpServer.URL, nil)
 		require.NoError(t, err)
 		require.NotNil(t, a)
 
@@ -514,7 +547,7 @@ func TestAnalyticsGracefulShutdown(t *testing.T) {
 	})
 
 	t.Run("internal context is cancelled on Stop", func(t *testing.T) {
-		a, err := NewAnalytics("test-user", "test-secret", "", "")
+		a, err := NewAnalytics("test-user", "test-secret", "", "", nil)
 		require.NoError(t, err)
 		require.NotNil(t, a)
 
@@ -529,7 +562,7 @@ func TestAnalyticsGracefulShutdown(t *testing.T) {
 	})
 
 	t.Run("background goroutine exits after Stop", func(t *testing.T) {
-		a, err := NewAnalytics("test-user", "test-secret", "", "")
+		a, err := NewAnalytics("test-user", "test-secret", "", "", nil)
 		require.NoError(t, err)
 		require.NotNil(t, a)
 
@@ -551,7 +584,7 @@ func TestAnalyticsGracefulShutdown(t *testing.T) {
 	})
 
 	t.Run("Stop is idempotent", func(t *testing.T) {
-		a, err := NewAnalytics("test-user", "test-secret", "", "")
+		a, err := NewAnalytics("test-user", "test-secret", "", "", nil)
 		require.NoError(t, err)
 		require.NotNil(t, a)
 
@@ -576,7 +609,7 @@ func TestAnalyticsGracefulShutdown(t *testing.T) {
 //     even though two chunks of events are queued.
 func TestCancellationGuards(t *testing.T) {
 	t.Run("guard_1_skips_per_user_loop_when_context_pre_cancelled", func(t *testing.T) {
-		a, err := NewAnalytics("test-user", "test-secret", "", "")
+		a, err := NewAnalytics("test-user", "test-secret", "", "", nil)
 		require.NoError(t, err)
 		defer a.Stop()
 
@@ -616,7 +649,7 @@ func TestCancellationGuards(t *testing.T) {
 	})
 
 	t.Run("guard_2_skips_event_expansion_when_context_pre_cancelled", func(t *testing.T) {
-		a, err := NewAnalytics("test-user", "test-secret", "", "")
+		a, err := NewAnalytics("test-user", "test-secret", "", "", nil)
 		require.NoError(t, err)
 		defer a.Stop()
 
@@ -654,7 +687,7 @@ func TestCancellationGuards(t *testing.T) {
 	})
 
 	t.Run("guard_3_stops_chunk_loop_after_first_chunk_sends", func(t *testing.T) {
-		a, err := NewAnalytics("test-user", "test-secret", "", "")
+		a, err := NewAnalytics("test-user", "test-secret", "", "", nil)
 		require.NoError(t, err)
 		defer a.Stop()
 
@@ -711,6 +744,7 @@ func TestAnalyticsIntegration(t *testing.T) {
 		"test-secret",
 		"dGVzdC1yZXBvcnRwb3J0YWwtYW5hbHl0aWNzLXRva2VuLWJhc2U2NA==",
 		"",
+		nil,
 	)
 	require.NoError(t, err)
 	require.NotNil(t, analytics)
@@ -883,9 +917,12 @@ func TestConcurrentMetricIncrement(t *testing.T) {
 
 func TestAnalyticsUserIDGeneration(t *testing.T) {
 	// Test with empty user ID - should generate one
-	analytics1, err := NewAnalytics("", "test-secret", testToken4, "")
+	analytics1, err := NewAnalytics("", "test-secret", testToken4, "", nil)
 	assert.NoError(t, err)
 	assert.NotNil(t, analytics1)
+	if analytics1 != nil {
+		defer analytics1.Stop()
+	}
 
 	// Test with provided user ID
 	analytics2, err := NewAnalytics(
@@ -893,9 +930,13 @@ func TestAnalyticsUserIDGeneration(t *testing.T) {
 		"test-secret",
 		testToken5,
 		"",
+		nil,
 	)
 	assert.NoError(t, err)
 	assert.NotNil(t, analytics2)
+	if analytics2 != nil {
+		defer analytics2.Stop()
+	}
 
 	// Both should be valid
 	assert.NotNil(t, analytics1.Config)
@@ -948,7 +989,13 @@ func TestGetUserIDFromContext(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create analytics with the specified configuration
-			analytics, err := NewAnalytics(tt.customUserID, "test-secret", tt.rpTokenEnvVar, "")
+			analytics, err := NewAnalytics(
+				tt.customUserID,
+				"test-secret",
+				tt.rpTokenEnvVar,
+				"",
+				nil,
+			)
 			require.NoError(t, err)
 			require.NotNil(t, analytics)
 			defer analytics.Stop()
@@ -998,7 +1045,7 @@ func TestTrackMCPEventWithTokenFromContext(t *testing.T) {
 	// Test 1: Analytics with RP_API_TOKEN env var - should always use env var hash
 	t.Run("with RP_API_TOKEN env var", func(t *testing.T) {
 		envToken := testEnvTokenString
-		analytics, err := NewAnalytics("", "test-secret", envToken, "")
+		analytics, err := NewAnalytics("", "test-secret", envToken, "", nil)
 		require.NoError(t, err)
 		require.NotNil(t, analytics)
 		defer analytics.Stop()
@@ -1034,7 +1081,7 @@ func TestTrackMCPEventWithTokenFromContext(t *testing.T) {
 
 	// Test 2: Analytics WITHOUT env var - should use Bearer token from context
 	t.Run("without RP_API_TOKEN env var - uses Bearer token", func(t *testing.T) {
-		analytics, err := NewAnalytics("", "test-secret", "", "") // No env token
+		analytics, err := NewAnalytics("", "test-secret", "", "", nil) // No env token
 		require.NoError(t, err)
 		require.NotNil(t, analytics)
 		defer analytics.Stop()
@@ -1075,7 +1122,7 @@ func TestTrackMCPEventWithTokenFromContext(t *testing.T) {
 
 	// Test 3: No env var and no Bearer token - uses anonymous
 	t.Run("without env var and without Bearer token - uses anonymous", func(t *testing.T) {
-		analytics, err := NewAnalytics("", "test-secret", "", "")
+		analytics, err := NewAnalytics("", "test-secret", "", "", nil)
 		require.NoError(t, err)
 		require.NotNil(t, analytics)
 		defer analytics.Stop()
@@ -1105,7 +1152,7 @@ func TestAnalyticsBatchSendingPerUser(t *testing.T) {
 	// Test with NO env var - should use Bearer tokens from requests
 	t.Run("without RP_API_TOKEN env var - tracks per Bearer token", func(t *testing.T) {
 		// Create analytics without env token
-		analytics, err := NewAnalytics("", "test-secret", "", "")
+		analytics, err := NewAnalytics("", "test-secret", "", "", nil)
 		require.NoError(t, err)
 		require.NotNil(t, analytics)
 		defer analytics.Stop()
@@ -1142,7 +1189,7 @@ func TestAnalyticsBatchSendingPerUser(t *testing.T) {
 	// Test with env var - should use env var regardless of Bearer tokens
 	t.Run("with RP_API_TOKEN env var - tracks under single user", func(t *testing.T) {
 		envToken := testEnvTokenString
-		analytics, err := NewAnalytics("", "test-secret", envToken, "")
+		analytics, err := NewAnalytics("", "test-secret", envToken, "", nil)
 		require.NoError(t, err)
 		require.NotNil(t, analytics)
 		defer analytics.Stop()
@@ -1191,13 +1238,13 @@ func TestAnalyticsHashingComparison_WithAndWithoutRPToken(t *testing.T) {
 	rpEnvToken := testToken2
 
 	// Scenario 1: Analytics WITH RP_API_TOKEN env var
-	analytics1, err1 := NewAnalytics("", "test-secret", rpEnvToken, "")
+	analytics1, err1 := NewAnalytics("", "test-secret", rpEnvToken, "", nil)
 	require.NoError(t, err1)
 	require.NotNil(t, analytics1)
 	defer analytics1.Stop()
 
 	// Scenario 2: Analytics WITHOUT RP_API_TOKEN env var
-	analytics2, err2 := NewAnalytics("", "test-secret", "", "")
+	analytics2, err2 := NewAnalytics("", "test-secret", "", "", nil)
 	require.NoError(t, err2)
 	require.NotNil(t, analytics2)
 	defer analytics2.Stop()
@@ -1272,13 +1319,13 @@ func TestSameTokenDifferentSources_ProducesSameHash(t *testing.T) {
 	sameTokenValue := testToken1
 
 	// Scenario 1: Token from RP_API_TOKEN environment variable
-	analytics1, err1 := NewAnalytics("", "test-secret", sameTokenValue, "")
+	analytics1, err1 := NewAnalytics("", "test-secret", sameTokenValue, "", nil)
 	require.NoError(t, err1)
 	require.NotNil(t, analytics1)
 	defer analytics1.Stop()
 
 	// Scenario 2: Token from Bearer header (no env var)
-	analytics2, err2 := NewAnalytics("", "test-secret", "", "")
+	analytics2, err2 := NewAnalytics("", "test-secret", "", "", nil)
 	require.NoError(t, err2)
 	require.NotNil(t, analytics2)
 	defer analytics2.Stop()
@@ -1341,7 +1388,7 @@ func TestHTTPTokenMiddlewareIntegrationWithAnalytics(t *testing.T) {
 	// Test 1: Analytics WITHOUT env var - should use Bearer tokens
 	t.Run("without RP_API_TOKEN env var - uses Bearer tokens", func(t *testing.T) {
 		// Create analytics without env var or custom user ID
-		analytics, err := NewAnalytics("", "test-secret", "", "")
+		analytics, err := NewAnalytics("", "test-secret", "", "", nil)
 		require.NoError(t, err)
 		require.NotNil(t, analytics)
 		defer analytics.Stop()
@@ -1403,7 +1450,7 @@ func TestHTTPTokenMiddlewareIntegrationWithAnalytics(t *testing.T) {
 	// Test 2: Analytics WITH custom user ID - should ignore Bearer tokens
 	t.Run("with custom user ID - ignores Bearer tokens", func(t *testing.T) {
 		customUserID := "my-custom-user-id"
-		analytics, err := NewAnalytics(customUserID, "test-secret", "", "")
+		analytics, err := NewAnalytics(customUserID, "test-secret", "", "", nil)
 		require.NoError(t, err)
 		require.NotNil(t, analytics)
 		defer analytics.Stop()
@@ -1473,7 +1520,7 @@ func TestAnalyticsInstanceIDFetching(t *testing.T) {
 	defer mockServer.Close()
 
 	t.Run("instance ID is fetched and stored", func(t *testing.T) {
-		analytics, err := NewAnalytics("test-user", "test-secret", "", mockServer.URL)
+		analytics, err := NewAnalytics("test-user", "test-secret", "", mockServer.URL, nil)
 		require.NoError(t, err)
 		require.NotNil(t, analytics)
 		defer analytics.Stop()
@@ -1491,7 +1538,7 @@ func TestAnalyticsInstanceIDFetching(t *testing.T) {
 
 	t.Run("instance ID is fetched lazily on first metrics processing", func(t *testing.T) {
 		// Create analytics with mock RP server
-		analytics, err := NewAnalytics("test-user", "test-secret", "", mockServer.URL)
+		analytics, err := NewAnalytics("test-user", "test-secret", "", mockServer.URL, nil)
 		require.NoError(t, err)
 		require.NotNil(t, analytics)
 		defer analytics.Stop()
@@ -1538,7 +1585,7 @@ func TestAnalyticsInstanceIDFetching(t *testing.T) {
 		defer gaServer.Close()
 
 		// Create analytics with mock RP server
-		analytics, err := NewAnalytics("test-user", "test-secret", "", mockServer.URL)
+		analytics, err := NewAnalytics("test-user", "test-secret", "", mockServer.URL, nil)
 		require.NoError(t, err)
 		require.NotNil(t, analytics)
 		defer analytics.Stop()
@@ -1593,7 +1640,7 @@ func TestAnalyticsInstanceIDFetching(t *testing.T) {
 		)
 		defer retryServer.Close()
 
-		analytics, err := NewAnalytics("test-user", "test-secret", "", retryServer.URL)
+		analytics, err := NewAnalytics("test-user", "test-secret", "", retryServer.URL, nil)
 		require.NoError(t, err)
 		require.NotNil(t, analytics)
 		defer analytics.Stop()
@@ -1633,7 +1680,7 @@ func TestAnalyticsInstanceIDFetching(t *testing.T) {
 	})
 
 	t.Run("empty instance ID when host URL is empty", func(t *testing.T) {
-		analytics, err := NewAnalytics("test-user", "test-secret", "", "")
+		analytics, err := NewAnalytics("test-user", "test-secret", "", "", nil)
 		require.NoError(t, err)
 		require.NotNil(t, analytics)
 		defer analytics.Stop()

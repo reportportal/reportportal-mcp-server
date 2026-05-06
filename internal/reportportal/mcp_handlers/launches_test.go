@@ -50,6 +50,7 @@ func TestListLaunchesTool(t *testing.T) {
 		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(ctx, "")),
 		nil,
 		"",
+		nil,
 	)
 
 	// Get the tool and handler
@@ -103,6 +104,7 @@ func TestGetLaunchByIdTool(t *testing.T) {
 		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(ctx, "")),
 		nil,
 		"",
+		nil,
 	)
 
 	// Get the tool and handler
@@ -161,6 +163,7 @@ func TestGetLaunchByIdTool_NotFound(t *testing.T) {
 		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(ctx, "")),
 		nil,
 		"",
+		nil,
 	)
 
 	// Get the tool and handler
@@ -217,6 +220,7 @@ func TestRunAutoAnalysisTool(t *testing.T) {
 		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(ctx, "")),
 		nil,
 		"",
+		nil,
 	)
 
 	// Get the tool and handler
