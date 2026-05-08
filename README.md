@@ -799,7 +799,7 @@ Ask your AI assistant:
 "What ReportPortal tools are available?"
 ```
 
-Expected response: A list of 21 tools including launches, test items, analysis tools, TMS tools, etc.
+Expected response: A list of 18 tools including launches, test items, analysis tools, etc.
 
 **Step 2: Test Basic Query**
 
