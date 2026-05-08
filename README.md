@@ -427,6 +427,9 @@ The ReportPortal MCP server provides a comprehensive set of capabilities for int
 | Get Project Defect Types        | Retrieves available defect types for the specific project        | None                                                                                              |
 | Update defect types by item ids        | Updates defect types for multiple test items        |`test_items_ids` (required), `defect_type_id` (required), `defect_type_comment` (optional)                                                                                               |
 | Get Test Items History | Retrieves execution history of test items for a specific launch or parent suite | `filter-eq-launchId` or `filter-eq-parentId` (one required), `historyDepth`, `type`, `name`, `description`, `status`, `start_time_from`, `start_time_to`, `attributes`, `has_retries`, `defect_comment`, `auto_analyzed`, `ignored_in_aa`, `ticket_id`, `pattern_name`, `page`, `page-size`, `page-sort` (all optional) |
+| Get Milestones by filter | Lists TMS milestones for a project, optionally filtered by name or ID | `filter-name` (optional), `filter-id` (optional), `project` (optional) |
+| Get Test Plan by ID | Retrieves a TMS test plan by its ID | `id` (required), `project` (optional) |
+| Get Test Cases for Test Plan | Lists test cases assigned to a TMS test plan | `test-plan-id` (required), `project` (optional) |
 
 ### Available Prompts
 
@@ -796,7 +799,7 @@ Ask your AI assistant:
 "What ReportPortal tools are available?"
 ```
 
-Expected response: A list of 18 tools including launches, test items, analysis tools, etc.
+Expected response: A list of 21 tools including launches, test items, analysis tools, TMS tools, etc.
 
 **Step 2: Test Basic Query**
 

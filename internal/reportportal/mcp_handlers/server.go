@@ -86,6 +86,9 @@ func NewServer(
 	// Register all test item-related tools and resources
 	RegisterTestItemTools(s, rpClient, project, analyticsInstance)
 
+	// Register all TMS-related tools
+	RegisterTMSTools(s, rpClient, project, analyticsInstance)
+
 	prompts, err := ReadPrompts(PromptFiles, "prompts")
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to load prompts: %w", err)
