@@ -15,6 +15,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/reportportal/goRP/v5/pkg/gorp"
 	"github.com/urfave/cli/v3"
+	"golang.org/x/oauth2"
 
 	"github.com/reportportal/reportportal-mcp-server/internal/config"
 	"github.com/reportportal/reportportal-mcp-server/internal/promptreader"
@@ -44,13 +45,25 @@ func NewServer(
 		},
 	)
 
-	// Build a shared HTTP client for this server instance (used by both gorp and analytics).
+	// Build a plain HTTP client used only for analytics (no auth needed there).
 	httpClient := buildHTTPClient(tlsCfg)
 
-	// Create a new ReportPortal client
-	rpClient := gorp.NewClient(hostUrl, gorp.WithApiKeyAuth(context.Background(), token))
+	// Create the ReportPortal client with an oauth2 transport that injects
+	// the Bearer token on every request.
+	//
+	// When a custom TLS config is required, pass a pre-configured base client
+	// via the oauth2 context so the oauth2 transport inherits it. This keeps
+	// TLS settings intact while preserving the Authorization header.
+	//
+	// IMPORTANT: do NOT overwrite rpClient.APIClient.GetConfig().HTTPClient
+	// afterwards — that would replace the oauth2 transport with a plain client
+	// and silently drop all Authorization headers, causing 401 responses.
+	authCtx := context.Background()
+	if tlsCfg != nil {
+		authCtx = context.WithValue(authCtx, oauth2.HTTPClient, buildHTTPClient(tlsCfg))
+	}
+	rpClient := gorp.NewClient(hostUrl, gorp.WithApiKeyAuth(authCtx, token))
 	rpClient.APIClient.GetConfig().Middleware = middleware.QueryParamsMiddleware
-	rpClient.APIClient.GetConfig().HTTPClient = httpClient
 
 	// Initialize analytics (disabled if analyticsOff is true)
 	var analyticsInstance *analytics.Analytics
