@@ -3,6 +3,7 @@ package mcphandlers
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -57,13 +58,17 @@ type GetMilestonesByFilterArgs struct {
 }
 
 func (tr *TMSResources) toolGetMilestonesByFilter() (*mcp.Tool, ToolHandler[GetMilestonesByFilterArgs, any]) {
+	pkSchema, err := utils.ProjectKeySchema(tr.defaultProjectKey)
+	if err != nil {
+		slog.Error("failed to build project key schema", "error", err)
+	}
 	return &mcp.Tool{
 			Name:        "get_milestones_by_filter",
 			Description: "Get milestones from ReportPortal TMS, optionally filtered by name or ID",
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
-					utils.ProjectKeyField: utils.ProjectKeySchema(tr.defaultProjectKey),
+					utils.ProjectKeyField: pkSchema,
 					"filter-name": {
 						Type:        "string",
 						Description: "Filter milestones by name (exact match)",
@@ -137,13 +142,17 @@ type GetTestPlanByIDArgs struct {
 }
 
 func (tr *TMSResources) toolGetTestPlanByID() (*mcp.Tool, ToolHandler[GetTestPlanByIDArgs, any]) {
+	pkSchema, err := utils.ProjectKeySchema(tr.defaultProjectKey)
+	if err != nil {
+		slog.Error("failed to build project key schema", "error", err)
+	}
 	return &mcp.Tool{
 			Name:        "get_test_plan_by_id",
 			Description: "Get a TMS test plan by its ID",
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
-					utils.ProjectKeyField: utils.ProjectKeySchema(tr.defaultProjectKey),
+					utils.ProjectKeyField: pkSchema,
 					"id": {
 						Type:        "integer",
 						Description: "Test plan ID",
@@ -183,13 +192,17 @@ type GetTestCasesForTestPlanArgs struct {
 }
 
 func (tr *TMSResources) toolGetTestCasesForTestPlan() (*mcp.Tool, ToolHandler[GetTestCasesForTestPlanArgs, any]) {
+	pkSchema, err := utils.ProjectKeySchema(tr.defaultProjectKey)
+	if err != nil {
+		slog.Error("failed to build project key schema", "error", err)
+	}
 	return &mcp.Tool{
 			Name:        "get_test_cases_for_test_plan",
 			Description: "Get test cases assigned to a TMS test plan",
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
-					utils.ProjectKeyField: utils.ProjectKeySchema(tr.defaultProjectKey),
+					utils.ProjectKeyField: pkSchema,
 					"test-plan-id": {
 						Type:        "integer",
 						Description: "Test plan ID to retrieve test cases for",
