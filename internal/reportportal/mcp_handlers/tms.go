@@ -3,6 +3,7 @@ package mcphandlers
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -11,6 +12,7 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/reportportal/goRP/v5/pkg/gorp"
+	"github.com/reportportal/goRP/v5/pkg/openapi"
 
 	"github.com/reportportal/reportportal-mcp-server/internal/reportportal/analytics"
 	"github.com/reportportal/reportportal-mcp-server/internal/reportportal/utils"
@@ -122,12 +124,28 @@ func (tr *TMSResources) toolGetMilestonesByFilter() (*mcp.Tool, ToolHandler[GetM
 
 				httpClient := cfg.HTTPClient
 				if httpClient == nil {
-					httpClient = http.DefaultClient
+					httpClient = &http.Client{Timeout: importHTTPClientTimeout}
 				}
 
 				resp, err := httpClient.Do(httpReq)
 				if err != nil {
 					return nil, nil, fmt.Errorf("milestone request failed: %w", err)
+				}
+
+				if resp.StatusCode >= 300 {
+					defer resp.Body.Close() //nolint:errcheck
+					respBody, readErr := io.ReadAll(resp.Body)
+					if readErr != nil {
+						return nil, nil, fmt.Errorf(
+							"milestone request failed (HTTP %d)",
+							resp.StatusCode,
+						)
+					}
+					return nil, nil, fmt.Errorf(
+						"milestone request failed (HTTP %d): %s",
+						resp.StatusCode,
+						string(respBody),
+					)
 				}
 
 				return utils.ReadResponseBody(resp)
@@ -156,6 +174,7 @@ func (tr *TMSResources) toolGetTestPlanByID() (*mcp.Tool, ToolHandler[GetTestPla
 					"id": {
 						Type:        "integer",
 						Description: "Test plan ID",
+						Minimum:     openapi.PtrFloat64(1),
 					},
 				},
 				Required: utils.RequiredFields("id"),
@@ -206,6 +225,7 @@ func (tr *TMSResources) toolGetTestCasesForTestPlan() (*mcp.Tool, ToolHandler[Ge
 					"test-plan-id": {
 						Type:        "integer",
 						Description: "Test plan ID to retrieve test cases for",
+						Minimum:     openapi.PtrFloat64(1),
 					},
 				},
 				Required: utils.RequiredFields("test-plan-id"),
