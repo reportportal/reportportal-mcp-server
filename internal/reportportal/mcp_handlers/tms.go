@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/jsonschema-go/jsonschema"
@@ -276,7 +277,7 @@ func (tr *TMSResources) toolCreateFolder() (*mcp.Tool, ToolHandler[CreateFolderA
 	}
 	return &mcp.Tool{
 			Name:        "create_folder",
-			Description: "Create a new test folder in the ReportPortal TMS. Supports creating subfolders by providing a parent folder ID.",
+			Description: "Create a new test folder in the ReportPortal TMS. Supports creating subfolders by providing a parent folder ID. This tool mutates TMS data.",
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
@@ -305,6 +306,9 @@ func (tr *TMSResources) toolCreateFolder() (*mcp.Tool, ToolHandler[CreateFolderA
 				project, err := utils.ExtractProject(ctx, args.ProjectKey)
 				if err != nil {
 					return nil, nil, fmt.Errorf("failed to extract project: %w", err)
+				}
+				if strings.TrimSpace(args.Name) == "" {
+					return nil, nil, fmt.Errorf("name must not be empty or whitespace")
 				}
 
 				rq := openapi.NewComEpamReportportalBaseCoreTmsDtoTmsTestFolderRQ()
@@ -339,7 +343,7 @@ type CreateTestCaseArgs struct {
 	Priority       *string `json:"priority,omitempty"`
 	TestFolderID   *int64  `json:"test-folder-id,omitempty"`
 	Instructions   *string `json:"instructions,omitempty"`
-	ExpectedResult *string `json:"expectedResult,omitempty"`
+	ExpectedResult *string `json:"expected-result,omitempty"`
 }
 
 func (tr *TMSResources) toolCreateTestCase() (*mcp.Tool, ToolHandler[CreateTestCaseArgs, any]) {
@@ -349,7 +353,7 @@ func (tr *TMSResources) toolCreateTestCase() (*mcp.Tool, ToolHandler[CreateTestC
 	}
 	return &mcp.Tool{
 			Name:        "create_test_case",
-			Description: "Create a new test case in the ReportPortal TMS with a TEXT manual scenario type",
+			Description: "Create a new test case in the ReportPortal TMS with a TEXT manual scenario type. This tool mutates TMS data.",
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
@@ -376,7 +380,7 @@ func (tr *TMSResources) toolCreateTestCase() (*mcp.Tool, ToolHandler[CreateTestC
 						Type:        "string",
 						Description: "Optional manual scenario instructions / test steps (TEXT scenario type)",
 					},
-					"expectedResult": {
+					"expected-result": {
 						Type:        "string",
 						Description: "Optional expected result for the manual scenario",
 					},
@@ -392,7 +396,13 @@ func (tr *TMSResources) toolCreateTestCase() (*mcp.Tool, ToolHandler[CreateTestC
 				if err != nil {
 					return nil, nil, fmt.Errorf("failed to extract project: %w", err)
 				}
+				if strings.TrimSpace(args.Name) == "" {
+					return nil, nil, fmt.Errorf("name must not be empty or whitespace")
+				}
 
+				// The API requires a manual scenario object; TEXT is the only
+				// supported type, so it is always included even when instructions
+				// and expected-result are omitted.
 				textScenario := openapi.NewComEpamReportportalBaseCoreTmsDtoTmsTextManualScenarioRQ(
 					"TEXT",
 				)
@@ -440,8 +450,8 @@ type CreateMilestoneArgs struct {
 	Name       string  `json:"name"`
 	Type       string  `json:"type"`
 	Status     *string `json:"status,omitempty"`
-	StartDate  string  `json:"startDate"`
-	EndDate    string  `json:"endDate"`
+	StartDate  string  `json:"start-date"`
+	EndDate    string  `json:"end-date"`
 }
 
 func (tr *TMSResources) toolCreateMilestone() (*mcp.Tool, ToolHandler[CreateMilestoneArgs, any]) {
@@ -451,7 +461,7 @@ func (tr *TMSResources) toolCreateMilestone() (*mcp.Tool, ToolHandler[CreateMile
 	}
 	return &mcp.Tool{
 			Name:        "create_milestone",
-			Description: "Create a new milestone in the ReportPortal TMS",
+			Description: "Create a new milestone in the ReportPortal TMS. This tool mutates TMS data.",
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
@@ -462,22 +472,24 @@ func (tr *TMSResources) toolCreateMilestone() (*mcp.Tool, ToolHandler[CreateMile
 					},
 					"type": {
 						Type:        "string",
-						Description: "Type of the milestone (e.g. SPRINT, RELEASE, OTHER)",
+						Description: "Type of the milestone",
+						Enum:        []any{"SPRINT", "RELEASE", "OTHER"},
 					},
 					"status": {
 						Type:        "string",
-						Description: "Status of the milestone (e.g. ACTIVE, CLOSED)",
+						Description: "Optional status of the milestone",
+						Enum:        []any{"ACTIVE", "CLOSED"},
 					},
-					"startDate": {
+					"start-date": {
 						Type:        "string",
 						Description: "Start date of the milestone in RFC3339 format (e.g. 2026-01-01T00:00:00Z)",
 					},
-					"endDate": {
+					"end-date": {
 						Type:        "string",
-						Description: "End date of the milestone in RFC3339 format (e.g. 2026-12-31T00:00:00Z)",
+						Description: "End date of the milestone in RFC3339 format (e.g. 2026-12-31T00:00:00Z); must not be before start-date",
 					},
 				},
-				Required: utils.RequiredFields("name", "type", "startDate", "endDate"),
+				Required: utils.RequiredFields("name", "type", "start-date", "end-date"),
 			},
 		},
 		utils.WithAnalytics(
@@ -487,6 +499,9 @@ func (tr *TMSResources) toolCreateMilestone() (*mcp.Tool, ToolHandler[CreateMile
 				project, err := utils.ExtractProject(ctx, args.ProjectKey)
 				if err != nil {
 					return nil, nil, fmt.Errorf("failed to extract project: %w", err)
+				}
+				if strings.TrimSpace(args.Name) == "" {
+					return nil, nil, fmt.Errorf("name must not be empty or whitespace")
 				}
 
 				rq := openapi.NewComEpamReportportalBaseCoreTmsDtoTmsMilestoneRQ()
@@ -498,7 +513,7 @@ func (tr *TMSResources) toolCreateMilestone() (*mcp.Tool, ToolHandler[CreateMile
 				startDate, parseErr := time.Parse(time.RFC3339, args.StartDate)
 				if parseErr != nil {
 					return nil, nil, fmt.Errorf(
-						"invalid startDate format, expected RFC3339: %w",
+						"invalid start-date format, expected RFC3339: %w",
 						parseErr,
 					)
 				}
@@ -506,13 +521,13 @@ func (tr *TMSResources) toolCreateMilestone() (*mcp.Tool, ToolHandler[CreateMile
 				endDate, parseErr := time.Parse(time.RFC3339, args.EndDate)
 				if parseErr != nil {
 					return nil, nil, fmt.Errorf(
-						"invalid endDate format, expected RFC3339: %w",
+						"invalid end-date format, expected RFC3339: %w",
 						parseErr,
 					)
 				}
 				if endDate.Before(startDate) {
 					return nil, nil, fmt.Errorf(
-						"endDate (%s) must not be before startDate (%s)",
+						"end-date (%s) must not be before start-date (%s)",
 						args.EndDate, args.StartDate,
 					)
 				}
@@ -549,7 +564,7 @@ func (tr *TMSResources) toolCreateTestPlan() (*mcp.Tool, ToolHandler[CreateTestP
 	}
 	return &mcp.Tool{
 			Name:        "create_test_plan",
-			Description: "Create a new test plan in the ReportPortal TMS. A milestone must exist before creating a test plan.",
+			Description: "Create a new test plan in the ReportPortal TMS. A milestone must exist before creating a test plan. This tool mutates TMS data.",
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
@@ -578,6 +593,9 @@ func (tr *TMSResources) toolCreateTestPlan() (*mcp.Tool, ToolHandler[CreateTestP
 				project, err := utils.ExtractProject(ctx, args.ProjectKey)
 				if err != nil {
 					return nil, nil, fmt.Errorf("failed to extract project: %w", err)
+				}
+				if strings.TrimSpace(args.Name) == "" {
+					return nil, nil, fmt.Errorf("name must not be empty or whitespace")
 				}
 
 				rq := openapi.NewComEpamReportportalBaseCoreTmsDtoTmsTestPlanRQ()
@@ -616,7 +634,7 @@ func (tr *TMSResources) toolAddTestCasesToTestPlan() (*mcp.Tool, ToolHandler[Add
 	}
 	return &mcp.Tool{
 			Name:        "add_test_cases_to_test_plan",
-			Description: "Add multiple test cases to an existing TMS test plan",
+			Description: "Add multiple test cases to an existing TMS test plan. This tool mutates TMS data.",
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
@@ -628,8 +646,11 @@ func (tr *TMSResources) toolAddTestCasesToTestPlan() (*mcp.Tool, ToolHandler[Add
 					},
 					"test-case-ids": {
 						Type:        "array",
-						Description: "List of test case IDs to add to the test plan (must not be empty)",
-						Items:       &jsonschema.Schema{Type: "integer"},
+						Description: "List of test case IDs (each ≥ 1) to add to the test plan (must not be empty)",
+						Items: &jsonschema.Schema{
+							Type:    "integer",
+							Minimum: openapi.PtrFloat64(1),
+						},
 					},
 				},
 				Required: utils.RequiredFields("test-plan-id", "test-case-ids"),
