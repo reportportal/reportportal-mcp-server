@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"sync/atomic"
 	"testing"
 
@@ -246,7 +247,8 @@ func TestAddTestCasesToTestPlanTool_InvalidEmptyArray(t *testing.T) {
 }
 
 // TestGetTestFoldersByFilterTool_IntegerFilterBounds verifies that the JSON schema
-// for filter-eq-id and filter-eq-parentId carries minimum:1 and maximum:MaxInt32.
+// for filter-eq-id and filter-eq-parentId carries minimum:1 and no upper bound,
+// so that int64 IDs above MaxInt32 are accepted.
 func TestGetTestFoldersByFilterTool_IntegerFilterBounds(t *testing.T) {
 	tool, _ := newTMSResources(t).toolGetTestFoldersByFilter()
 
@@ -259,34 +261,43 @@ func TestGetTestFoldersByFilterTool_IntegerFilterBounds(t *testing.T) {
 		require.Equal(t, "integer", prop.Type, "%s should be integer type", field)
 		require.NotNil(t, prop.Minimum, "%s should have a minimum constraint", field)
 		require.Equal(t, float64(1), *prop.Minimum, "%s minimum should be 1", field)
-		require.NotNil(t, prop.Maximum, "%s should have a maximum constraint", field)
-		require.Equal(
-			t,
-			float64(math.MaxInt32),
-			*prop.Maximum,
-			"%s maximum should be MaxInt32",
-			field,
-		)
+		require.Nil(t, prop.Maximum, "%s should have no maximum constraint", field)
 	}
 }
 
-// TestGetTestFoldersByFilterTool_OutOfRangeID verifies that a filter-eq-id
-// exceeding math.MaxInt32 is rejected with a descriptive error and that no
-// HTTP request is made to the server.
-func TestGetTestFoldersByFilterTool_OutOfRangeID(t *testing.T) {
+// TestGetTestFoldersByFilterTool_LargeIDReachesHTTP verifies that a filter-eq-id
+// greater than math.MaxInt32 is accepted and forwarded as a query parameter to
+// the HTTP layer, allowing int64 IDs from typical ReportPortal deployments.
+func TestGetTestFoldersByFilterTool_LargeIDReachesHTTP(t *testing.T) {
 	ctx := context.Background()
-	res, requestCount := newTMSResourcesWithCounter(t)
+
+	var capturedQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedQuery = r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"content":[],"page":{"totalElements":0}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
 	_, handler := res.toolGetTestFoldersByFilter()
 
-	outOfRange := int64(math.MaxInt32) + 1
-	_, _, err := handler(ctx, &mcp.CallToolRequest{}, GetTestFoldersByFilterArgs{
+	largeID := int64(math.MaxInt32) + 1
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, GetTestFoldersByFilterArgs{
 		ProjectKey: "test-project",
-		FilterEqID: &outOfRange,
+		FilterEqID: &largeID,
 	})
 
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "filter-eq-id out of range")
-	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+	require.NoError(t, callErr, "large int64 ID should be accepted and forwarded")
+	require.NotNil(t, capturedQuery, "HTTP request should reach the server")
+	require.Equal(t, strconv.FormatInt(largeID, 10), capturedQuery.Get("filter.eq.id"))
 }
 
 // TestGetTestFoldersByFilterTool_ZeroID verifies that a filter-eq-id of 0
@@ -325,21 +336,37 @@ func TestGetTestFoldersByFilterTool_NegativeParentID(t *testing.T) {
 	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
 }
 
-// TestGetTestFoldersByFilterTool_OutOfRangeParentID verifies that a
-// filter-eq-parentId exceeding math.MaxInt32 is rejected and that no HTTP
-// request is made to the server.
-func TestGetTestFoldersByFilterTool_OutOfRangeParentID(t *testing.T) {
+// TestGetTestFoldersByFilterTool_LargeParentIDReachesHTTP verifies that a
+// filter-eq-parentId greater than math.MaxInt32 is accepted and forwarded as a
+// query parameter to the HTTP layer.
+func TestGetTestFoldersByFilterTool_LargeParentIDReachesHTTP(t *testing.T) {
 	ctx := context.Background()
-	res, requestCount := newTMSResourcesWithCounter(t)
+
+	var capturedQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedQuery = r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"content":[],"page":{"totalElements":0}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
 	_, handler := res.toolGetTestFoldersByFilter()
 
-	outOfRange := int64(math.MaxInt32) + 1
-	_, _, err := handler(ctx, &mcp.CallToolRequest{}, GetTestFoldersByFilterArgs{
+	largeParentID := int64(math.MaxInt32) + 1
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, GetTestFoldersByFilterArgs{
 		ProjectKey:       "test-project",
-		FilterEqParentID: &outOfRange,
+		FilterEqParentID: &largeParentID,
 	})
 
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "filter-eq-parentId out of range")
-	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+	require.NoError(t, callErr, "large int64 parent ID should be accepted and forwarded")
+	require.NotNil(t, capturedQuery, "HTTP request should reach the server")
+	require.Equal(t, strconv.FormatInt(largeParentID, 10), capturedQuery.Get("filter.eq.parentId"))
 }

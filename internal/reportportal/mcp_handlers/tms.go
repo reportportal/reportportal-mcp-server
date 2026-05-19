@@ -2,11 +2,9 @@ package mcphandlers
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
-	"math"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -281,7 +279,7 @@ func (tr *TMSResources) toolGetTestFoldersByFilter() (*mcp.Tool, ToolHandler[Get
 	}
 	return &mcp.Tool{
 			Name:        "get_test_folders_by_filter",
-			Description: "Get test folders for a project from ReportPortal TMS. All filters are optional. Without filters, returns the first page of folders for the project; pagination is not supported by this tool, so the response may be incomplete for large folder sets. To detect truncation, compare page.totalElements with len(page.content); if they differ, narrow the results using filter-eq-parentId or filter-eq-name.",
+			Description: "Get test folders for a project from ReportPortal TMS. All filters are optional. Without filters, returns the first page of folders for the project; pagination is not supported by this tool, so the response may be incomplete for large folder sets. To detect truncation, compare page.totalElements with len(content) (or check page.hasNext); if more items exist than returned, narrow the results using filter-eq-parentId or filter-eq-name.",
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
@@ -290,13 +288,11 @@ func (tr *TMSResources) toolGetTestFoldersByFilter() (*mcp.Tool, ToolHandler[Get
 						Type:        "integer",
 						Description: "Filter folders by id",
 						Minimum:     openapi.PtrFloat64(1),
-						Maximum:     openapi.PtrFloat64(float64(math.MaxInt32)),
 					},
 					"filter-eq-parentId": {
 						Type:        "integer",
 						Description: "Filter folders by parent folder id",
 						Minimum:     openapi.PtrFloat64(1),
-						Maximum:     openapi.PtrFloat64(float64(math.MaxInt32)),
 					},
 					"filter-eq-name": {
 						Type:        "string",
@@ -315,44 +311,72 @@ func (tr *TMSResources) toolGetTestFoldersByFilter() (*mcp.Tool, ToolHandler[Get
 					return nil, nil, fmt.Errorf("failed to extract project: %w", err)
 				}
 
-				apiReq := tr.client.TestFolderAPI.GetFoldersByCriteria(ctx, project)
-				if args.FilterEqID != nil {
-					if *args.FilterEqID < 1 || *args.FilterEqID > math.MaxInt32 {
-						return nil, nil, fmt.Errorf(
-							"filter-eq-id out of range: must be between 1 and %d",
-							math.MaxInt32,
-						)
-					}
-					apiReq = apiReq.FilterEqId(int32(*args.FilterEqID))
+				if args.FilterEqID != nil && *args.FilterEqID < 1 {
+					return nil, nil, fmt.Errorf("filter-eq-id out of range: must be >= 1")
 				}
-				if args.FilterEqParentID != nil {
-					if *args.FilterEqParentID < 1 || *args.FilterEqParentID > math.MaxInt32 {
-						return nil, nil, fmt.Errorf(
-							"filter-eq-parentId out of range: must be between 1 and %d",
-							math.MaxInt32,
-						)
-					}
-					apiReq = apiReq.FilterEqParentId(int32(*args.FilterEqParentID))
-				}
-				if args.FilterEqName != "" {
-					apiReq = apiReq.FilterEqName(args.FilterEqName)
+				if args.FilterEqParentID != nil && *args.FilterEqParentID < 1 {
+					return nil, nil, fmt.Errorf("filter-eq-parentId out of range: must be >= 1")
 				}
 
-				page, response, err := apiReq.Execute()
+				cfg := tr.client.GetConfig()
+				folderURL := fmt.Sprintf(
+					"%s://%s/api/v1/project/%s/tms/folder",
+					cfg.Scheme, cfg.Host, url.PathEscape(project),
+				)
+
+				httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, folderURL, nil)
 				if err != nil {
+					return nil, nil, fmt.Errorf("failed to build folder request: %w", err)
+				}
+
+				for k, v := range cfg.DefaultHeader {
+					httpReq.Header.Set(k, v)
+				}
+				httpReq.Header.Set("Accept", "application/json")
+
+				query := httpReq.URL.Query()
+				if args.FilterEqID != nil {
+					query.Set("filter.eq.id", strconv.FormatInt(*args.FilterEqID, 10))
+				}
+				if args.FilterEqParentID != nil {
+					query.Set("filter.eq.parentId", strconv.FormatInt(*args.FilterEqParentID, 10))
+				}
+				if args.FilterEqName != "" {
+					query.Set("filter.eq.name", args.FilterEqName)
+				}
+				httpReq.URL.RawQuery = query.Encode()
+
+				if cfg.Middleware != nil {
+					cfg.Middleware(httpReq)
+				}
+
+				httpClient := cfg.HTTPClient
+				if httpClient == nil {
+					httpClient = &http.Client{Timeout: importHTTPClientTimeout}
+				}
+
+				resp, err := httpClient.Do(httpReq)
+				if err != nil {
+					return nil, nil, fmt.Errorf("folder request failed: %w", err)
+				}
+
+				if resp.StatusCode >= 300 {
+					defer resp.Body.Close() //nolint:errcheck
+					respBody, readErr := io.ReadAll(resp.Body)
+					if readErr != nil {
+						return nil, nil, fmt.Errorf(
+							"folder request failed (HTTP %d)",
+							resp.StatusCode,
+						)
+					}
 					return nil, nil, fmt.Errorf(
-						"%s: %w",
-						utils.ExtractResponseError(err, response),
-						err,
+						"folder request failed (HTTP %d): %s",
+						resp.StatusCode,
+						string(respBody),
 					)
 				}
-				r, err := json.Marshal(page)
-				if err != nil {
-					return nil, nil, fmt.Errorf("failed to marshal response: %w", err)
-				}
-				return &mcp.CallToolResult{
-					Content: []mcp.Content{&mcp.TextContent{Text: string(r)}},
-				}, nil, nil
+
+				return utils.ReadResponseBody(resp)
 			},
 		)
 }
