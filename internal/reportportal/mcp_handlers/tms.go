@@ -53,6 +53,7 @@ func RegisterTMSTools(
 	registerTool(s, tms.toolGetTestPlanByID)
 	registerTool(s, tms.toolGetTestCasesForTestPlan)
 	registerTool(s, tms.toolGetTestFoldersByFilter)
+	registerTool(s, tms.toolGetTestCasesByFilter)
 	registerTool(s, tms.toolCreateFolder)
 	registerTool(s, tms.toolCreateTestCase)
 	registerTool(s, tms.toolCreateMilestone)
@@ -377,6 +378,77 @@ func (tr *TMSResources) toolGetTestFoldersByFilter() (*mcp.Tool, ToolHandler[Get
 				}
 
 				return utils.ReadResponseBody(resp)
+			},
+		)
+}
+
+// GetTestCasesByFilterArgs represents the arguments for the get_test_cases_by_filter tool.
+type GetTestCasesByFilterArgs struct {
+	ProjectKey           string `json:"projectKey"`
+	FilterEqID           *int64 `json:"filter-eq-id,omitempty"`
+	FilterEqName         string `json:"filter-eq-name,omitempty"`
+	FilterEqTestFolderID *int64 `json:"filter-eq-testFolderId,omitempty"`
+}
+
+func (tr *TMSResources) toolGetTestCasesByFilter() (*mcp.Tool, ToolHandler[GetTestCasesByFilterArgs, any]) {
+	pkSchema, err := utils.ProjectKeySchema(tr.defaultProjectKey)
+	if err != nil {
+		slog.Error("failed to build project key schema", "error", err)
+	}
+	return &mcp.Tool{
+			Name:        "get_test_cases_by_filter",
+			Description: "Get test cases for a project from ReportPortal TMS, optionally filtered by id, name, or test folder id.",
+			InputSchema: &jsonschema.Schema{
+				Type: "object",
+				Properties: map[string]*jsonschema.Schema{
+					utils.ProjectKeyField: pkSchema,
+					"filter-eq-id": {
+						Type:        "integer",
+						Description: "Filter test cases by id",
+					},
+					"filter-eq-name": {
+						Type:        "string",
+						Description: "Filter test cases by name (exact match)",
+					},
+					"filter-eq-testFolderId": {
+						Type:        "integer",
+						Description: "Filter test cases by parent test folder id",
+					},
+				},
+				Required: utils.RequiredFields(),
+			},
+		},
+		utils.WithAnalytics(
+			tr.analytics,
+			"get_test_cases_by_filter",
+			func(ctx context.Context, req *mcp.CallToolRequest, args GetTestCasesByFilterArgs) (*mcp.CallToolResult, any, error) {
+				project, err := utils.ExtractProject(ctx, args.ProjectKey)
+				if err != nil {
+					return nil, nil, fmt.Errorf("failed to extract project: %w", err)
+				}
+
+				apiReq := tr.client.TestCaseAPI.GetTestCasesByCriteria(ctx, project)
+				if args.FilterEqID != nil {
+					apiReq = apiReq.FilterEqId(int32(*args.FilterEqID)) //nolint:gosec
+				}
+				if args.FilterEqName != "" {
+					apiReq = apiReq.FilterEqName(args.FilterEqName)
+				}
+				if args.FilterEqTestFolderID != nil {
+					apiReq = apiReq.FilterEqTestFolderId(
+						int32(*args.FilterEqTestFolderID), //nolint:gosec
+					)
+				}
+
+				_, response, err := apiReq.Execute()
+				if err != nil {
+					return nil, nil, fmt.Errorf(
+						"%s: %w",
+						utils.ExtractResponseError(err, response),
+						err,
+					)
+				}
+				return utils.ReadResponseBody(response)
 			},
 		)
 }
