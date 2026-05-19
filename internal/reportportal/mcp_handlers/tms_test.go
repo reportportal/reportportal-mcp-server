@@ -3,7 +3,10 @@ package mcphandlers
 import (
 	"context"
 	"math"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
+	"sync/atomic"
 	"testing"
 
 	"github.com/google/jsonschema-go/jsonschema"
@@ -21,6 +24,28 @@ func newTMSResources(t *testing.T) *TMSResources {
 		nil,
 		"",
 	)
+}
+
+// newTMSResourcesWithCounter creates a TMSResources backed by an httptest.Server
+// and returns both the resources and an atomic counter incremented on every
+// inbound HTTP request. Tests that expect validation to short-circuit before
+// any network call can assert that the counter remains zero.
+func newTMSResourcesWithCounter(t *testing.T) (*TMSResources, *atomic.Int64) {
+	t.Helper()
+	var requestCount atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requestCount.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	return NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	), &requestCount
 }
 
 // TestAddTestCasesToTestPlanTool_ArraySchema mirrors TestUpdateDefectTypeForTestItemsTool
@@ -246,10 +271,12 @@ func TestGetTestFoldersByFilterTool_IntegerFilterBounds(t *testing.T) {
 }
 
 // TestGetTestFoldersByFilterTool_OutOfRangeID verifies that a filter-eq-id
-// exceeding math.MaxInt32 is rejected with a descriptive error.
+// exceeding math.MaxInt32 is rejected with a descriptive error and that no
+// HTTP request is made to the server.
 func TestGetTestFoldersByFilterTool_OutOfRangeID(t *testing.T) {
 	ctx := context.Background()
-	_, handler := newTMSResources(t).toolGetTestFoldersByFilter()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolGetTestFoldersByFilter()
 
 	outOfRange := int64(math.MaxInt32) + 1
 	_, _, err := handler(ctx, &mcp.CallToolRequest{}, GetTestFoldersByFilterArgs{
@@ -259,13 +286,15 @@ func TestGetTestFoldersByFilterTool_OutOfRangeID(t *testing.T) {
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "filter-eq-id out of range")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
 }
 
 // TestGetTestFoldersByFilterTool_ZeroID verifies that a filter-eq-id of 0
 // (non-positive) is rejected before any API call is made.
 func TestGetTestFoldersByFilterTool_ZeroID(t *testing.T) {
 	ctx := context.Background()
-	_, handler := newTMSResources(t).toolGetTestFoldersByFilter()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolGetTestFoldersByFilter()
 
 	zero := int64(0)
 	_, _, err := handler(ctx, &mcp.CallToolRequest{}, GetTestFoldersByFilterArgs{
@@ -275,13 +304,15 @@ func TestGetTestFoldersByFilterTool_ZeroID(t *testing.T) {
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "filter-eq-id out of range")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
 }
 
 // TestGetTestFoldersByFilterTool_NegativeParentID verifies that a negative
 // filter-eq-parentId is rejected before any API call is made.
 func TestGetTestFoldersByFilterTool_NegativeParentID(t *testing.T) {
 	ctx := context.Background()
-	_, handler := newTMSResources(t).toolGetTestFoldersByFilter()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolGetTestFoldersByFilter()
 
 	negative := int64(-1)
 	_, _, err := handler(ctx, &mcp.CallToolRequest{}, GetTestFoldersByFilterArgs{
@@ -291,13 +322,16 @@ func TestGetTestFoldersByFilterTool_NegativeParentID(t *testing.T) {
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "filter-eq-parentId out of range")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
 }
 
 // TestGetTestFoldersByFilterTool_OutOfRangeParentID verifies that a
-// filter-eq-parentId exceeding math.MaxInt32 is rejected.
+// filter-eq-parentId exceeding math.MaxInt32 is rejected and that no HTTP
+// request is made to the server.
 func TestGetTestFoldersByFilterTool_OutOfRangeParentID(t *testing.T) {
 	ctx := context.Background()
-	_, handler := newTMSResources(t).toolGetTestFoldersByFilter()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolGetTestFoldersByFilter()
 
 	outOfRange := int64(math.MaxInt32) + 1
 	_, _, err := handler(ctx, &mcp.CallToolRequest{}, GetTestFoldersByFilterArgs{
@@ -307,4 +341,5 @@ func TestGetTestFoldersByFilterTool_OutOfRangeParentID(t *testing.T) {
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "filter-eq-parentId out of range")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
 }

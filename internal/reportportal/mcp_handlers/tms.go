@@ -2,6 +2,7 @@ package mcphandlers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -280,7 +281,7 @@ func (tr *TMSResources) toolGetTestFoldersByFilter() (*mcp.Tool, ToolHandler[Get
 	}
 	return &mcp.Tool{
 			Name:        "get_test_folders_by_filter",
-			Description: "Get test folders for a project from ReportPortal TMS. All filters are optional. Without filters, returns the first page of folders for the project; pagination is not supported by this tool, so the response may be incomplete for large folder sets.",
+			Description: "Get test folders for a project from ReportPortal TMS. All filters are optional. Without filters, returns the first page of folders for the project; pagination is not supported by this tool, so the response may be incomplete for large folder sets. To detect truncation, compare page.totalElements with len(page.content); if they differ, narrow the results using filter-eq-parentId or filter-eq-name.",
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
@@ -337,7 +338,7 @@ func (tr *TMSResources) toolGetTestFoldersByFilter() (*mcp.Tool, ToolHandler[Get
 					apiReq = apiReq.FilterEqName(args.FilterEqName)
 				}
 
-				_, response, err := apiReq.Execute()
+				page, response, err := apiReq.Execute()
 				if err != nil {
 					return nil, nil, fmt.Errorf(
 						"%s: %w",
@@ -345,7 +346,13 @@ func (tr *TMSResources) toolGetTestFoldersByFilter() (*mcp.Tool, ToolHandler[Get
 						err,
 					)
 				}
-				return utils.ReadResponseBody(response)
+				r, err := json.Marshal(page)
+				if err != nil {
+					return nil, nil, fmt.Errorf("failed to marshal response: %w", err)
+				}
+				return &mcp.CallToolResult{
+					Content: []mcp.Content{&mcp.TextContent{Text: string(r)}},
+				}, nil, nil
 			},
 		)
 }
