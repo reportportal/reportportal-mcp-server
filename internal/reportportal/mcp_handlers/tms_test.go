@@ -2,6 +2,7 @@ package mcphandlers
 
 import (
 	"context"
+	"math"
 	"net/url"
 	"testing"
 
@@ -217,4 +218,93 @@ func TestAddTestCasesToTestPlanTool_InvalidEmptyArray(t *testing.T) {
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "must not be empty")
+}
+
+// TestGetTestFoldersByFilterTool_IntegerFilterBounds verifies that the JSON schema
+// for filter-eq-id and filter-eq-parentId carries minimum:1 and maximum:MaxInt32.
+func TestGetTestFoldersByFilterTool_IntegerFilterBounds(t *testing.T) {
+	tool, _ := newTMSResources(t).toolGetTestFoldersByFilter()
+
+	schema, ok := tool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok, "InputSchema should be a *jsonschema.Schema")
+
+	for _, field := range []string{"filter-eq-id", "filter-eq-parentId"} {
+		prop, ok := schema.Properties[field]
+		require.True(t, ok, "%s property should exist", field)
+		require.Equal(t, "integer", prop.Type, "%s should be integer type", field)
+		require.NotNil(t, prop.Minimum, "%s should have a minimum constraint", field)
+		require.Equal(t, float64(1), *prop.Minimum, "%s minimum should be 1", field)
+		require.NotNil(t, prop.Maximum, "%s should have a maximum constraint", field)
+		require.Equal(
+			t,
+			float64(math.MaxInt32),
+			*prop.Maximum,
+			"%s maximum should be MaxInt32",
+			field,
+		)
+	}
+}
+
+// TestGetTestFoldersByFilterTool_OutOfRangeID verifies that a filter-eq-id
+// exceeding math.MaxInt32 is rejected with a descriptive error.
+func TestGetTestFoldersByFilterTool_OutOfRangeID(t *testing.T) {
+	ctx := context.Background()
+	_, handler := newTMSResources(t).toolGetTestFoldersByFilter()
+
+	outOfRange := int64(math.MaxInt32) + 1
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, GetTestFoldersByFilterArgs{
+		ProjectKey: "test-project",
+		FilterEqID: &outOfRange,
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "filter-eq-id out of range")
+}
+
+// TestGetTestFoldersByFilterTool_ZeroID verifies that a filter-eq-id of 0
+// (non-positive) is rejected before any API call is made.
+func TestGetTestFoldersByFilterTool_ZeroID(t *testing.T) {
+	ctx := context.Background()
+	_, handler := newTMSResources(t).toolGetTestFoldersByFilter()
+
+	zero := int64(0)
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, GetTestFoldersByFilterArgs{
+		ProjectKey: "test-project",
+		FilterEqID: &zero,
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "filter-eq-id out of range")
+}
+
+// TestGetTestFoldersByFilterTool_NegativeParentID verifies that a negative
+// filter-eq-parentId is rejected before any API call is made.
+func TestGetTestFoldersByFilterTool_NegativeParentID(t *testing.T) {
+	ctx := context.Background()
+	_, handler := newTMSResources(t).toolGetTestFoldersByFilter()
+
+	negative := int64(-1)
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, GetTestFoldersByFilterArgs{
+		ProjectKey:       "test-project",
+		FilterEqParentID: &negative,
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "filter-eq-parentId out of range")
+}
+
+// TestGetTestFoldersByFilterTool_OutOfRangeParentID verifies that a
+// filter-eq-parentId exceeding math.MaxInt32 is rejected.
+func TestGetTestFoldersByFilterTool_OutOfRangeParentID(t *testing.T) {
+	ctx := context.Background()
+	_, handler := newTMSResources(t).toolGetTestFoldersByFilter()
+
+	outOfRange := int64(math.MaxInt32) + 1
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, GetTestFoldersByFilterArgs{
+		ProjectKey:       "test-project",
+		FilterEqParentID: &outOfRange,
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "filter-eq-parentId out of range")
 }
