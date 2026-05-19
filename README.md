@@ -430,6 +430,11 @@ The ReportPortal MCP server provides a comprehensive set of capabilities for int
 | Get Milestones by filter | Lists TMS milestones for a project, optionally filtered by name or ID | `projectKey` (required), `filter-name` (optional), `filter-id` (optional) |
 | Get Test Plan by ID | Retrieves a TMS test plan by its ID | `projectKey` (required), `id` (required) |
 | Get Test Cases for Test Plan | Lists test cases assigned to a TMS test plan | `projectKey` (required), `test-plan-id` (required) |
+| Create Folder | Creates a new test folder (or subfolder) in the TMS. **Mutates TMS data.** | `projectKey` (required), `name` (required), `description` (optional), `parent-test-folder-id` (optional, integer ≥ 1) |
+| Create Test Case | Creates a new test case with a TEXT manual scenario type. **Mutates TMS data.** | `projectKey` (required), `name` (required), `description` (optional), `priority` (optional, enum: `LOW` \| `MEDIUM` \| `HIGH` \| `CRITICAL`), `test-folder-id` (optional, integer ≥ 1), `instructions` (optional), `expected-result` (optional) |
+| Create Milestone | Creates a new milestone in the TMS. **Mutates TMS data.** Dates must be RFC3339 (e.g. `2026-01-01T00:00:00Z`); `end-date` must not precede `start-date`. | `projectKey` (required), `name` (required), `type` (required, enum: `SPRINT` \| `RELEASE` \| `OTHER`), `start-date` (required, RFC3339), `end-date` (required, RFC3339), `status` (optional, enum: `ACTIVE` \| `CLOSED`) |
+| Create Test Plan | Creates a new test plan linked to an existing milestone. **Mutates TMS data.** | `projectKey` (required), `name` (required), `milestone-id` (required, integer ≥ 1), `description` (optional) |
+| Add Test Cases to Test Plan | Adds one or more test cases to an existing TMS test plan. **Mutates TMS data.** | `projectKey` (required), `test-plan-id` (required, integer ≥ 1), `test-case-ids` (required, non-empty array of integers) |
 
 ### Available Prompts
 
@@ -799,7 +804,7 @@ Ask your AI assistant:
 "What ReportPortal tools are available?"
 ```
 
-Expected response: A list of 21 tools including launches, test items, analysis tools, TMS tools, etc.
+Expected response: A list of 26 tools including launches, test items, analysis tools, TMS tools, etc.
 
 **Step 2: Test Basic Query**
 
