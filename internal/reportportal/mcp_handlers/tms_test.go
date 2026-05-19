@@ -2,7 +2,12 @@ package mcphandlers
 
 import (
 	"context"
+	"math"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
+	"strconv"
+	"sync/atomic"
 	"testing"
 
 	"github.com/google/jsonschema-go/jsonschema"
@@ -20,6 +25,28 @@ func newTMSResources(t *testing.T) *TMSResources {
 		nil,
 		"",
 	)
+}
+
+// newTMSResourcesWithCounter creates a TMSResources backed by an httptest.Server
+// and returns both the resources and an atomic counter incremented on every
+// inbound HTTP request. Tests that expect validation to short-circuit before
+// any network call can assert that the counter remains zero.
+func newTMSResourcesWithCounter(t *testing.T) (*TMSResources, *atomic.Int64) {
+	t.Helper()
+	var requestCount atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requestCount.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	return NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	), &requestCount
 }
 
 // TestAddTestCasesToTestPlanTool_ArraySchema mirrors TestUpdateDefectTypeForTestItemsTool
@@ -217,4 +244,129 @@ func TestAddTestCasesToTestPlanTool_InvalidEmptyArray(t *testing.T) {
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "must not be empty")
+}
+
+// TestGetTestFoldersByFilterTool_IntegerFilterBounds verifies that the JSON schema
+// for filter-eq-id and filter-eq-parentId carries minimum:1 and no upper bound,
+// so that int64 IDs above MaxInt32 are accepted.
+func TestGetTestFoldersByFilterTool_IntegerFilterBounds(t *testing.T) {
+	tool, _ := newTMSResources(t).toolGetTestFoldersByFilter()
+
+	schema, ok := tool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok, "InputSchema should be a *jsonschema.Schema")
+
+	for _, field := range []string{"filter-eq-id", "filter-eq-parentId"} {
+		prop, ok := schema.Properties[field]
+		require.True(t, ok, "%s property should exist", field)
+		require.Equal(t, "integer", prop.Type, "%s should be integer type", field)
+		require.NotNil(t, prop.Minimum, "%s should have a minimum constraint", field)
+		require.Equal(t, float64(1), *prop.Minimum, "%s minimum should be 1", field)
+		require.Nil(t, prop.Maximum, "%s should have no maximum constraint", field)
+	}
+}
+
+// TestGetTestFoldersByFilterTool_LargeIDReachesHTTP verifies that a filter-eq-id
+// greater than math.MaxInt32 is accepted and forwarded as a query parameter to
+// the HTTP layer, allowing int64 IDs from typical ReportPortal deployments.
+func TestGetTestFoldersByFilterTool_LargeIDReachesHTTP(t *testing.T) {
+	ctx := context.Background()
+
+	var capturedQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedQuery = r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"content":[],"page":{"totalElements":0}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolGetTestFoldersByFilter()
+
+	largeID := int64(math.MaxInt32) + 1
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, GetTestFoldersByFilterArgs{
+		ProjectKey: "test-project",
+		FilterEqID: &largeID,
+	})
+
+	require.NoError(t, callErr, "large int64 ID should be accepted and forwarded")
+	require.NotNil(t, capturedQuery, "HTTP request should reach the server")
+	require.Equal(t, strconv.FormatInt(largeID, 10), capturedQuery.Get("filter.eq.id"))
+}
+
+// TestGetTestFoldersByFilterTool_ZeroID verifies that a filter-eq-id of 0
+// (non-positive) is rejected before any API call is made.
+func TestGetTestFoldersByFilterTool_ZeroID(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolGetTestFoldersByFilter()
+
+	zero := int64(0)
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, GetTestFoldersByFilterArgs{
+		ProjectKey: "test-project",
+		FilterEqID: &zero,
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "filter-eq-id out of range")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestGetTestFoldersByFilterTool_NegativeParentID verifies that a negative
+// filter-eq-parentId is rejected before any API call is made.
+func TestGetTestFoldersByFilterTool_NegativeParentID(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolGetTestFoldersByFilter()
+
+	negative := int64(-1)
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, GetTestFoldersByFilterArgs{
+		ProjectKey:       "test-project",
+		FilterEqParentID: &negative,
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "filter-eq-parentId out of range")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestGetTestFoldersByFilterTool_LargeParentIDReachesHTTP verifies that a
+// filter-eq-parentId greater than math.MaxInt32 is accepted and forwarded as a
+// query parameter to the HTTP layer.
+func TestGetTestFoldersByFilterTool_LargeParentIDReachesHTTP(t *testing.T) {
+	ctx := context.Background()
+
+	var capturedQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedQuery = r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"content":[],"page":{"totalElements":0}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolGetTestFoldersByFilter()
+
+	largeParentID := int64(math.MaxInt32) + 1
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, GetTestFoldersByFilterArgs{
+		ProjectKey:       "test-project",
+		FilterEqParentID: &largeParentID,
+	})
+
+	require.NoError(t, callErr, "large int64 parent ID should be accepted and forwarded")
+	require.NotNil(t, capturedQuery, "HTTP request should reach the server")
+	require.Equal(t, strconv.FormatInt(largeParentID, 10), capturedQuery.Get("filter.eq.parentId"))
 }

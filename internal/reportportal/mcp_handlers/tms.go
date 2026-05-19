@@ -52,6 +52,7 @@ func RegisterTMSTools(
 	registerTool(s, tms.toolGetMilestonesByFilter)
 	registerTool(s, tms.toolGetTestPlanByID)
 	registerTool(s, tms.toolGetTestCasesForTestPlan)
+	registerTool(s, tms.toolGetTestFoldersByFilter)
 	registerTool(s, tms.toolCreateFolder)
 	registerTool(s, tms.toolCreateTestCase)
 	registerTool(s, tms.toolCreateMilestone)
@@ -258,6 +259,124 @@ func (tr *TMSResources) toolGetTestCasesForTestPlan() (*mcp.Tool, ToolHandler[Ge
 				}
 
 				return utils.ReadResponseBody(response)
+			},
+		)
+}
+
+// GetTestFoldersByFilterArgs represents the arguments for the get_test_folders_by_filter tool.
+type GetTestFoldersByFilterArgs struct {
+	ProjectKey       string `json:"projectKey"`
+	FilterEqID       *int64 `json:"filter-eq-id,omitempty"`
+	FilterEqParentID *int64 `json:"filter-eq-parentId,omitempty"`
+	FilterEqName     string `json:"filter-eq-name,omitempty"`
+}
+
+func (tr *TMSResources) toolGetTestFoldersByFilter() (*mcp.Tool, ToolHandler[GetTestFoldersByFilterArgs, any]) {
+	pkSchema, err := utils.ProjectKeySchema(tr.defaultProjectKey)
+	if err != nil {
+		slog.Error("failed to build project key schema", "error", err)
+		pkSchema = &jsonschema.Schema{Type: "string"}
+	}
+	return &mcp.Tool{
+			Name:        "get_test_folders_by_filter",
+			Description: "Get test folders for a project from ReportPortal TMS. All filters are optional. Without filters, returns the first page of folders for the project; pagination is not supported by this tool, so the response may be incomplete for large folder sets. To detect truncation, compare page.totalElements with len(content) (or check page.hasNext); if more items exist than returned, narrow the results using filter-eq-parentId or filter-eq-name.",
+			InputSchema: &jsonschema.Schema{
+				Type: "object",
+				Properties: map[string]*jsonschema.Schema{
+					utils.ProjectKeyField: pkSchema,
+					"filter-eq-id": {
+						Type:        "integer",
+						Description: "Filter folders by id",
+						Minimum:     openapi.PtrFloat64(1),
+					},
+					"filter-eq-parentId": {
+						Type:        "integer",
+						Description: "Filter folders by parent folder id",
+						Minimum:     openapi.PtrFloat64(1),
+					},
+					"filter-eq-name": {
+						Type:        "string",
+						Description: "Filter folders by name (exact match)",
+					},
+				},
+				Required: utils.RequiredFields(),
+			},
+		},
+		utils.WithAnalytics(
+			tr.analytics,
+			"get_test_folders_by_filter",
+			func(ctx context.Context, req *mcp.CallToolRequest, args GetTestFoldersByFilterArgs) (*mcp.CallToolResult, any, error) {
+				project, err := utils.ExtractProject(ctx, args.ProjectKey)
+				if err != nil {
+					return nil, nil, fmt.Errorf("failed to extract project: %w", err)
+				}
+
+				if args.FilterEqID != nil && *args.FilterEqID < 1 {
+					return nil, nil, fmt.Errorf("filter-eq-id out of range: must be >= 1")
+				}
+				if args.FilterEqParentID != nil && *args.FilterEqParentID < 1 {
+					return nil, nil, fmt.Errorf("filter-eq-parentId out of range: must be >= 1")
+				}
+
+				cfg := tr.client.GetConfig()
+				folderURL := fmt.Sprintf(
+					"%s://%s/api/v1/project/%s/tms/folder",
+					cfg.Scheme, cfg.Host, url.PathEscape(project),
+				)
+
+				httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, folderURL, nil)
+				if err != nil {
+					return nil, nil, fmt.Errorf("failed to build folder request: %w", err)
+				}
+
+				for k, v := range cfg.DefaultHeader {
+					httpReq.Header.Set(k, v)
+				}
+				httpReq.Header.Set("Accept", "application/json")
+
+				query := httpReq.URL.Query()
+				if args.FilterEqID != nil {
+					query.Set("filter.eq.id", strconv.FormatInt(*args.FilterEqID, 10))
+				}
+				if args.FilterEqParentID != nil {
+					query.Set("filter.eq.parentId", strconv.FormatInt(*args.FilterEqParentID, 10))
+				}
+				if args.FilterEqName != "" {
+					query.Set("filter.eq.name", args.FilterEqName)
+				}
+				httpReq.URL.RawQuery = query.Encode()
+
+				if cfg.Middleware != nil {
+					cfg.Middleware(httpReq)
+				}
+
+				httpClient := cfg.HTTPClient
+				if httpClient == nil {
+					httpClient = &http.Client{Timeout: importHTTPClientTimeout}
+				}
+
+				resp, err := httpClient.Do(httpReq)
+				if err != nil {
+					return nil, nil, fmt.Errorf("folder request failed: %w", err)
+				}
+
+				if resp.StatusCode >= 300 {
+					defer resp.Body.Close() //nolint:errcheck
+					respBody, readErr := io.ReadAll(resp.Body)
+					if readErr != nil {
+						return nil, nil, fmt.Errorf(
+							"folder request failed (HTTP %d)",
+							resp.StatusCode,
+						)
+					}
+					return nil, nil, fmt.Errorf(
+						"folder request failed (HTTP %d): %s",
+						resp.StatusCode,
+						string(respBody),
+					)
+				}
+
+				return utils.ReadResponseBody(resp)
 			},
 		)
 }
