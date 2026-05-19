@@ -36,7 +36,8 @@ func RequiredFields(others ...string) []string {
 
 // ProjectKeySchema returns a JSON schema for the projectKey MCP tool parameter.
 // Default is set only when defaultProjectKey is non-empty (JSON default is omitted otherwise).
-func ProjectKeySchema(defaultProjectKey string) *jsonschema.Schema {
+// Returns an error if marshalling the default value fails (in practice unreachable for plain strings).
+func ProjectKeySchema(defaultProjectKey string) (*jsonschema.Schema, error) {
 	s := &jsonschema.Schema{
 		Type: "string",
 		Description: "URL-safe project key: the identifier from ReportPortal URLs after the '#' " +
@@ -45,11 +46,11 @@ func ProjectKeySchema(defaultProjectKey string) *jsonschema.Schema {
 	if defaultProjectKey != "" {
 		b, err := json.Marshal(defaultProjectKey)
 		if err != nil {
-			panic(fmt.Sprintf("failed to marshal JSON: %v", err))
+			return nil, fmt.Errorf("failed to marshal default project key: %w", err)
 		}
 		s.Default = b
 	}
-	return s
+	return s, nil
 }
 
 // ApplyPaginationOptions applies pagination to an API request from typed values.

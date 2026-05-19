@@ -177,6 +177,9 @@ func (hs *HTTPServer) initializeTools() error {
 		hs.AnalyticsInstance,
 	)
 
+	// Register all TMS-related tools
+	mcphandlers.RegisterTMSTools(hs.mcpServer, rpClient, "", hs.AnalyticsInstance)
+
 	// Add prompts
 	prompts, err := mcphandlers.ReadPrompts(mcphandlers.PromptFiles, "prompts")
 	if err != nil {

@@ -163,7 +163,11 @@ func (lr *TestItemResources) toolGetTestItemsByFilter() (*mcp.Tool, ToolHandler[
 	properties := make(map[string]*jsonschema.Schema)
 
 	// Required parameters
-	properties[utils.ProjectKeyField] = utils.ProjectKeySchema(lr.defaultProjectKey)
+	pkSchema, err := utils.ProjectKeySchema(lr.defaultProjectKey)
+	if err != nil {
+		slog.Error("failed to build project key schema", "error", err)
+	}
+	properties[utils.ProjectKeyField] = pkSchema
 
 	// Conditionally required parameters
 	properties["launch-id"] = &jsonschema.Schema{
@@ -437,7 +441,11 @@ type GetTestItemByIdArgs struct {
 // toolGetTestItemById creates a tool to retrieve a test item by its ID.
 func (lr *TestItemResources) toolGetTestItemById() (*mcp.Tool, ToolHandler[GetTestItemByIdArgs, any]) {
 	properties := make(map[string]*jsonschema.Schema)
-	properties[utils.ProjectKeyField] = utils.ProjectKeySchema(lr.defaultProjectKey)
+	pkSchema, err := utils.ProjectKeySchema(lr.defaultProjectKey)
+	if err != nil {
+		slog.Error("failed to build project key schema", "error", err)
+	}
+	properties[utils.ProjectKeyField] = pkSchema
 	properties["test_item_id"] = &jsonschema.Schema{
 		Type:        "string",
 		Description: "Test Item ID",
@@ -532,7 +540,11 @@ type GetTestItemAttachmentArgs struct {
 
 func (lr *TestItemResources) toolGetTestItemAttachment() (*mcp.Tool, ToolHandler[GetTestItemAttachmentArgs, any]) {
 	properties := make(map[string]*jsonschema.Schema)
-	properties[utils.ProjectKeyField] = utils.ProjectKeySchema(lr.defaultProjectKey)
+	pkSchema, err := utils.ProjectKeySchema(lr.defaultProjectKey)
+	if err != nil {
+		slog.Error("failed to build project key schema", "error", err)
+	}
+	properties[utils.ProjectKeyField] = pkSchema
 	properties["attachment-content-id"] = &jsonschema.Schema{
 		Type:        "string",
 		Description: "Attachment binary content ID",
@@ -630,7 +642,11 @@ type GetTestItemLogsByFilterArgs struct {
 // toolGetTestItemLogsByFilter creates a tool to get test items logs for a specific launch.
 func (lr *TestItemResources) toolGetTestItemLogsByFilter() (*mcp.Tool, ToolHandler[GetTestItemLogsByFilterArgs, any]) {
 	properties := make(map[string]*jsonschema.Schema)
-	properties[utils.ProjectKeyField] = utils.ProjectKeySchema(lr.defaultProjectKey)
+	pkSchema, err := utils.ProjectKeySchema(lr.defaultProjectKey)
+	if err != nil {
+		slog.Error("failed to build project key schema", "error", err)
+	}
+	properties[utils.ProjectKeyField] = pkSchema
 	properties["parent-item-id"] = &jsonschema.Schema{
 		Type:        "string",
 		Description: "Items with specific Parent Item ID, this is a required parameter",
@@ -764,7 +780,11 @@ type GetTestSuitesByFilterArgs struct {
 // toolGetTestSuitesByFilter creates a tool to get test suites for a specific launch.
 func (lr *TestItemResources) toolGetTestSuitesByFilter() (*mcp.Tool, ToolHandler[GetTestSuitesByFilterArgs, any]) {
 	properties := make(map[string]*jsonschema.Schema)
-	properties[utils.ProjectKeyField] = utils.ProjectKeySchema(lr.defaultProjectKey)
+	pkSchema, err := utils.ProjectKeySchema(lr.defaultProjectKey)
+	if err != nil {
+		slog.Error("failed to build project key schema", "error", err)
+	}
+	properties[utils.ProjectKeyField] = pkSchema
 	properties["launch-id"] = &jsonschema.Schema{
 		Type:        "integer",
 		Description: "Suites with specific Launch ID, this is a required parameter",
@@ -939,7 +959,11 @@ type ProjectKeyArgs struct {
 // toolGetProjectDefectTypes creates a tool to retrieve all defect types for a specific project.
 func (lr *TestItemResources) toolGetProjectDefectTypes() (*mcp.Tool, ToolHandler[ProjectKeyArgs, any]) {
 	properties := make(map[string]*jsonschema.Schema)
-	properties[utils.ProjectKeyField] = utils.ProjectKeySchema(lr.defaultProjectKey)
+	pkSchema, err := utils.ProjectKeySchema(lr.defaultProjectKey)
+	if err != nil {
+		slog.Error("failed to build project key schema", "error", err)
+	}
+	properties[utils.ProjectKeyField] = pkSchema
 
 	return &mcp.Tool{
 			Name:        "get_project_defect_types",
@@ -998,7 +1022,11 @@ type UpdateDefectTypeArgs struct {
 // toolUpdateDefectTypeForTestItems creates a tool to update the defect type for a list of specific test items.
 func (lr *TestItemResources) toolUpdateDefectTypeForTestItems() (*mcp.Tool, ToolHandler[UpdateDefectTypeArgs, any]) {
 	properties := make(map[string]*jsonschema.Schema)
-	properties[utils.ProjectKeyField] = utils.ProjectKeySchema(lr.defaultProjectKey)
+	pkSchema, err := utils.ProjectKeySchema(lr.defaultProjectKey)
+	if err != nil {
+		slog.Error("failed to build project key schema", "error", err)
+	}
+	properties[utils.ProjectKeyField] = pkSchema
 	properties["test_items_ids"] = &jsonschema.Schema{
 		Type:        "array",
 		Description: "Array of test items IDs",
@@ -1122,7 +1150,11 @@ type GetTestItemsHistoryArgs struct {
 // toolGetTestItemsHistory creates a tool to retrieve history of test items.
 func (lr *TestItemResources) toolGetTestItemsHistory() (*mcp.Tool, ToolHandler[GetTestItemsHistoryArgs, any]) {
 	properties := make(map[string]*jsonschema.Schema)
-	properties[utils.ProjectKeyField] = utils.ProjectKeySchema(lr.defaultProjectKey)
+	pkSchema, err := utils.ProjectKeySchema(lr.defaultProjectKey)
+	if err != nil {
+		slog.Error("failed to build project key schema", "error", err)
+	}
+	properties[utils.ProjectKeyField] = pkSchema
 	properties["filter-eq-launchId"] = &jsonschema.Schema{
 		Type:        "integer",
 		Description: "Filter by Launch ID. Conditionally required if Parent ID is not provided.",

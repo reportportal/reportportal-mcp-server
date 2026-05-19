@@ -316,7 +316,11 @@ type GetLaunchesArgs struct {
 func (lr *LaunchResources) toolGetLaunches() (*mcp.Tool, ToolHandler[GetLaunchesArgs, any]) {
 	// Build JSON Schema for input parameters
 	properties := utils.SetPaginationProperties(utils.DefaultSortingForLaunches)
-	properties[utils.ProjectKeyField] = utils.ProjectKeySchema(lr.defaultProjectKey)
+	pkSchema, err := utils.ProjectKeySchema(lr.defaultProjectKey)
+	if err != nil {
+		slog.Error("failed to build project key schema", "error", err)
+	}
+	properties[utils.ProjectKeyField] = pkSchema
 	properties["filter-cnt-name"] = &jsonschema.Schema{
 		Type:        "string",
 		Description: "Launches name should contain this substring",
@@ -440,13 +444,17 @@ type LaunchIDArgs struct {
 }
 
 func (lr *LaunchResources) toolRunQualityGate() (*mcp.Tool, ToolHandler[LaunchIDArgs, any]) {
+	pkSchema, err := utils.ProjectKeySchema(lr.defaultProjectKey)
+	if err != nil {
+		slog.Error("failed to build project key schema", "error", err)
+	}
 	return &mcp.Tool{
 			Name:        "run_quality_gate",
 			Description: "Run quality gate on ReportPortal launches",
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
-					utils.ProjectKeyField: utils.ProjectKeySchema(lr.defaultProjectKey),
+					utils.ProjectKeyField: pkSchema,
 					"launch_id": {
 						Type:        "integer",
 						Description: "Launch ID",
@@ -499,7 +507,11 @@ type GetLastLaunchByNameArgs struct {
 // toolGetLastLaunchByName creates a tool to retrieve the last launch by its name.
 func (lr *LaunchResources) toolGetLastLaunchByName() (*mcp.Tool, ToolHandler[GetLastLaunchByNameArgs, any]) {
 	properties := utils.SetPaginationProperties(utils.DefaultSortingForLaunches)
-	properties[utils.ProjectKeyField] = utils.ProjectKeySchema(lr.defaultProjectKey)
+	pkSchema, err := utils.ProjectKeySchema(lr.defaultProjectKey)
+	if err != nil {
+		slog.Error("failed to build project key schema", "error", err)
+	}
+	properties[utils.ProjectKeyField] = pkSchema
 	properties["launch"] = &jsonschema.Schema{
 		Type:        "string",
 		Description: "Launch name",
@@ -563,13 +575,17 @@ func (lr *LaunchResources) toolGetLastLaunchByName() (*mcp.Tool, ToolHandler[Get
 
 // toolGetLaunchById creates a tool to retrieve a specific launch by its ID directly.
 func (lr *LaunchResources) toolGetLaunchById() (*mcp.Tool, ToolHandler[LaunchIDArgs, any]) {
+	pkSchema, err := utils.ProjectKeySchema(lr.defaultProjectKey)
+	if err != nil {
+		slog.Error("failed to build project key schema", "error", err)
+	}
 	return &mcp.Tool{
 			Name:        "get_launch_by_id",
 			Description: "Get a specific launch by its ID directly",
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
-					utils.ProjectKeyField: utils.ProjectKeySchema(lr.defaultProjectKey),
+					utils.ProjectKeyField: pkSchema,
 					"launch_id": {
 						Type:        "integer",
 						Description: "Launch ID",
@@ -614,13 +630,17 @@ func (lr *LaunchResources) toolGetLaunchById() (*mcp.Tool, ToolHandler[LaunchIDA
 }
 
 func (lr *LaunchResources) toolDeleteLaunch() (*mcp.Tool, ToolHandler[LaunchIDArgs, any]) {
+	pkSchema, err := utils.ProjectKeySchema(lr.defaultProjectKey)
+	if err != nil {
+		slog.Error("failed to build project key schema", "error", err)
+	}
 	return &mcp.Tool{
 			Name:        "launch_delete",
 			Description: "Delete ReportPortal launch",
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
-					utils.ProjectKeyField: utils.ProjectKeySchema(lr.defaultProjectKey),
+					utils.ProjectKeyField: pkSchema,
 					"launch_id": {
 						Type:        "integer",
 						Description: "Launch ID",
@@ -669,13 +689,17 @@ type RunAutoAnalysisArgs struct {
 }
 
 func (lr *LaunchResources) toolRunAutoAnalysis() (*mcp.Tool, ToolHandler[RunAutoAnalysisArgs, any]) {
+	pkSchema, err := utils.ProjectKeySchema(lr.defaultProjectKey)
+	if err != nil {
+		slog.Error("failed to build project key schema", "error", err)
+	}
 	return &mcp.Tool{
 			Name:        "run_auto_analysis",
 			Description: "Run auto analysis on ReportPortal launch",
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
-					utils.ProjectKeyField: utils.ProjectKeySchema(lr.defaultProjectKey),
+					utils.ProjectKeyField: pkSchema,
 					"launch_id": {
 						Type:        "integer",
 						Description: "Launch ID",
@@ -766,13 +790,17 @@ type UniqueErrorAnalysisArgs struct {
 }
 
 func (lr *LaunchResources) toolUniqueErrorAnalysis() (*mcp.Tool, ToolHandler[UniqueErrorAnalysisArgs, any]) {
+	pkSchema, err := utils.ProjectKeySchema(lr.defaultProjectKey)
+	if err != nil {
+		slog.Error("failed to build project key schema", "error", err)
+	}
 	return &mcp.Tool{
 			Name:        "run_unique_error_analysis",
 			Description: "Run unique error analysis on ReportPortal launch",
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
-					utils.ProjectKeyField: utils.ProjectKeySchema(lr.defaultProjectKey),
+					utils.ProjectKeyField: pkSchema,
 					"launch_id": {
 						Type:        "integer",
 						Description: "Launch ID",
@@ -836,13 +864,17 @@ type UpdateLaunchArgs struct {
 }
 
 func (lr *LaunchResources) toolUpdateLaunch() (*mcp.Tool, ToolHandler[UpdateLaunchArgs, any]) {
+	pkSchema, err := utils.ProjectKeySchema(lr.defaultProjectKey)
+	if err != nil {
+		slog.Error("failed to build project key schema", "error", err)
+	}
 	return &mcp.Tool{
 			Name:        "update_launch",
 			Description: "Update launch attributes and description in ReportPortal",
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
-					utils.ProjectKeyField: utils.ProjectKeySchema(lr.defaultProjectKey),
+					utils.ProjectKeyField: pkSchema,
 					"launch_id": {
 						Type:        "integer",
 						Description: "Launch ID",
@@ -944,13 +976,17 @@ func (lr *LaunchResources) toolUpdateLaunch() (*mcp.Tool, ToolHandler[UpdateLaun
 }
 
 func (lr *LaunchResources) toolForceFinishLaunch() (*mcp.Tool, ToolHandler[LaunchIDArgs, any]) {
+	pkSchema, err := utils.ProjectKeySchema(lr.defaultProjectKey)
+	if err != nil {
+		slog.Error("failed to build project key schema", "error", err)
+	}
 	return &mcp.Tool{
 			Name:        "launch_force_finish",
 			Description: "Force finish launch",
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
-					utils.ProjectKeyField: utils.ProjectKeySchema(lr.defaultProjectKey),
+					utils.ProjectKeyField: pkSchema,
 					"launch_id": {
 						Type:        "integer",
 						Description: "Launch ID",
@@ -1008,8 +1044,12 @@ type ImportLaunchFromFileArgs struct {
 
 // toolImportLaunchFromFile creates a tool to import a launch into ReportPortal from a file passed inline.
 func (lr *LaunchResources) toolImportLaunchFromFile() (*mcp.Tool, ToolHandler[ImportLaunchFromFileArgs, any]) {
+	pkSchema, err := utils.ProjectKeySchema(lr.defaultProjectKey)
+	if err != nil {
+		slog.Error("failed to build project key schema", "error", err)
+	}
 	properties := map[string]*jsonschema.Schema{
-		utils.ProjectKeyField: utils.ProjectKeySchema(lr.defaultProjectKey),
+		utils.ProjectKeyField: pkSchema,
 		"plugin_name": {
 			Type: "string",
 			Description: "Name of the import plugin to use (e.g. 'junit'). " +
