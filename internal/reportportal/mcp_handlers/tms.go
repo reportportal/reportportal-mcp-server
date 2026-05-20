@@ -394,10 +394,11 @@ func (tr *TMSResources) toolGetTestCasesByFilter() (*mcp.Tool, ToolHandler[GetTe
 	pkSchema, err := utils.ProjectKeySchema(tr.defaultProjectKey)
 	if err != nil {
 		slog.Error("failed to build project key schema", "error", err)
+		pkSchema = &jsonschema.Schema{Type: "string"}
 	}
 	return &mcp.Tool{
 			Name:        "get_test_cases_by_filter",
-			Description: "Get test cases for a project from ReportPortal TMS, optionally filtered by id, name, or test folder id.",
+			Description: "Get test cases for a project from ReportPortal TMS. All filters are optional. Without filters, returns the first page of test cases for the project; pagination is not supported by this tool, so the response may be incomplete for large test case sets. To detect truncation, compare page.totalElements with len(content) (or check page.hasNext); if more items exist than returned, narrow the results using filter-eq-testFolderId, filter-eq-name, or filter-eq-id.",
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
@@ -457,7 +458,10 @@ func (tr *TMSResources) toolGetTestCasesByFilter() (*mcp.Tool, ToolHandler[GetTe
 					query.Set("filter.eq.id", strconv.FormatInt(*args.FilterEqID, 10))
 				}
 				if args.FilterEqTestFolderID != nil {
-					query.Set("filter.eq.testFolderId", strconv.FormatInt(*args.FilterEqTestFolderID, 10))
+					query.Set(
+						"filter.eq.testFolderId",
+						strconv.FormatInt(*args.FilterEqTestFolderID, 10),
+					)
 				}
 				if args.FilterEqName != "" {
 					query.Set("filter.eq.name", args.FilterEqName)
