@@ -405,6 +405,7 @@ func (tr *TMSResources) toolGetTestCasesByFilter() (*mcp.Tool, ToolHandler[GetTe
 					"filter-eq-id": {
 						Type:        "integer",
 						Description: "Filter test cases by id",
+						Minimum:     openapi.PtrFloat64(1),
 					},
 					"filter-eq-name": {
 						Type:        "string",
@@ -413,6 +414,7 @@ func (tr *TMSResources) toolGetTestCasesByFilter() (*mcp.Tool, ToolHandler[GetTe
 					"filter-eq-testFolderId": {
 						Type:        "integer",
 						Description: "Filter test cases by parent test folder id",
+						Minimum:     openapi.PtrFloat64(1),
 					},
 				},
 				Required: utils.RequiredFields(),
@@ -427,28 +429,72 @@ func (tr *TMSResources) toolGetTestCasesByFilter() (*mcp.Tool, ToolHandler[GetTe
 					return nil, nil, fmt.Errorf("failed to extract project: %w", err)
 				}
 
-				apiReq := tr.client.TestCaseAPI.GetTestCasesByCriteria(ctx, project)
-				if args.FilterEqID != nil {
-					apiReq = apiReq.FilterEqId(int32(*args.FilterEqID)) //nolint:gosec
+				if args.FilterEqID != nil && *args.FilterEqID < 1 {
+					return nil, nil, fmt.Errorf("filter-eq-id out of range: must be >= 1")
 				}
-				if args.FilterEqName != "" {
-					apiReq = apiReq.FilterEqName(args.FilterEqName)
+				if args.FilterEqTestFolderID != nil && *args.FilterEqTestFolderID < 1 {
+					return nil, nil, fmt.Errorf("filter-eq-testFolderId out of range: must be >= 1")
+				}
+
+				cfg := tr.client.GetConfig()
+				testCaseURL := fmt.Sprintf(
+					"%s://%s/api/v1/project/%s/tms/test-case",
+					cfg.Scheme, cfg.Host, url.PathEscape(project),
+				)
+
+				httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, testCaseURL, nil)
+				if err != nil {
+					return nil, nil, fmt.Errorf("failed to build test case request: %w", err)
+				}
+
+				for k, v := range cfg.DefaultHeader {
+					httpReq.Header.Set(k, v)
+				}
+				httpReq.Header.Set("Accept", "application/json")
+
+				query := httpReq.URL.Query()
+				if args.FilterEqID != nil {
+					query.Set("filter.eq.id", strconv.FormatInt(*args.FilterEqID, 10))
 				}
 				if args.FilterEqTestFolderID != nil {
-					apiReq = apiReq.FilterEqTestFolderId(
-						int32(*args.FilterEqTestFolderID), //nolint:gosec
+					query.Set("filter.eq.testFolderId", strconv.FormatInt(*args.FilterEqTestFolderID, 10))
+				}
+				if args.FilterEqName != "" {
+					query.Set("filter.eq.name", args.FilterEqName)
+				}
+				httpReq.URL.RawQuery = query.Encode()
+
+				if cfg.Middleware != nil {
+					cfg.Middleware(httpReq)
+				}
+
+				httpClient := cfg.HTTPClient
+				if httpClient == nil {
+					httpClient = &http.Client{Timeout: importHTTPClientTimeout}
+				}
+
+				resp, err := httpClient.Do(httpReq)
+				if err != nil {
+					return nil, nil, fmt.Errorf("test case request failed: %w", err)
+				}
+
+				if resp.StatusCode >= 300 {
+					defer resp.Body.Close() //nolint:errcheck
+					respBody, readErr := io.ReadAll(resp.Body)
+					if readErr != nil {
+						return nil, nil, fmt.Errorf(
+							"test case request failed (HTTP %d)",
+							resp.StatusCode,
+						)
+					}
+					return nil, nil, fmt.Errorf(
+						"test case request failed (HTTP %d): %s",
+						resp.StatusCode,
+						string(respBody),
 					)
 				}
 
-				_, response, err := apiReq.Execute()
-				if err != nil {
-					return nil, nil, fmt.Errorf(
-						"%s: %w",
-						utils.ExtractResponseError(err, response),
-						err,
-					)
-				}
-				return utils.ReadResponseBody(response)
+				return utils.ReadResponseBody(resp)
 			},
 		)
 }
