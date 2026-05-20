@@ -53,6 +53,7 @@ func RegisterTMSTools(
 	registerTool(s, tms.toolGetTestPlanByID)
 	registerTool(s, tms.toolGetTestCasesForTestPlan)
 	registerTool(s, tms.toolGetTestFoldersByFilter)
+	registerTool(s, tms.toolGetTestCasesByFilter)
 	registerTool(s, tms.toolCreateFolder)
 	registerTool(s, tms.toolCreateTestCase)
 	registerTool(s, tms.toolCreateMilestone)
@@ -371,6 +372,127 @@ func (tr *TMSResources) toolGetTestFoldersByFilter() (*mcp.Tool, ToolHandler[Get
 					}
 					return nil, nil, fmt.Errorf(
 						"folder request failed (HTTP %d): %s",
+						resp.StatusCode,
+						string(respBody),
+					)
+				}
+
+				return utils.ReadResponseBody(resp)
+			},
+		)
+}
+
+// GetTestCasesByFilterArgs represents the arguments for the get_test_cases_by_filter tool.
+type GetTestCasesByFilterArgs struct {
+	ProjectKey           string `json:"projectKey"`
+	FilterEqID           *int64 `json:"filter-eq-id,omitempty"`
+	FilterEqName         string `json:"filter-eq-name,omitempty"`
+	FilterEqTestFolderID *int64 `json:"filter-eq-testFolderId,omitempty"`
+}
+
+func (tr *TMSResources) toolGetTestCasesByFilter() (*mcp.Tool, ToolHandler[GetTestCasesByFilterArgs, any]) {
+	pkSchema, err := utils.ProjectKeySchema(tr.defaultProjectKey)
+	if err != nil {
+		slog.Error("failed to build project key schema", "error", err)
+		pkSchema = &jsonschema.Schema{Type: "string"}
+	}
+	return &mcp.Tool{
+			Name:        "get_test_cases_by_filter",
+			Description: "Get test cases for a project from ReportPortal TMS. All filters are optional. Without filters, returns the first page of test cases for the project; pagination is not supported by this tool, so the response may be incomplete for large test case sets. To detect truncation, compare page.totalElements with len(content) (or check page.hasNext); if more items exist than returned, narrow the results using filter-eq-testFolderId, filter-eq-name, or filter-eq-id.",
+			InputSchema: &jsonschema.Schema{
+				Type: "object",
+				Properties: map[string]*jsonschema.Schema{
+					utils.ProjectKeyField: pkSchema,
+					"filter-eq-id": {
+						Type:        "integer",
+						Description: "Filter test cases by id",
+						Minimum:     openapi.PtrFloat64(1),
+					},
+					"filter-eq-name": {
+						Type:        "string",
+						Description: "Filter test cases by name (exact match)",
+					},
+					"filter-eq-testFolderId": {
+						Type:        "integer",
+						Description: "Filter test cases by parent test folder id",
+						Minimum:     openapi.PtrFloat64(1),
+					},
+				},
+				Required: utils.RequiredFields(),
+			},
+		},
+		utils.WithAnalytics(
+			tr.analytics,
+			"get_test_cases_by_filter",
+			func(ctx context.Context, req *mcp.CallToolRequest, args GetTestCasesByFilterArgs) (*mcp.CallToolResult, any, error) {
+				project, err := utils.ExtractProject(ctx, args.ProjectKey)
+				if err != nil {
+					return nil, nil, fmt.Errorf("failed to extract project: %w", err)
+				}
+
+				if args.FilterEqID != nil && *args.FilterEqID < 1 {
+					return nil, nil, fmt.Errorf("filter-eq-id out of range: must be >= 1")
+				}
+				if args.FilterEqTestFolderID != nil && *args.FilterEqTestFolderID < 1 {
+					return nil, nil, fmt.Errorf("filter-eq-testFolderId out of range: must be >= 1")
+				}
+
+				cfg := tr.client.GetConfig()
+				testCaseURL := fmt.Sprintf(
+					"%s://%s/api/v1/project/%s/tms/test-case",
+					cfg.Scheme, cfg.Host, url.PathEscape(project),
+				)
+
+				httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, testCaseURL, nil)
+				if err != nil {
+					return nil, nil, fmt.Errorf("failed to build test case request: %w", err)
+				}
+
+				for k, v := range cfg.DefaultHeader {
+					httpReq.Header.Set(k, v)
+				}
+				httpReq.Header.Set("Accept", "application/json")
+
+				query := httpReq.URL.Query()
+				if args.FilterEqID != nil {
+					query.Set("filter.eq.id", strconv.FormatInt(*args.FilterEqID, 10))
+				}
+				if args.FilterEqTestFolderID != nil {
+					query.Set(
+						"filter.eq.testFolderId",
+						strconv.FormatInt(*args.FilterEqTestFolderID, 10),
+					)
+				}
+				if args.FilterEqName != "" {
+					query.Set("filter.eq.name", args.FilterEqName)
+				}
+				httpReq.URL.RawQuery = query.Encode()
+
+				if cfg.Middleware != nil {
+					cfg.Middleware(httpReq)
+				}
+
+				httpClient := cfg.HTTPClient
+				if httpClient == nil {
+					httpClient = &http.Client{Timeout: importHTTPClientTimeout}
+				}
+
+				resp, err := httpClient.Do(httpReq)
+				if err != nil {
+					return nil, nil, fmt.Errorf("test case request failed: %w", err)
+				}
+
+				if resp.StatusCode >= 300 {
+					defer resp.Body.Close() //nolint:errcheck
+					respBody, readErr := io.ReadAll(resp.Body)
+					if readErr != nil {
+						return nil, nil, fmt.Errorf(
+							"test case request failed (HTTP %d)",
+							resp.StatusCode,
+						)
+					}
+					return nil, nil, fmt.Errorf(
+						"test case request failed (HTTP %d): %s",
 						resp.StatusCode,
 						string(respBody),
 					)
