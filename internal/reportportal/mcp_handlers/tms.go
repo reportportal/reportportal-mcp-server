@@ -55,6 +55,7 @@ func RegisterTMSTools(
 	registerTool(s, tms.toolGetTestFoldersByFilter)
 	registerTool(s, tms.toolGetTestCasesByFilter)
 	registerTool(s, tms.toolCreateFolder)
+	registerTool(s, tms.toolDeleteFolder)
 	registerTool(s, tms.toolCreateTestCase)
 	registerTool(s, tms.toolCreateMilestone)
 	registerTool(s, tms.toolCreateTestPlan)
@@ -572,6 +573,69 @@ func (tr *TMSResources) toolCreateFolder() (*mcp.Tool, ToolHandler[CreateFolderA
 					)
 				}
 				return utils.ReadResponseBody(response)
+			},
+		)
+}
+
+// DeleteFolderArgs represents the arguments for the delete_folder tool.
+type DeleteFolderArgs struct {
+	ProjectKey string `json:"projectKey"`
+	FolderID   int64  `json:"folderId"`
+}
+
+func (tr *TMSResources) toolDeleteFolder() (*mcp.Tool, ToolHandler[DeleteFolderArgs, any]) {
+	pkSchema, err := utils.ProjectKeySchema(tr.defaultProjectKey)
+	if err != nil {
+		slog.Error("failed to build project key schema", "error", err)
+	}
+	return &mcp.Tool{
+			Name:        "delete_folder",
+			Description: "Delete a test folder by its ID from the ReportPortal TMS. This tool mutates TMS data and the operation is irreversible.",
+			InputSchema: &jsonschema.Schema{
+				Type: "object",
+				Properties: map[string]*jsonschema.Schema{
+					utils.ProjectKeyField: pkSchema,
+					"folderId": {
+						Type:        "integer",
+						Description: "ID of the test folder to delete",
+						Minimum:     openapi.PtrFloat64(1),
+					},
+				},
+				Required: utils.RequiredFields("folderId"),
+			},
+		},
+		utils.WithAnalytics(
+			tr.analytics,
+			"delete_folder",
+			func(ctx context.Context, req *mcp.CallToolRequest, args DeleteFolderArgs) (*mcp.CallToolResult, any, error) {
+				project, err := utils.ExtractProject(ctx, args.ProjectKey)
+				if err != nil {
+					return nil, nil, fmt.Errorf("failed to extract project: %w", err)
+				}
+				if args.FolderID < 1 {
+					return nil, nil, fmt.Errorf("folderId out of range: must be >= 1")
+				}
+
+				response, err := tr.client.TestFolderAPI.DeleteTestFolder(ctx, args.FolderID, project).
+					Execute()
+				if err != nil {
+					return nil, nil, fmt.Errorf(
+						"%s: %w",
+						utils.ExtractResponseError(err, response),
+						err,
+					)
+				}
+
+				if response != nil && response.ContentLength != 0 {
+					return utils.ReadResponseBody(response)
+				}
+				return &mcp.CallToolResult{
+					Content: []mcp.Content{
+						&mcp.TextContent{
+							Text: fmt.Sprintf("folder %d deleted successfully", args.FolderID),
+						},
+					},
+				}, nil, nil
 			},
 		)
 }

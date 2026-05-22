@@ -336,6 +336,82 @@ func TestGetTestFoldersByFilterTool_NegativeParentID(t *testing.T) {
 	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
 }
 
+// TestDeleteFolderTool_ZeroID verifies that folderId of 0 is rejected before
+// any API call is made.
+func TestDeleteFolderTool_ZeroID(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolDeleteFolder()
+
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, DeleteFolderArgs{
+		ProjectKey: "test-project",
+		FolderID:   0,
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "folderId out of range")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestDeleteFolderTool_RequiredFields verifies that folderId is required.
+func TestDeleteFolderTool_RequiredFields(t *testing.T) {
+	tool, _ := newTMSResources(t).toolDeleteFolder()
+
+	schema, ok := tool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok, "InputSchema should be a *jsonschema.Schema")
+
+	require.ElementsMatch(t, []string{"projectKey", "folderId"}, schema.Required)
+}
+
+// TestDeleteFolderTool_IDMinimumConstraint verifies the folderId schema has minimum:1.
+func TestDeleteFolderTool_IDMinimumConstraint(t *testing.T) {
+	tool, _ := newTMSResources(t).toolDeleteFolder()
+
+	schema, ok := tool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok, "InputSchema should be a *jsonschema.Schema")
+
+	prop, ok := schema.Properties["folderId"]
+	require.True(t, ok, "folderId property should exist")
+	require.Equal(t, "integer", prop.Type)
+	require.NotNil(t, prop.Minimum)
+	require.Equal(t, float64(1), *prop.Minimum)
+}
+
+// TestDeleteFolderTool_SuccessReachesHTTP verifies that a valid folderId causes
+// an HTTP DELETE request to the correct path.
+func TestDeleteFolderTool_SuccessReachesHTTP(t *testing.T) {
+	ctx := context.Background()
+
+	type httpReq struct{ method, path string }
+	reqCh := make(chan httpReq, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reqCh <- httpReq{method: r.Method, path: r.URL.Path}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolDeleteFolder()
+
+	result, _, callErr := handler(ctx, &mcp.CallToolRequest{}, DeleteFolderArgs{
+		ProjectKey: "test-project",
+		FolderID:   42,
+	})
+
+	captured := <-reqCh
+	require.NoError(t, callErr)
+	require.Equal(t, http.MethodDelete, captured.method)
+	require.Contains(t, captured.path, "/tms/folder/42")
+	require.NotNil(t, result)
+	require.False(t, result.IsError)
+}
+
 // TestGetTestFoldersByFilterTool_LargeParentIDReachesHTTP verifies that a
 // filter-eq-parentId greater than math.MaxInt32 is accepted and forwarded as a
 // query parameter to the HTTP layer.
