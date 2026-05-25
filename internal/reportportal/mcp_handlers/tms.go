@@ -438,7 +438,6 @@ func (tr *TMSResources) toolGetTestCasesByFilter() (*mcp.Tool, ToolHandler[GetTe
 							Enum: []any{
 								"CRITICAL",
 								"MEDIUM",
-								"BLOCKER",
 								"HIGH",
 								"LOW",
 								"UNSPECIFIED",
@@ -1047,40 +1046,42 @@ func (tr *TMSResources) toolUpdateTestCase() (*mcp.Tool, ToolHandler[UpdateTestC
 					rq.SetTestFolderId(*args.TestFolderID)
 				}
 				if args.Instructions != nil || args.ExpectedResult != nil {
+					existing, getResp, getErr := tr.client.TestCaseAPI.GetTestCaseById(ctx, project, args.TestCaseID).
+						Execute()
+					if getErr != nil {
+						return nil, nil, fmt.Errorf(
+							"could not fetch existing test case to merge manual scenario fields: %s: %w",
+							utils.ExtractResponseError(getErr, getResp),
+							getErr,
+						)
+					}
+					if existing == nil {
+						return nil, nil, fmt.Errorf(
+							"could not retrieve the existing test case; cannot perform a partial manual-scenario update",
+						)
+					}
+					ms, ok := existing.GetManualScenarioOk()
+					if !ok || ms == nil ||
+						ms.ComEpamReportportalBaseCoreTmsDtoTmsTextManualScenarioRS == nil {
+						return nil, nil, fmt.Errorf(
+							"partial manual-scenario update is only supported when the existing test case already contains a TEXT manual scenario; " +
+								"the current test case has no TEXT manual scenario — supply both instructions and expected-result to create one from scratch",
+						)
+					}
+					textRS := ms.ComEpamReportportalBaseCoreTmsDtoTmsTextManualScenarioRS
 					textScenario := openapi.NewComEpamReportportalBaseCoreTmsDtoTmsTextManualScenarioRQ(
 						"TEXT",
 					)
-					if args.Instructions == nil || args.ExpectedResult == nil {
-						existing, _, getErr := tr.client.TestCaseAPI.GetTestCaseById(ctx, project, args.TestCaseID).
-							Execute()
-						if getErr != nil {
-							return nil, nil, fmt.Errorf(
-								"could not fetch existing test case to merge manual scenario fields: %w",
-								getErr,
-							)
-						}
-						merged := false
-						if existing != nil {
-							if ms, ok := existing.GetManualScenarioOk(); ok && ms != nil &&
-								ms.ComEpamReportportalBaseCoreTmsDtoTmsTextManualScenarioRS != nil {
-								textRS := ms.ComEpamReportportalBaseCoreTmsDtoTmsTextManualScenarioRS
-								if args.Instructions == nil && textRS.HasInstructions() {
-									v := textRS.GetInstructions()
-									textScenario.SetInstructions(v)
-								}
-								if args.ExpectedResult == nil && textRS.HasExpectedResult() {
-									v := textRS.GetExpectedResult()
-									textScenario.SetExpectedResult(v)
-								}
-								merged = true
-							}
-						}
-						if !merged {
-							return nil, nil, fmt.Errorf(
-								"existing test case has no TEXT manual scenario to merge from; provide both instructions and expected-result",
-							)
-						}
+					existingInstructions := ""
+					if textRS.HasInstructions() {
+						existingInstructions = textRS.GetInstructions()
 					}
+					existingExpectedResult := ""
+					if textRS.HasExpectedResult() {
+						existingExpectedResult = textRS.GetExpectedResult()
+					}
+					textScenario.SetInstructions(existingInstructions)
+					textScenario.SetExpectedResult(existingExpectedResult)
 					if args.Instructions != nil {
 						textScenario.SetInstructions(*args.Instructions)
 					}

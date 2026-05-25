@@ -629,7 +629,7 @@ func TestGetTestCasesByFilterTool_PriorityItemsSchema(t *testing.T) {
 	require.NotNil(t, prop.Items, "filter-in-priority must have items sub-schema")
 	require.Equal(t, "string", prop.Items.Type, "items should be of type string")
 	require.ElementsMatch(t,
-		[]any{"CRITICAL", "MEDIUM", "BLOCKER", "HIGH", "LOW", "UNSPECIFIED"},
+		[]any{"CRITICAL", "MEDIUM", "HIGH", "LOW", "UNSPECIFIED"},
 		prop.Items.Enum,
 		"items enum should contain all priority values",
 	)
