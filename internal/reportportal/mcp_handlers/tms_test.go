@@ -2,6 +2,8 @@ package mcphandlers
 
 import (
 	"context"
+	"encoding/json"
+	"io"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -124,9 +126,9 @@ func TestCreateTestCaseTool_PriorityEnum(t *testing.T) {
 	priorityProp, ok := schema.Properties["priority"]
 	require.True(t, ok, "priority property should exist")
 	require.ElementsMatch(t,
-		[]any{"LOW", "MEDIUM", "HIGH", "CRITICAL"},
+		[]any{"LOW", "MEDIUM", "HIGH", "CRITICAL", "BLOCKER", "UNSPECIFIED"},
 		priorityProp.Enum,
-		"priority enum should contain LOW, MEDIUM, HIGH, CRITICAL",
+		"priority enum should match update_test_case and filter-in-priority values",
 	)
 }
 
@@ -553,9 +555,9 @@ func TestUpdateTestCaseTool_PriorityEnum(t *testing.T) {
 	priorityProp, ok := schema.Properties["priority"]
 	require.True(t, ok, "priority property should exist")
 	require.ElementsMatch(t,
-		[]any{"LOW", "MEDIUM", "HIGH", "CRITICAL"},
+		[]any{"LOW", "MEDIUM", "HIGH", "CRITICAL", "BLOCKER", "UNSPECIFIED"},
 		priorityProp.Enum,
-		"priority enum should contain LOW, MEDIUM, HIGH, CRITICAL",
+		"priority enum should match get_test_cases_by_filter filter-in-priority values",
 	)
 }
 
@@ -615,6 +617,89 @@ func TestUpdateTestCaseTool_SuccessReachesHTTP(t *testing.T) {
 	require.False(t, result.IsError)
 }
 
+// TestUpdateTestCaseTool_PartialScenarioRejected verifies that supplying only one of
+// instructions / expected-result is rejected before any HTTP request is made.
+func TestUpdateTestCaseTool_PartialScenarioRejected(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolUpdateTestCase()
+
+	instructionsOnly := "step 1"
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, UpdateTestCaseArgs{
+		ProjectKey:   "test-project",
+		TestCaseID:   1,
+		Instructions: &instructionsOnly,
+		// ExpectedResult intentionally omitted
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "must both be provided together")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+
+	requestCount.Store(0)
+	expectedOnly := "pass"
+	_, _, err = handler(ctx, &mcp.CallToolRequest{}, UpdateTestCaseArgs{
+		ProjectKey:     "test-project",
+		TestCaseID:     1,
+		ExpectedResult: &expectedOnly,
+		// Instructions intentionally omitted
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "must both be provided together")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestUpdateTestCaseTool_BothScenarioFieldsSendsSinglePatch verifies that when
+// both instructions and expected-result are provided a single PATCH is issued
+// (no prior GET).
+func TestUpdateTestCaseTool_BothScenarioFieldsSendsSinglePatch(t *testing.T) {
+	ctx := context.Background()
+	type httpReq struct {
+		method string
+		path   string
+		body   string
+	}
+	reqCh := make(chan httpReq, 2)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rawBody, _ := io.ReadAll(r.Body)
+		reqCh <- httpReq{method: r.Method, path: r.URL.Path, body: string(rawBody)}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":7,"name":"TC"}`))
+	}))
+	t.Cleanup(srv.Close)
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolUpdateTestCase()
+	instructions := "step 1"
+	expected := "pass"
+	result, _, callErr := handler(ctx, &mcp.CallToolRequest{}, UpdateTestCaseArgs{
+		ProjectKey:     "test-project",
+		TestCaseID:     7,
+		Instructions:   &instructions,
+		ExpectedResult: &expected,
+	})
+	require.NoError(t, callErr)
+	require.NotNil(t, result)
+	require.False(t, result.IsError)
+	// Exactly one request must have been made and it must be a PATCH (no GET).
+	require.Len(t, reqCh, 1)
+	captured := <-reqCh
+	require.Equal(t, http.MethodPatch, captured.method)
+	require.Contains(t, captured.path, "/tms/test-case/7")
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal([]byte(captured.body), &payload))
+	manual, ok := payload["manualScenario"].(map[string]any)
+	require.True(t, ok, "manualScenario should be present in PATCH payload")
+	require.Equal(t, "TEXT", manual["manualScenarioType"])
+	require.Equal(t, "step 1", manual["instructions"])
+	require.Equal(t, "pass", manual["expectedResult"])
+}
+
 // TestGetTestCasesByFilterTool_PriorityItemsSchema verifies that filter-in-priority
 // is an array with the correct enum on its items sub-schema.
 func TestGetTestCasesByFilterTool_PriorityItemsSchema(t *testing.T) {
@@ -629,7 +714,7 @@ func TestGetTestCasesByFilterTool_PriorityItemsSchema(t *testing.T) {
 	require.NotNil(t, prop.Items, "filter-in-priority must have items sub-schema")
 	require.Equal(t, "string", prop.Items.Type, "items should be of type string")
 	require.ElementsMatch(t,
-		[]any{"CRITICAL", "MEDIUM", "HIGH", "LOW", "UNSPECIFIED"},
+		[]any{"BLOCKER", "CRITICAL", "MEDIUM", "HIGH", "LOW", "UNSPECIFIED"},
 		prop.Items.Enum,
 		"items enum should contain all priority values",
 	)

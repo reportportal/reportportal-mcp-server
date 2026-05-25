@@ -436,6 +436,7 @@ func (tr *TMSResources) toolGetTestCasesByFilter() (*mcp.Tool, ToolHandler[GetTe
 						Items: &jsonschema.Schema{
 							Type: "string",
 							Enum: []any{
+								"BLOCKER",
 								"CRITICAL",
 								"MEDIUM",
 								"HIGH",
@@ -710,7 +711,14 @@ func (tr *TMSResources) toolCreateTestCase() (*mcp.Tool, ToolHandler[CreateTestC
 					"priority": {
 						Type:        "string",
 						Description: "Priority of the test case",
-						Enum:        []any{"LOW", "MEDIUM", "HIGH", "CRITICAL"},
+						Enum: []any{
+							"LOW",
+							"MEDIUM",
+							"HIGH",
+							"CRITICAL",
+							"BLOCKER",
+							"UNSPECIFIED",
+						},
 					},
 					"test-folder-id": {
 						Type:        "integer",
@@ -1001,7 +1009,14 @@ func (tr *TMSResources) toolUpdateTestCase() (*mcp.Tool, ToolHandler[UpdateTestC
 					"priority": {
 						Type:        "string",
 						Description: "New priority for the test case",
-						Enum:        []any{"LOW", "MEDIUM", "HIGH", "CRITICAL"},
+						Enum: []any{
+							"LOW",
+							"MEDIUM",
+							"HIGH",
+							"CRITICAL",
+							"BLOCKER",
+							"UNSPECIFIED",
+						},
 					},
 					"test-folder-id": {
 						Type:        "integer",
@@ -1010,11 +1025,11 @@ func (tr *TMSResources) toolUpdateTestCase() (*mcp.Tool, ToolHandler[UpdateTestC
 					},
 					"instructions": {
 						Type:        "string",
-						Description: "New manual scenario instructions / test steps (TEXT scenario type)",
+						Description: "Manual scenario instructions / test steps (TEXT scenario type). Must be supplied together with expected-result; providing only one of the two is an error.",
 					},
 					"expected-result": {
 						Type:        "string",
-						Description: "New expected result for the manual scenario",
+						Description: "Expected result for the manual scenario. Must be supplied together with instructions; providing only one of the two is an error.",
 					},
 				},
 				Required: utils.RequiredFields("testCaseId"),
@@ -1046,48 +1061,16 @@ func (tr *TMSResources) toolUpdateTestCase() (*mcp.Tool, ToolHandler[UpdateTestC
 					rq.SetTestFolderId(*args.TestFolderID)
 				}
 				if args.Instructions != nil || args.ExpectedResult != nil {
-					existing, getResp, getErr := tr.client.TestCaseAPI.GetTestCaseById(ctx, project, args.TestCaseID).
-						Execute()
-					if getErr != nil {
+					if args.Instructions == nil || args.ExpectedResult == nil {
 						return nil, nil, fmt.Errorf(
-							"could not fetch existing test case to merge manual scenario fields: %s: %w",
-							utils.ExtractResponseError(getErr, getResp),
-							getErr,
+							"instructions and expected-result must both be provided together to set a TEXT manual scenario",
 						)
 					}
-					if existing == nil {
-						return nil, nil, fmt.Errorf(
-							"could not retrieve the existing test case; cannot perform a partial manual-scenario update",
-						)
-					}
-					ms, ok := existing.GetManualScenarioOk()
-					if !ok || ms == nil ||
-						ms.ComEpamReportportalBaseCoreTmsDtoTmsTextManualScenarioRS == nil {
-						return nil, nil, fmt.Errorf(
-							"partial manual-scenario update is only supported when the existing test case already contains a TEXT manual scenario; " +
-								"the current test case has no TEXT manual scenario — supply both instructions and expected-result to create one from scratch",
-						)
-					}
-					textRS := ms.ComEpamReportportalBaseCoreTmsDtoTmsTextManualScenarioRS
 					textScenario := openapi.NewComEpamReportportalBaseCoreTmsDtoTmsTextManualScenarioRQ(
 						"TEXT",
 					)
-					existingInstructions := ""
-					if textRS.HasInstructions() {
-						existingInstructions = textRS.GetInstructions()
-					}
-					existingExpectedResult := ""
-					if textRS.HasExpectedResult() {
-						existingExpectedResult = textRS.GetExpectedResult()
-					}
-					textScenario.SetInstructions(existingInstructions)
-					textScenario.SetExpectedResult(existingExpectedResult)
-					if args.Instructions != nil {
-						textScenario.SetInstructions(*args.Instructions)
-					}
-					if args.ExpectedResult != nil {
-						textScenario.SetExpectedResult(*args.ExpectedResult)
-					}
+					textScenario.SetInstructions(*args.Instructions)
+					textScenario.SetExpectedResult(*args.ExpectedResult)
 					scenario := openapi.ComEpamReportportalBaseCoreTmsDtoTmsTextManualScenarioRQAsComEpamReportportalBaseCoreTmsDtoTmsTestCaseRQManualScenario(
 						textScenario,
 					)
