@@ -430,11 +430,13 @@ The ReportPortal MCP server provides a comprehensive set of capabilities for int
 | Get Milestones by filter | Lists TMS milestones for a project, optionally filtered by name or ID | `projectKey` (required), `filter-name` (optional), `filter-id` (optional) |
 | Get Test Plan by ID | Retrieves a TMS test plan by its ID | `projectKey` (required), `id` (required) |
 | Get Test Cases for Test Plan | Lists test cases assigned to a TMS test plan | `projectKey` (required), `test-plan-id` (required) |
-| Get Test Folders by Filter | Lists TMS test folders for a project. All filters are optional; without filters returns the first page. To detect truncation compare `page.totalElements` with `len(content)` and narrow results with `filter-eq-parentId` or `filter-eq-name`. | `projectKey` (required), `filter-eq-id` (optional, integer ≥ 1), `filter-eq-parentId` (optional, integer ≥ 1), `filter-eq-name` (optional) |
-| Get Test Cases by Filter | Lists TMS test cases for a project. All filters are optional; without filters returns the first page. To detect truncation compare `page.totalElements` with `len(content)` and narrow results with `filter-eq-testFolderId`, `filter-eq-name`, or `filter-eq-id`. | `projectKey` (required), `filter-eq-id` (optional, integer ≥ 1), `filter-eq-name` (optional), `filter-eq-testFolderId` (optional, integer ≥ 1) |
+| Get Test Folders by Filter | Lists TMS test folders for a project. All filters are optional; without filters returns the first page. To detect truncation compare `page.totalElements` with `len(content)` and narrow results with `filter-eq-parentId`, `filter-eq-name`, or `filter-cnt-name`. | `projectKey` (required), `filter-eq-id` (optional, integer ≥ 1), `filter-eq-parentId` (optional, integer ≥ 1), `filter-eq-name` (optional), `filter-cnt-name` (optional) |
+| Get Test Cases by Filter | Lists TMS test cases for a project. All filters are optional; without filters returns the first page. To detect truncation compare `page.totalElements` with `len(content)` and narrow results with `filter-eq-testFolderId`, `filter-cnt-name`, `filter-eq-id`, `filter-has-attributeKey`, or `filter-in-priority`. | `projectKey` (required), `filter-eq-id` (optional, integer ≥ 1), `filter-eq-testFolderId` (optional, integer ≥ 1), `filter-cnt-name` (optional), `filter-has-attributeKey` (optional), `filter-in-priority` (optional, enum array: `CRITICAL` \| `MEDIUM` \| `BLOCKER` \| `HIGH` \| `LOW` \| `UNSPECIFIED`) |
 | Create Folder | Creates a new test folder (or subfolder) in the TMS. **Mutates TMS data.** | `projectKey` (required), `name` (required), `description` (optional), `parent-test-folder-id` (optional, integer ≥ 1) |
 | Delete Folder | Deletes a test folder by its ID from the TMS. **Mutates TMS data. Irreversible.** | `projectKey` (required), `folderId` (required, integer ≥ 1) |
 | Create Test Case | Creates a new test case with a TEXT manual scenario type. **Mutates TMS data.** | `projectKey` (required), `name` (required), `description` (optional), `priority` (optional, enum: `LOW` \| `MEDIUM` \| `HIGH` \| `CRITICAL`), `test-folder-id` (optional, integer ≥ 1), `instructions` (optional), `expected-result` (optional) |
+| Update Test Case | Updates an existing test case; only provided fields are changed. **Mutates TMS data.** | `projectKey` (required), `testCaseId` (required, integer ≥ 1), `name` (optional), `description` (optional), `priority` (optional, enum: `LOW` \| `MEDIUM` \| `HIGH` \| `CRITICAL`), `test-folder-id` (optional, integer ≥ 1), `instructions` (optional), `expected-result` (optional) |
+| Delete Test Case | Deletes a test case by its ID from the TMS. **Mutates TMS data. Irreversible.** | `projectKey` (required), `testCaseId` (required, integer ≥ 1) |
 | Create Milestone | Creates a new milestone in the TMS. **Mutates TMS data.** Dates must be RFC3339 (e.g. `2026-01-01T00:00:00Z`); `end-date` must not precede `start-date`. | `projectKey` (required), `name` (required), `type` (required, enum: `SPRINT` \| `RELEASE` \| `OTHER`), `start-date` (required, RFC3339), `end-date` (required, RFC3339), `status` (optional, enum: `ACTIVE` \| `CLOSED`) |
 | Create Test Plan | Creates a new test plan linked to an existing milestone. **Mutates TMS data.** | `projectKey` (required), `name` (required), `milestone-id` (required, integer ≥ 1), `description` (optional) |
 | Add Test Cases to Test Plan | Adds one or more test cases to an existing TMS test plan. **Mutates TMS data.** | `projectKey` (required), `test-plan-id` (required, integer ≥ 1), `test-case-ids` (required, non-empty array of integers) |
@@ -807,7 +809,7 @@ Ask your AI assistant:
 "What ReportPortal tools are available?"
 ```
 
-Expected response: A list of 29 tools including launches, test items, analysis tools, TMS tools, etc.
+Expected response: A list of 31 tools including launches, test items, analysis tools, TMS tools, etc.
 
 **Step 2: Test Basic Query**
 
