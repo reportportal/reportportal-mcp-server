@@ -265,6 +265,51 @@ func TestGetTestFoldersByFilterTool_IntegerFilterBounds(t *testing.T) {
 	}
 }
 
+// TestGetTestFoldersByFilterTool_CntNameSchema verifies filter-cnt-name is exposed
+// in the schema and maps to API filter.cnt.name.
+func TestGetTestFoldersByFilterTool_CntNameSchema(t *testing.T) {
+	tool, _ := newTMSResources(t).toolGetTestFoldersByFilter()
+
+	schema, ok := tool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok, "InputSchema should be a *jsonschema.Schema")
+
+	prop, ok := schema.Properties["filter-cnt-name"]
+	require.True(t, ok, "filter-cnt-name property should exist")
+	require.Equal(t, "string", prop.Type)
+}
+
+// TestGetTestFoldersByFilterTool_CntNameReachesHTTP verifies filter.cnt.name is forwarded.
+func TestGetTestFoldersByFilterTool_CntNameReachesHTTP(t *testing.T) {
+	ctx := context.Background()
+
+	var capturedQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedQuery = r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"content":[],"page":{"totalElements":0}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolGetTestFoldersByFilter()
+
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, GetTestFoldersByFilterArgs{
+		ProjectKey:    "test-project",
+		FilterCntName: "smoke",
+	})
+
+	require.NoError(t, callErr)
+	require.NotNil(t, capturedQuery, "HTTP request should reach the server")
+	require.Equal(t, "smoke", capturedQuery.Get("filter.cnt.name"))
+}
+
 // TestGetTestFoldersByFilterTool_LargeIDReachesHTTP verifies that a filter-eq-id
 // greater than math.MaxInt32 is accepted and forwarded as a query parameter to
 // the HTTP layer, allowing int64 IDs from typical ReportPortal deployments.
@@ -410,6 +455,255 @@ func TestDeleteFolderTool_SuccessReachesHTTP(t *testing.T) {
 	require.Contains(t, captured.path, "/tms/folder/42")
 	require.NotNil(t, result)
 	require.False(t, result.IsError)
+}
+
+// TestDeleteTestCaseTool_RequiredFields verifies that testCaseId is required.
+func TestDeleteTestCaseTool_RequiredFields(t *testing.T) {
+	tool, _ := newTMSResources(t).toolDeleteTestCase()
+
+	schema, ok := tool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok, "InputSchema should be a *jsonschema.Schema")
+
+	require.ElementsMatch(t, []string{"projectKey", "testCaseId"}, schema.Required)
+}
+
+// TestDeleteTestCaseTool_IDMinimumConstraint verifies the testCaseId schema has minimum:1.
+func TestDeleteTestCaseTool_IDMinimumConstraint(t *testing.T) {
+	tool, _ := newTMSResources(t).toolDeleteTestCase()
+
+	schema, ok := tool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok, "InputSchema should be a *jsonschema.Schema")
+
+	prop, ok := schema.Properties["testCaseId"]
+	require.True(t, ok, "testCaseId property should exist")
+	require.Equal(t, "integer", prop.Type)
+	require.NotNil(t, prop.Minimum)
+	require.Equal(t, float64(1), *prop.Minimum)
+}
+
+// TestDeleteTestCaseTool_ZeroID verifies that testCaseId of 0 is rejected before
+// any API call is made.
+func TestDeleteTestCaseTool_ZeroID(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolDeleteTestCase()
+
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, DeleteTestCaseArgs{
+		ProjectKey: "test-project",
+		TestCaseID: 0,
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "testCaseId out of range")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestDeleteTestCaseTool_SuccessReachesHTTP verifies that a valid testCaseId causes
+// an HTTP DELETE request to the correct path.
+func TestDeleteTestCaseTool_SuccessReachesHTTP(t *testing.T) {
+	ctx := context.Background()
+
+	type httpReq struct{ method, path string }
+	reqCh := make(chan httpReq, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reqCh <- httpReq{method: r.Method, path: r.URL.Path}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolDeleteTestCase()
+
+	result, _, callErr := handler(ctx, &mcp.CallToolRequest{}, DeleteTestCaseArgs{
+		ProjectKey: "test-project",
+		TestCaseID: 99,
+	})
+
+	captured := <-reqCh
+	require.NoError(t, callErr)
+	require.Equal(t, http.MethodDelete, captured.method)
+	require.Contains(t, captured.path, "/tms/test-case/99")
+	require.NotNil(t, result)
+	require.False(t, result.IsError)
+}
+
+// TestUpdateTestCaseTool_RequiredFields verifies that testCaseId is required.
+func TestUpdateTestCaseTool_RequiredFields(t *testing.T) {
+	tool, _ := newTMSResources(t).toolUpdateTestCase()
+
+	schema, ok := tool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok, "InputSchema should be a *jsonschema.Schema")
+
+	require.ElementsMatch(t, []string{"projectKey", "testCaseId"}, schema.Required)
+}
+
+// TestUpdateTestCaseTool_PriorityEnum verifies the priority enum on update_test_case.
+func TestUpdateTestCaseTool_PriorityEnum(t *testing.T) {
+	tool, _ := newTMSResources(t).toolUpdateTestCase()
+
+	schema, ok := tool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok, "InputSchema should be a *jsonschema.Schema")
+
+	priorityProp, ok := schema.Properties["priority"]
+	require.True(t, ok, "priority property should exist")
+	require.ElementsMatch(t,
+		[]any{"LOW", "MEDIUM", "HIGH", "CRITICAL"},
+		priorityProp.Enum,
+		"priority enum should contain LOW, MEDIUM, HIGH, CRITICAL",
+	)
+}
+
+// TestUpdateTestCaseTool_ZeroID verifies that testCaseId of 0 is rejected before
+// any API call is made.
+func TestUpdateTestCaseTool_ZeroID(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolUpdateTestCase()
+
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, UpdateTestCaseArgs{
+		ProjectKey: "test-project",
+		TestCaseID: 0,
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "testCaseId out of range")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestUpdateTestCaseTool_SuccessReachesHTTP verifies that a valid testCaseId causes
+// an HTTP PATCH request to the correct path.
+func TestUpdateTestCaseTool_SuccessReachesHTTP(t *testing.T) {
+	ctx := context.Background()
+
+	type httpReq struct{ method, path string }
+	reqCh := make(chan httpReq, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reqCh <- httpReq{method: r.Method, path: r.URL.Path}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":55,"name":"Updated TC"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolUpdateTestCase()
+
+	name := "Updated TC"
+	result, _, callErr := handler(ctx, &mcp.CallToolRequest{}, UpdateTestCaseArgs{
+		ProjectKey: "test-project",
+		TestCaseID: 55,
+		Name:       &name,
+	})
+
+	captured := <-reqCh
+	require.NoError(t, callErr)
+	require.Equal(t, http.MethodPatch, captured.method)
+	require.Contains(t, captured.path, "/tms/test-case/55")
+	require.NotNil(t, result)
+	require.False(t, result.IsError)
+}
+
+// TestGetTestCasesByFilterTool_PriorityItemsSchema verifies that filter-in-priority
+// is an array with the correct enum on its items sub-schema.
+func TestGetTestCasesByFilterTool_PriorityItemsSchema(t *testing.T) {
+	tool, _ := newTMSResources(t).toolGetTestCasesByFilter()
+
+	schema, ok := tool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok, "InputSchema should be a *jsonschema.Schema")
+
+	prop, ok := schema.Properties["filter-in-priority"]
+	require.True(t, ok, "filter-in-priority property should exist")
+	require.Equal(t, "array", prop.Type, "filter-in-priority should be an array type")
+	require.NotNil(t, prop.Items, "filter-in-priority must have items sub-schema")
+	require.Equal(t, "string", prop.Items.Type, "items should be of type string")
+	require.ElementsMatch(t,
+		[]any{"CRITICAL", "MEDIUM", "HIGH", "LOW", "UNSPECIFIED"},
+		prop.Items.Enum,
+		"items enum should contain all priority values",
+	)
+}
+
+// TestGetTestCasesByFilterTool_AttributeKeySchema verifies that filter-has-attributeKey
+// is a string property in the schema.
+func TestGetTestCasesByFilterTool_AttributeKeySchema(t *testing.T) {
+	tool, _ := newTMSResources(t).toolGetTestCasesByFilter()
+
+	schema, ok := tool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok, "InputSchema should be a *jsonschema.Schema")
+
+	prop, ok := schema.Properties["filter-has-attributeKey"]
+	require.True(t, ok, "filter-has-attributeKey property should exist")
+	require.Equal(t, "string", prop.Type)
+}
+
+// TestGetTestCasesByFilterTool_CntNameSchema verifies that filter-cnt-name
+// is a string property in the schema (contains match, not exact).
+func TestGetTestCasesByFilterTool_CntNameSchema(t *testing.T) {
+	tool, _ := newTMSResources(t).toolGetTestCasesByFilter()
+
+	schema, ok := tool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok, "InputSchema should be a *jsonschema.Schema")
+
+	prop, ok := schema.Properties["filter-cnt-name"]
+	require.True(t, ok, "filter-cnt-name property should exist")
+	require.Equal(t, "string", prop.Type)
+
+	_, eqNameExists := schema.Properties["filter-eq-name"]
+	require.False(
+		t,
+		eqNameExists,
+		"filter-eq-name should no longer exist (replaced by filter-cnt-name)",
+	)
+}
+
+// TestGetTestCasesByFilterTool_FiltersReachHTTP verifies that filter-has-attributeKey,
+// filter-in-priority, and filter-cnt-name are forwarded as the correct query params.
+func TestGetTestCasesByFilterTool_FiltersReachHTTP(t *testing.T) {
+	ctx := context.Background()
+
+	var capturedQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedQuery = r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"content":[],"page":{"totalElements":0}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolGetTestCasesByFilter()
+
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, GetTestCasesByFilterArgs{
+		ProjectKey:            "test-project",
+		FilterHasAttributeKey: "smoke",
+		FilterInPriority:      []string{"CRITICAL", "HIGH"},
+		FilterCntName:         "login",
+	})
+
+	require.NoError(t, callErr)
+	require.NotNil(t, capturedQuery, "HTTP request should reach the server")
+	require.Equal(t, "smoke", capturedQuery.Get("filter.has.attributeKey"))
+	require.Equal(t, "CRITICAL,HIGH", capturedQuery.Get("filter.in.priority"))
+	require.Equal(t, "login", capturedQuery.Get("filter.cnt.name"))
+	require.Empty(t, capturedQuery.Get("filter.eq.name"), "filter.eq.name should not be set")
 }
 
 // TestGetTestFoldersByFilterTool_LargeParentIDReachesHTTP verifies that a

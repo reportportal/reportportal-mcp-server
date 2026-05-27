@@ -57,6 +57,8 @@ func RegisterTMSTools(
 	registerTool(s, tms.toolCreateFolder)
 	registerTool(s, tms.toolDeleteFolder)
 	registerTool(s, tms.toolCreateTestCase)
+	registerTool(s, tms.toolUpdateTestCase)
+	registerTool(s, tms.toolDeleteTestCase)
 	registerTool(s, tms.toolCreateMilestone)
 	registerTool(s, tms.toolCreateTestPlan)
 	registerTool(s, tms.toolAddTestCasesToTestPlan)
@@ -271,6 +273,7 @@ type GetTestFoldersByFilterArgs struct {
 	FilterEqID       *int64 `json:"filter-eq-id,omitempty"`
 	FilterEqParentID *int64 `json:"filter-eq-parentId,omitempty"`
 	FilterEqName     string `json:"filter-eq-name,omitempty"`
+	FilterCntName    string `json:"filter-cnt-name,omitempty"`
 }
 
 func (tr *TMSResources) toolGetTestFoldersByFilter() (*mcp.Tool, ToolHandler[GetTestFoldersByFilterArgs, any]) {
@@ -281,7 +284,7 @@ func (tr *TMSResources) toolGetTestFoldersByFilter() (*mcp.Tool, ToolHandler[Get
 	}
 	return &mcp.Tool{
 			Name:        "get_test_folders_by_filter",
-			Description: "Get test folders for a project from ReportPortal TMS. All filters are optional. Without filters, returns the first page of folders for the project; pagination is not supported by this tool, so the response may be incomplete for large folder sets. To detect truncation, compare page.totalElements with len(content) (or check page.hasNext); if more items exist than returned, narrow the results using filter-eq-parentId or filter-eq-name.",
+			Description: "Get test folders for a project from ReportPortal TMS. All filters are optional. Without filters, returns the first page of folders for the project; pagination is not supported by this tool, so the response may be incomplete for large folder sets. To detect truncation, compare page.totalElements with len(content) (or check page.hasNext); if more items exist than returned, narrow the results using filter-eq-parentId, filter-eq-name, or filter-cnt-name.",
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
@@ -298,7 +301,11 @@ func (tr *TMSResources) toolGetTestFoldersByFilter() (*mcp.Tool, ToolHandler[Get
 					},
 					"filter-eq-name": {
 						Type:        "string",
-						Description: "Filter folders by name (exact match)",
+						Description: "Filter folders by name (exact match; API filter.eq.name)",
+					},
+					"filter-cnt-name": {
+						Type:        "string",
+						Description: "Filter folders by name substring (API filter.cnt.name)",
 					},
 				},
 				Required: utils.RequiredFields(),
@@ -346,6 +353,9 @@ func (tr *TMSResources) toolGetTestFoldersByFilter() (*mcp.Tool, ToolHandler[Get
 				if args.FilterEqName != "" {
 					query.Set("filter.eq.name", args.FilterEqName)
 				}
+				if args.FilterCntName != "" {
+					query.Set("filter.cnt.name", args.FilterCntName)
+				}
 				httpReq.URL.RawQuery = query.Encode()
 
 				if cfg.Middleware != nil {
@@ -385,10 +395,12 @@ func (tr *TMSResources) toolGetTestFoldersByFilter() (*mcp.Tool, ToolHandler[Get
 
 // GetTestCasesByFilterArgs represents the arguments for the get_test_cases_by_filter tool.
 type GetTestCasesByFilterArgs struct {
-	ProjectKey           string `json:"projectKey"`
-	FilterEqID           *int64 `json:"filter-eq-id,omitempty"`
-	FilterEqName         string `json:"filter-eq-name,omitempty"`
-	FilterEqTestFolderID *int64 `json:"filter-eq-testFolderId,omitempty"`
+	ProjectKey            string   `json:"projectKey"`
+	FilterEqID            *int64   `json:"filter-eq-id,omitempty"`
+	FilterEqTestFolderID  *int64   `json:"filter-eq-testFolderId,omitempty"`
+	FilterHasAttributeKey string   `json:"filter-has-attributeKey,omitempty"`
+	FilterInPriority      []string `json:"filter-in-priority,omitempty"`
+	FilterCntName         string   `json:"filter-cnt-name,omitempty"`
 }
 
 func (tr *TMSResources) toolGetTestCasesByFilter() (*mcp.Tool, ToolHandler[GetTestCasesByFilterArgs, any]) {
@@ -399,7 +411,7 @@ func (tr *TMSResources) toolGetTestCasesByFilter() (*mcp.Tool, ToolHandler[GetTe
 	}
 	return &mcp.Tool{
 			Name:        "get_test_cases_by_filter",
-			Description: "Get test cases for a project from ReportPortal TMS. All filters are optional. Without filters, returns the first page of test cases for the project; pagination is not supported by this tool, so the response may be incomplete for large test case sets. To detect truncation, compare page.totalElements with len(content) (or check page.hasNext); if more items exist than returned, narrow the results using filter-eq-testFolderId, filter-eq-name, or filter-eq-id.",
+			Description: "Get test cases for a project from ReportPortal TMS. All filters are optional. Without filters, returns the first page of test cases for the project; pagination is not supported by this tool, so the response may be incomplete for large test case sets. To detect truncation, compare page.totalElements with len(content) (or check page.hasNext); if more items exist than returned, narrow the results using filter-eq-testFolderId, filter-cnt-name, filter-eq-id, filter-has-attributeKey, or filter-in-priority.",
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
@@ -409,14 +421,32 @@ func (tr *TMSResources) toolGetTestCasesByFilter() (*mcp.Tool, ToolHandler[GetTe
 						Description: "Filter test cases by id",
 						Minimum:     openapi.PtrFloat64(1),
 					},
-					"filter-eq-name": {
-						Type:        "string",
-						Description: "Filter test cases by name (exact match)",
-					},
 					"filter-eq-testFolderId": {
 						Type:        "integer",
 						Description: "Filter test cases by parent test folder id",
 						Minimum:     openapi.PtrFloat64(1),
+					},
+					"filter-has-attributeKey": {
+						Type:        "string",
+						Description: "Filter test cases that have the specified attribute key (tag)",
+					},
+					"filter-in-priority": {
+						Type:        "array",
+						Description: "Filter test cases by one or more priority values",
+						Items: &jsonschema.Schema{
+							Type: "string",
+							Enum: []any{
+								"CRITICAL",
+								"MEDIUM",
+								"HIGH",
+								"LOW",
+								"UNSPECIFIED",
+							},
+						},
+					},
+					"filter-cnt-name": {
+						Type:        "string",
+						Description: "Filter test cases by name substring (API filter.cnt.name)",
 					},
 				},
 				Required: utils.RequiredFields(),
@@ -464,8 +494,14 @@ func (tr *TMSResources) toolGetTestCasesByFilter() (*mcp.Tool, ToolHandler[GetTe
 						strconv.FormatInt(*args.FilterEqTestFolderID, 10),
 					)
 				}
-				if args.FilterEqName != "" {
-					query.Set("filter.eq.name", args.FilterEqName)
+				if args.FilterHasAttributeKey != "" {
+					query.Set("filter.has.attributeKey", args.FilterHasAttributeKey)
+				}
+				if len(args.FilterInPriority) > 0 {
+					query.Set("filter.in.priority", strings.Join(args.FilterInPriority, ","))
+				}
+				if args.FilterCntName != "" {
+					query.Set("filter.cnt.name", args.FilterCntName)
 				}
 				httpReq.URL.RawQuery = query.Encode()
 
@@ -921,6 +957,217 @@ func (tr *TMSResources) toolCreateTestPlan() (*mcp.Tool, ToolHandler[CreateTestP
 					)
 				}
 				return utils.ReadResponseBody(response)
+			},
+		)
+}
+
+// UpdateTestCaseArgs represents the arguments for the update_test_case tool.
+type UpdateTestCaseArgs struct {
+	ProjectKey     string  `json:"projectKey"`
+	TestCaseID     int64   `json:"testCaseId"`
+	Name           *string `json:"name,omitempty"`
+	Description    *string `json:"description,omitempty"`
+	Priority       *string `json:"priority,omitempty"`
+	TestFolderID   *int64  `json:"test-folder-id,omitempty"`
+	Instructions   *string `json:"instructions,omitempty"`
+	ExpectedResult *string `json:"expected-result,omitempty"`
+}
+
+func (tr *TMSResources) toolUpdateTestCase() (*mcp.Tool, ToolHandler[UpdateTestCaseArgs, any]) {
+	pkSchema, err := utils.ProjectKeySchema(tr.defaultProjectKey)
+	if err != nil {
+		slog.Error("failed to build project key schema", "error", err)
+	}
+	return &mcp.Tool{
+			Name:        "update_test_case",
+			Description: "Update an existing test case in the ReportPortal TMS. Only provided fields are updated; omitted fields remain unchanged. This tool mutates TMS data.",
+			InputSchema: &jsonschema.Schema{
+				Type: "object",
+				Properties: map[string]*jsonschema.Schema{
+					utils.ProjectKeyField: pkSchema,
+					"testCaseId": {
+						Type:        "integer",
+						Description: "ID of the test case to update",
+						Minimum:     openapi.PtrFloat64(1),
+					},
+					"name": {
+						Type:        "string",
+						Description: "New name for the test case",
+					},
+					"description": {
+						Type:        "string",
+						Description: "New description for the test case",
+					},
+					"priority": {
+						Type:        "string",
+						Description: "New priority for the test case",
+						Enum:        []any{"LOW", "MEDIUM", "HIGH", "CRITICAL"},
+					},
+					"test-folder-id": {
+						Type:        "integer",
+						Description: "ID of the folder to move the test case into",
+						Minimum:     openapi.PtrFloat64(1),
+					},
+					"instructions": {
+						Type:        "string",
+						Description: "New manual scenario instructions / test steps (TEXT scenario type)",
+					},
+					"expected-result": {
+						Type:        "string",
+						Description: "New expected result for the manual scenario",
+					},
+				},
+				Required: utils.RequiredFields("testCaseId"),
+			},
+		},
+		utils.WithAnalytics(
+			tr.analytics,
+			"update_test_case",
+			func(ctx context.Context, req *mcp.CallToolRequest, args UpdateTestCaseArgs) (*mcp.CallToolResult, any, error) {
+				project, err := utils.ExtractProject(ctx, args.ProjectKey)
+				if err != nil {
+					return nil, nil, fmt.Errorf("failed to extract project: %w", err)
+				}
+				if args.TestCaseID < 1 {
+					return nil, nil, fmt.Errorf("testCaseId out of range: must be >= 1")
+				}
+
+				rq := openapi.NewComEpamReportportalBaseCoreTmsDtoTmsTestCaseRQ()
+				if args.Name != nil {
+					rq.SetName(*args.Name)
+				}
+				if args.Description != nil {
+					rq.SetDescription(*args.Description)
+				}
+				if args.Priority != nil {
+					rq.SetPriority(*args.Priority)
+				}
+				if args.TestFolderID != nil {
+					rq.SetTestFolderId(*args.TestFolderID)
+				}
+				if args.Instructions != nil || args.ExpectedResult != nil {
+					existing, getResp, getErr := tr.client.TestCaseAPI.GetTestCaseById(ctx, project, args.TestCaseID).
+						Execute()
+					if getErr != nil {
+						return nil, nil, fmt.Errorf(
+							"could not fetch existing test case to merge manual scenario fields: %s: %w",
+							utils.ExtractResponseError(getErr, getResp),
+							getErr,
+						)
+					}
+					if existing == nil {
+						return nil, nil, fmt.Errorf(
+							"could not retrieve the existing test case; cannot perform a partial manual-scenario update",
+						)
+					}
+					ms, ok := existing.GetManualScenarioOk()
+					if !ok || ms == nil ||
+						ms.ComEpamReportportalBaseCoreTmsDtoTmsTextManualScenarioRS == nil {
+						return nil, nil, fmt.Errorf(
+							"partial manual-scenario update is only supported when the existing test case already contains a TEXT manual scenario; " +
+								"the current test case has no TEXT manual scenario — supply both instructions and expected-result to create one from scratch",
+						)
+					}
+					textRS := ms.ComEpamReportportalBaseCoreTmsDtoTmsTextManualScenarioRS
+					textScenario := openapi.NewComEpamReportportalBaseCoreTmsDtoTmsTextManualScenarioRQ(
+						"TEXT",
+					)
+					existingInstructions := ""
+					if textRS.HasInstructions() {
+						existingInstructions = textRS.GetInstructions()
+					}
+					existingExpectedResult := ""
+					if textRS.HasExpectedResult() {
+						existingExpectedResult = textRS.GetExpectedResult()
+					}
+					textScenario.SetInstructions(existingInstructions)
+					textScenario.SetExpectedResult(existingExpectedResult)
+					if args.Instructions != nil {
+						textScenario.SetInstructions(*args.Instructions)
+					}
+					if args.ExpectedResult != nil {
+						textScenario.SetExpectedResult(*args.ExpectedResult)
+					}
+					scenario := openapi.ComEpamReportportalBaseCoreTmsDtoTmsTextManualScenarioRQAsComEpamReportportalBaseCoreTmsDtoTmsTestCaseRQManualScenario(
+						textScenario,
+					)
+					rq.SetManualScenario(scenario)
+				}
+
+				_, response, err := tr.client.TestCaseAPI.PatchTestCase(ctx, project, args.TestCaseID).
+					ComEpamReportportalBaseCoreTmsDtoTmsTestCaseRQ(*rq).
+					Execute()
+				if err != nil {
+					return nil, nil, fmt.Errorf(
+						"%s: %w",
+						utils.ExtractResponseError(err, response),
+						err,
+					)
+				}
+				return utils.ReadResponseBody(response)
+			},
+		)
+}
+
+// DeleteTestCaseArgs represents the arguments for the delete_test_case tool.
+type DeleteTestCaseArgs struct {
+	ProjectKey string `json:"projectKey"`
+	TestCaseID int64  `json:"testCaseId"`
+}
+
+func (tr *TMSResources) toolDeleteTestCase() (*mcp.Tool, ToolHandler[DeleteTestCaseArgs, any]) {
+	pkSchema, err := utils.ProjectKeySchema(tr.defaultProjectKey)
+	if err != nil {
+		slog.Error("failed to build project key schema", "error", err)
+	}
+	return &mcp.Tool{
+			Name:        "delete_test_case",
+			Description: "Delete a test case by its ID from the ReportPortal TMS. This tool mutates TMS data and the operation is irreversible.",
+			InputSchema: &jsonschema.Schema{
+				Type: "object",
+				Properties: map[string]*jsonschema.Schema{
+					utils.ProjectKeyField: pkSchema,
+					"testCaseId": {
+						Type:        "integer",
+						Description: "ID of the test case to delete",
+						Minimum:     openapi.PtrFloat64(1),
+					},
+				},
+				Required: utils.RequiredFields("testCaseId"),
+			},
+		},
+		utils.WithAnalytics(
+			tr.analytics,
+			"delete_test_case",
+			func(ctx context.Context, req *mcp.CallToolRequest, args DeleteTestCaseArgs) (*mcp.CallToolResult, any, error) {
+				project, err := utils.ExtractProject(ctx, args.ProjectKey)
+				if err != nil {
+					return nil, nil, fmt.Errorf("failed to extract project: %w", err)
+				}
+				if args.TestCaseID < 1 {
+					return nil, nil, fmt.Errorf("testCaseId out of range: must be >= 1")
+				}
+
+				response, err := tr.client.TestCaseAPI.DeleteTestCase(ctx, project, args.TestCaseID).
+					Execute()
+				if err != nil {
+					return nil, nil, fmt.Errorf(
+						"%s: %w",
+						utils.ExtractResponseError(err, response),
+						err,
+					)
+				}
+
+				if response != nil && response.ContentLength != 0 {
+					return utils.ReadResponseBody(response)
+				}
+				return &mcp.CallToolResult{
+					Content: []mcp.Content{
+						&mcp.TextContent{
+							Text: fmt.Sprintf("test case %d deleted successfully", args.TestCaseID),
+						},
+					},
+				}, nil, nil
 			},
 		)
 }
