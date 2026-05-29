@@ -49,19 +49,22 @@ func RegisterTMSTools(
 ) {
 	tms := NewTMSResources(rpClient, analyticsClient, defaultProjectKey)
 
-	registerTool(s, tms.toolGetMilestonesByFilter)
-	registerTool(s, tms.toolGetTestPlanByID)
-	registerTool(s, tms.toolGetTestCasesForTestPlan)
-	registerTool(s, tms.toolGetTestFoldersByFilter)
-	registerTool(s, tms.toolGetTestCasesByFilter)
-	registerTool(s, tms.toolCreateFolder)
-	registerTool(s, tms.toolDeleteFolder)
-	registerTool(s, tms.toolCreateTestCase)
-	registerTool(s, tms.toolUpdateTestCase)
-	registerTool(s, tms.toolDeleteTestCase)
 	registerTool(s, tms.toolCreateMilestone)
+	registerTool(s, tms.toolGetMilestonesByFilter)
+
 	registerTool(s, tms.toolCreateTestPlan)
 	registerTool(s, tms.toolAddTestCasesToTestPlan)
+	registerTool(s, tms.toolGetTestPlanByID)
+
+	registerTool(s, tms.toolCreateTestFolder)
+	registerTool(s, tms.toolDeleteTestFolder)
+	registerTool(s, tms.toolGetTestFoldersByFilter)
+
+	registerTool(s, tms.toolCreateTestCase)
+	registerTool(s, tms.toolGetTestCasesByFilter)
+	registerTool(s, tms.toolGetTestCasesForTestPlan)
+	registerTool(s, tms.toolUpdateTestCase)
+	registerTool(s, tms.toolDeleteTestCase)
 }
 
 // GetMilestonesByFilterArgs represents the arguments for the get_milestones_by_filter tool.
@@ -436,11 +439,11 @@ func (tr *TMSResources) toolGetTestCasesByFilter() (*mcp.Tool, ToolHandler[GetTe
 						Items: &jsonschema.Schema{
 							Type: "string",
 							Enum: []any{
-								"BLOCKER",
-								"CRITICAL",
+								"LOW",
 								"MEDIUM",
 								"HIGH",
-								"LOW",
+								"CRITICAL",
+								"BLOCKER",
 								"UNSPECIFIED",
 							},
 						},
@@ -549,7 +552,7 @@ type CreateFolderArgs struct {
 	ParentTestFolderID *int64  `json:"parent-test-folder-id,omitempty"`
 }
 
-func (tr *TMSResources) toolCreateFolder() (*mcp.Tool, ToolHandler[CreateFolderArgs, any]) {
+func (tr *TMSResources) toolCreateTestFolder() (*mcp.Tool, ToolHandler[CreateFolderArgs, any]) {
 	pkSchema, err := utils.ProjectKeySchema(tr.defaultProjectKey)
 	if err != nil {
 		slog.Error("failed to build project key schema", "error", err)
@@ -620,7 +623,7 @@ type DeleteFolderArgs struct {
 	FolderID   int64  `json:"folderId"`
 }
 
-func (tr *TMSResources) toolDeleteFolder() (*mcp.Tool, ToolHandler[DeleteFolderArgs, any]) {
+func (tr *TMSResources) toolDeleteTestFolder() (*mcp.Tool, ToolHandler[DeleteFolderArgs, any]) {
 	pkSchema, err := utils.ProjectKeySchema(tr.defaultProjectKey)
 	if err != nil {
 		slog.Error("failed to build project key schema", "error", err)
