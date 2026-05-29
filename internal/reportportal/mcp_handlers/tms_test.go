@@ -388,7 +388,7 @@ func TestGetTestFoldersByFilterTool_NegativeParentID(t *testing.T) {
 func TestDeleteFolderTool_ZeroID(t *testing.T) {
 	ctx := context.Background()
 	res, requestCount := newTMSResourcesWithCounter(t)
-	_, handler := res.toolDeleteFolder()
+	_, handler := res.toolDeleteTestFolder()
 
 	_, _, err := handler(ctx, &mcp.CallToolRequest{}, DeleteFolderArgs{
 		ProjectKey: "test-project",
@@ -402,7 +402,7 @@ func TestDeleteFolderTool_ZeroID(t *testing.T) {
 
 // TestDeleteFolderTool_RequiredFields verifies that folderId is required.
 func TestDeleteFolderTool_RequiredFields(t *testing.T) {
-	tool, _ := newTMSResources(t).toolDeleteFolder()
+	tool, _ := newTMSResources(t).toolDeleteTestFolder()
 
 	schema, ok := tool.InputSchema.(*jsonschema.Schema)
 	require.True(t, ok, "InputSchema should be a *jsonschema.Schema")
@@ -412,7 +412,7 @@ func TestDeleteFolderTool_RequiredFields(t *testing.T) {
 
 // TestDeleteFolderTool_IDMinimumConstraint verifies the folderId schema has minimum:1.
 func TestDeleteFolderTool_IDMinimumConstraint(t *testing.T) {
-	tool, _ := newTMSResources(t).toolDeleteFolder()
+	tool, _ := newTMSResources(t).toolDeleteTestFolder()
 
 	schema, ok := tool.InputSchema.(*jsonschema.Schema)
 	require.True(t, ok, "InputSchema should be a *jsonschema.Schema")
@@ -444,7 +444,7 @@ func TestDeleteFolderTool_SuccessReachesHTTP(t *testing.T) {
 		nil,
 		"",
 	)
-	_, handler := res.toolDeleteFolder()
+	_, handler := res.toolDeleteTestFolder()
 
 	result, _, callErr := handler(ctx, &mcp.CallToolRequest{}, DeleteFolderArgs{
 		ProjectKey: "test-project",
