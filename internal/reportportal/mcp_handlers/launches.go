@@ -360,7 +360,7 @@ func (lr *LaunchResources) toolGetLaunches() (*mcp.Tool, ToolHandler[GetLaunches
 			InputSchema: &jsonschema.Schema{
 				Type:       "object",
 				Properties: properties,
-				Required:   utils.RequiredFields(),
+				Required:   nil,
 			},
 		},
 		utils.WithAnalytics(
@@ -460,7 +460,7 @@ func (lr *LaunchResources) toolRunQualityGate() (*mcp.Tool, ToolHandler[LaunchID
 						Description: "Launch ID",
 					},
 				},
-				Required: utils.RequiredFields("launch_id"),
+				Required: []string{"launch_id"},
 			},
 		},
 		utils.WithAnalytics(
@@ -523,7 +523,7 @@ func (lr *LaunchResources) toolGetLastLaunchByName() (*mcp.Tool, ToolHandler[Get
 			InputSchema: &jsonschema.Schema{
 				Type:       "object",
 				Properties: properties,
-				Required:   utils.RequiredFields("launch"),
+				Required:   []string{"launch"},
 			},
 		},
 		utils.WithAnalytics(
@@ -591,7 +591,7 @@ func (lr *LaunchResources) toolGetLaunchById() (*mcp.Tool, ToolHandler[LaunchIDA
 						Description: "Launch ID",
 					},
 				},
-				Required: utils.RequiredFields("launch_id"),
+				Required: []string{"launch_id"},
 			},
 		},
 		utils.WithAnalytics(
@@ -646,7 +646,7 @@ func (lr *LaunchResources) toolDeleteLaunch() (*mcp.Tool, ToolHandler[LaunchIDAr
 						Description: "Launch ID",
 					},
 				},
-				Required: utils.RequiredFields("launch_id"),
+				Required: []string{"launch_id"},
 			},
 		},
 		utils.WithAnalytics(
@@ -732,12 +732,12 @@ func (lr *LaunchResources) toolRunAutoAnalysis() (*mcp.Tool, ToolHandler[RunAuto
 						Default: mustMarshalJSON([]string{"to_investigate"}),
 					},
 				},
-				Required: utils.RequiredFields(
+				Required: []string{
 					"launch_id",
 					"analyzer_mode",
 					"analyzer_type",
 					"analyzer_item_modes",
-				),
+				},
 			},
 		},
 		utils.WithAnalytics(
@@ -811,7 +811,7 @@ func (lr *LaunchResources) toolUniqueErrorAnalysis() (*mcp.Tool, ToolHandler[Uni
 						Default:     mustMarshalJSON(false),
 					},
 				},
-				Required: utils.RequiredFields("launch_id"),
+				Required: []string{"launch_id"},
 			},
 		},
 		utils.WithAnalytics(
@@ -902,7 +902,7 @@ func (lr *LaunchResources) toolUpdateLaunch() (*mcp.Tool, ToolHandler[UpdateLaun
 						},
 					},
 				},
-				Required: utils.RequiredFields("launch_id"),
+				Required: []string{"launch_id"},
 			},
 		},
 		utils.WithAnalytics(
@@ -992,7 +992,7 @@ func (lr *LaunchResources) toolForceFinishLaunch() (*mcp.Tool, ToolHandler[Launc
 						Description: "Launch ID",
 					},
 				},
-				Required: utils.RequiredFields("launch_id"),
+				Required: []string{"launch_id"},
 			},
 		},
 		utils.WithAnalytics(
@@ -1088,11 +1088,7 @@ func (lr *LaunchResources) toolImportLaunchFromFile() (*mcp.Tool, ToolHandler[Im
 			InputSchema: &jsonschema.Schema{
 				Type:       "object",
 				Properties: properties,
-				Required: utils.RequiredFields(
-					"plugin_name",
-					"file_name",
-					"file_content",
-				),
+				Required:   []string{"plugin_name", "file_name", "file_content"},
 			},
 		},
 		utils.WithAnalytics(

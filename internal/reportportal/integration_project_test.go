@@ -21,10 +21,10 @@ func TestIntegration_ProjectExtractionFlow(t *testing.T) {
 		expectError     bool
 	}{
 		{
-			name:            "request project takes precedence over HTTP header",
+			name:            "HTTP header takes precedence over request project",
 			httpHeaders:     map[string]string{"X-Project": "http-project"},
 			requestProject:  "request-project",
-			expectedProject: "request-project",
+			expectedProject: "http-project",
 			expectError:     false,
 		},
 		{
@@ -49,7 +49,7 @@ func TestIntegration_ProjectExtractionFlow(t *testing.T) {
 			expectError:     false,
 		},
 		{
-			name:            "fallback to HTTP header when no request project",
+			name:            "use HTTP header when no request project",
 			httpHeaders:     map[string]string{"X-Project": "http-project"},
 			requestProject:  "",
 			expectedProject: "http-project",
@@ -70,10 +70,10 @@ func TestIntegration_ProjectExtractionFlow(t *testing.T) {
 			expectError:     false,
 		},
 		{
-			name:            "request project with whitespace is trimmed",
-			httpHeaders:     map[string]string{"X-Project": "http-project"},
-			requestProject:  "  request-project  ",
-			expectedProject: "request-project",
+			name:            "HTTP header with whitespace is trimmed and takes precedence",
+			httpHeaders:     map[string]string{"X-Project": "  http-project  "},
+			requestProject:  "request-project",
+			expectedProject: "http-project",
 			expectError:     false,
 		},
 	}
@@ -111,8 +111,8 @@ func TestIntegration_ProjectExtractionFlow(t *testing.T) {
 }
 
 func TestIntegration_CompleteHTTPFlow(t *testing.T) {
-	// Test the complete flow from HTTP request to tool execution
-	// Request parameter should take precedence over HTTP header
+	// Test the complete flow from HTTP request to tool execution.
+	// HTTP header takes precedence over the tool input parameter.
 	req := httptest.NewRequest("GET", "/test", nil)
 	req.Header.Set("X-Project", "header-project")
 
@@ -121,9 +121,8 @@ func TestIntegration_CompleteHTTPFlow(t *testing.T) {
 
 	// Create a handler that simulates the MCP tool execution
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Simulate MCP tool request with explicit project parameter
-		// This should take precedence over the HTTP header
-		// Extract project using our shared helper
+		// Simulate MCP tool request with an explicit project parameter.
+		// The HTTP header in context wins over this tool input.
 		project, err := utils.ExtractProject(r.Context(), "request-project")
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
@@ -142,8 +141,8 @@ func TestIntegration_CompleteHTTPFlow(t *testing.T) {
 	// Execute request
 	middleware.ServeHTTP(rr, req)
 
-	// Verify results - request parameter should win
+	// Verify results - HTTP header wins over tool input
 	assert.Equal(t, http.StatusOK, rr.Code)
 	assert.True(t, projectFound)
-	assert.Equal(t, "request-project", capturedProject)
+	assert.Equal(t, "header-project", capturedProject)
 }

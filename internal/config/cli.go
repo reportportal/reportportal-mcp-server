@@ -35,7 +35,8 @@ ENVIRONMENT VARIABLES:
                      the ReportPortal UI: https://your-rp-instance.com/ui/#<PROJECT_KEY>/…
                      It is NOT the display name; use the value exactly as it appears in the URL.
                      The value is passed to the ReportPortal API as-is (only whitespace is trimmed).
-                     Individual tool calls can override it via the 'projectKey' argument.
+                     The per-call 'projectKey' argument is only used as a fallback when no
+                     project is available from the context (env variable or HTTP header).
                      Example: RP_PROJECT=my_project
 
 AUTHENTICATION:
@@ -62,7 +63,7 @@ func GetCommonFlags() []cli.Flag {
 			Required: false,
 			Sources:  cli.EnvVars("RP_PROJECT"),
 			Value:    "",
-			Usage:    "ReportPortal project key (URL-safe identifier shown after '#' in the UI: …/ui/#<PROJECT_KEY>/…). Not the display name. Overridable per tool call via the 'projectKey' argument.",
+			Usage:    "Default project key (unique project identifier within the ReportPortal instance). stdio mode only: takes top priority over the per-call 'projectKey' tool argument, which is used as fallback. Ignored in HTTP mode (use X-Project request header instead).",
 		},
 		&cli.StringFlag{
 			Name:     "log-level",

@@ -13,12 +13,12 @@ func TestExtractProject(t *testing.T) {
 		isHttpMode            bool   // If true, use projectFromHttpHeader; if false, use projectFromEnvVar
 		projectFromEnvVar     string // Project from environment variable (used in stdio mode)
 		projectFromHttpHeader string // Project from HTTP header (used in HTTP mode)
-		projectFromRequest    string // Project from request parameter (highest priority)
+		projectFromRequest    string // Project from request parameter (lowest-priority fallback, used only when context is empty)
 		expectedProject       string
 		expectError           bool
 	}{
 		{
-			name:                  "projectFromRequest takes precedence over all in stdio mode",
+			name:                  "projectFromRequest used as fallback when no env var in stdio mode",
 			isHttpMode:            false,
 			projectFromEnvVar:     "",
 			projectFromHttpHeader: "",
@@ -27,12 +27,21 @@ func TestExtractProject(t *testing.T) {
 			expectError:           false,
 		},
 		{
-			name:                  "projectFromRequest takes precedence over projectFromHttpHeader",
+			name:                  "projectFromEnvVar takes precedence over projectFromRequest in stdio mode",
+			isHttpMode:            false,
+			projectFromEnvVar:     "env-project",
+			projectFromHttpHeader: "",
+			projectFromRequest:    "request-project",
+			expectedProject:       "env-project",
+			expectError:           false,
+		},
+		{
+			name:                  "projectFromHttpHeader takes precedence over projectFromRequest in HTTP mode",
 			isHttpMode:            true,
 			projectFromEnvVar:     "",
 			projectFromHttpHeader: "header-project",
 			projectFromRequest:    "request-project",
-			expectedProject:       "request-project",
+			expectedProject:       "header-project",
 			expectError:           false,
 		},
 		{
@@ -159,7 +168,7 @@ func TestExtractProject(t *testing.T) {
 				ctx = WithProjectInContext(ctx, tt.projectFromEnvVar)
 			}
 
-			// Call ExtractProject (request arg has highest priority)
+			// Call ExtractProject (request arg is the lowest-priority fallback)
 			result, err := ExtractProject(ctx, tt.projectFromRequest)
 			if tt.expectError {
 				assert.Error(t, err)

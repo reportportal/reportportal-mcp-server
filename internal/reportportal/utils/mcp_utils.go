@@ -16,32 +16,13 @@ import (
 // reference this constant.
 const ProjectKeyField = "projectKey"
 
-// RequiredFields builds the Required slice for a tool's InputSchema.
-// ProjectKeyField is always included first: in HTTP mode there is no env-var
-// fallback so it must be supplied by the caller; in stdio mode it still
-// appears in Required (the schema carries a default value so clients can
-// pre-fill it) so the field is consistently visible across both modes.
-// Duplicates in others are silently dropped.
-func RequiredFields(others ...string) []string {
-	result := []string{ProjectKeyField}
-	seen := map[string]bool{ProjectKeyField: true}
-	for _, f := range others {
-		if !seen[f] {
-			seen[f] = true
-			result = append(result, f)
-		}
-	}
-	return result
-}
-
 // ProjectKeySchema returns a JSON schema for the projectKey MCP tool parameter.
 // Default is set only when defaultProjectKey is non-empty (JSON default is omitted otherwise).
 // Returns an error if marshalling the default value fails (in practice unreachable for plain strings).
 func ProjectKeySchema(defaultProjectKey string) (*jsonschema.Schema, error) {
 	s := &jsonschema.Schema{
-		Type: "string",
-		Description: "URL-safe project key: the identifier from ReportPortal URLs after the '#' " +
-			"(not the project display name).",
+		Type:        "string",
+		Description: "A unique project identifier within the ReportPortal instance.",
 	}
 	if defaultProjectKey != "" {
 		b, err := json.Marshal(defaultProjectKey)
@@ -82,12 +63,19 @@ func ApplyPaginationOptions[T PaginatedRequest[T]](
 		PageSort(pageSort)
 }
 
-// ExtractProject extracts the project from a typed argument string or context fallback.
+// ExtractProject resolves the active project key using the agreed priority order:
+//
+//   - stdio mode: env variable (context, top priority) → tool input (fallback)
+//   - HTTP mode:  env variable is ignored; HTTP header projectKey (context, top
+//     priority) → tool input (fallback)
+//
+// In both modes the context-carried value wins; tool input is only used when
+// no project has been placed in the context.
 func ExtractProject(ctx context.Context, projectArg string) (string, error) {
-	if project := strings.TrimSpace(projectArg); project != "" {
+	if project, ok := GetProjectFromContext(ctx); ok {
 		return project, nil
 	}
-	if project, ok := GetProjectFromContext(ctx); ok {
+	if project := strings.TrimSpace(projectArg); project != "" {
 		return project, nil
 	}
 	return "", fmt.Errorf(
