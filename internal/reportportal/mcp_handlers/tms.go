@@ -95,7 +95,7 @@ func (tr *TMSResources) toolGetMilestonesByFilter() (*mcp.Tool, ToolHandler[GetM
 						Description: "Filter milestones by ID",
 					},
 				},
-				Required: utils.RequiredFields(),
+				Required: nil,
 			},
 		},
 		utils.WithAnalytics(
@@ -192,7 +192,7 @@ func (tr *TMSResources) toolGetTestPlanByID() (*mcp.Tool, ToolHandler[GetTestPla
 						Minimum:     openapi.PtrFloat64(1),
 					},
 				},
-				Required: utils.RequiredFields("id"),
+				Required: []string{"id"},
 			},
 		},
 		utils.WithAnalytics(
@@ -243,7 +243,7 @@ func (tr *TMSResources) toolGetTestCasesForTestPlan() (*mcp.Tool, ToolHandler[Ge
 						Minimum:     openapi.PtrFloat64(1),
 					},
 				},
-				Required: utils.RequiredFields("test-plan-id"),
+				Required: []string{"test-plan-id"},
 			},
 		},
 		utils.WithAnalytics(
@@ -311,7 +311,7 @@ func (tr *TMSResources) toolGetTestFoldersByFilter() (*mcp.Tool, ToolHandler[Get
 						Description: "Filter folders by name substring (API filter.cnt.name)",
 					},
 				},
-				Required: utils.RequiredFields(),
+				Required: nil,
 			},
 		},
 		utils.WithAnalytics(
@@ -453,7 +453,7 @@ func (tr *TMSResources) toolGetTestCasesByFilter() (*mcp.Tool, ToolHandler[GetTe
 						Description: "Filter test cases by name substring (API filter.cnt.name)",
 					},
 				},
-				Required: utils.RequiredFields(),
+				Required: nil,
 			},
 		},
 		utils.WithAnalytics(
@@ -578,7 +578,7 @@ func (tr *TMSResources) toolCreateTestFolder() (*mcp.Tool, ToolHandler[CreateFol
 						Minimum:     openapi.PtrFloat64(1),
 					},
 				},
-				Required: utils.RequiredFields("name"),
+				Required: []string{"name"},
 			},
 		},
 		utils.WithAnalytics(
@@ -641,7 +641,7 @@ func (tr *TMSResources) toolDeleteTestFolder() (*mcp.Tool, ToolHandler[DeleteFol
 						Minimum:     openapi.PtrFloat64(1),
 					},
 				},
-				Required: utils.RequiredFields("folderId"),
+				Required: []string{"folderId"},
 			},
 		},
 		utils.WithAnalytics(
@@ -737,7 +737,7 @@ func (tr *TMSResources) toolCreateTestCase() (*mcp.Tool, ToolHandler[CreateTestC
 						Description: "Optional expected result for the manual scenario",
 					},
 				},
-				Required: utils.RequiredFields("name"),
+				Required: []string{"name"},
 			},
 		},
 		utils.WithAnalytics(
@@ -841,7 +841,7 @@ func (tr *TMSResources) toolCreateMilestone() (*mcp.Tool, ToolHandler[CreateMile
 						Description: "End date of the milestone in RFC3339 format (e.g. 2026-12-31T00:00:00Z); must not be before start-date",
 					},
 				},
-				Required: utils.RequiredFields("name", "type", "start-date", "end-date"),
+				Required: []string{"name", "type", "start-date", "end-date"},
 			},
 		},
 		utils.WithAnalytics(
@@ -935,7 +935,7 @@ func (tr *TMSResources) toolCreateTestPlan() (*mcp.Tool, ToolHandler[CreateTestP
 						Description: "Optional description of the test plan",
 					},
 				},
-				Required: utils.RequiredFields("name", "milestone-id"),
+				Required: []string{"name", "milestone-id"},
 			},
 		},
 		utils.WithAnalytics(
@@ -1035,7 +1035,7 @@ func (tr *TMSResources) toolUpdateTestCase() (*mcp.Tool, ToolHandler[UpdateTestC
 						Description: "Expected result for the manual scenario. Must be supplied together with instructions; providing only one of the two is an error.",
 					},
 				},
-				Required: utils.RequiredFields("testCaseId"),
+				Required: []string{"testCaseId"},
 			},
 		},
 		utils.WithAnalytics(
@@ -1119,7 +1119,7 @@ func (tr *TMSResources) toolDeleteTestCase() (*mcp.Tool, ToolHandler[DeleteTestC
 						Minimum:     openapi.PtrFloat64(1),
 					},
 				},
-				Required: utils.RequiredFields("testCaseId"),
+				Required: []string{"testCaseId"},
 			},
 		},
 		utils.WithAnalytics(
@@ -1191,7 +1191,7 @@ func (tr *TMSResources) toolAddTestCasesToTestPlan() (*mcp.Tool, ToolHandler[Add
 						},
 					},
 				},
-				Required: utils.RequiredFields("test-plan-id", "test-case-ids"),
+				Required: []string{"test-plan-id", "test-case-ids"},
 			},
 		},
 		utils.WithAnalytics(

@@ -109,9 +109,8 @@ func TestCreateMilestoneTool_RequiredFields(t *testing.T) {
 	schema, ok := tool.InputSchema.(*jsonschema.Schema)
 	require.True(t, ok, "InputSchema should be a *jsonschema.Schema")
 
-	// projectKey is required when no default project is configured
 	require.ElementsMatch(t,
-		[]string{"projectKey", "name", "type", "start-date", "end-date"},
+		[]string{"name", "type", "start-date", "end-date"},
 		schema.Required,
 	)
 }
@@ -407,7 +406,7 @@ func TestDeleteFolderTool_RequiredFields(t *testing.T) {
 	schema, ok := tool.InputSchema.(*jsonschema.Schema)
 	require.True(t, ok, "InputSchema should be a *jsonschema.Schema")
 
-	require.ElementsMatch(t, []string{"projectKey", "folderId"}, schema.Required)
+	require.ElementsMatch(t, []string{"folderId"}, schema.Required)
 }
 
 // TestDeleteFolderTool_IDMinimumConstraint verifies the folderId schema has minimum:1.
@@ -466,7 +465,7 @@ func TestDeleteTestCaseTool_RequiredFields(t *testing.T) {
 	schema, ok := tool.InputSchema.(*jsonschema.Schema)
 	require.True(t, ok, "InputSchema should be a *jsonschema.Schema")
 
-	require.ElementsMatch(t, []string{"projectKey", "testCaseId"}, schema.Required)
+	require.ElementsMatch(t, []string{"testCaseId"}, schema.Required)
 }
 
 // TestDeleteTestCaseTool_IDMinimumConstraint verifies the testCaseId schema has minimum:1.
@@ -542,7 +541,7 @@ func TestUpdateTestCaseTool_RequiredFields(t *testing.T) {
 	schema, ok := tool.InputSchema.(*jsonschema.Schema)
 	require.True(t, ok, "InputSchema should be a *jsonschema.Schema")
 
-	require.ElementsMatch(t, []string{"projectKey", "testCaseId"}, schema.Required)
+	require.ElementsMatch(t, []string{"testCaseId"}, schema.Required)
 }
 
 // TestUpdateTestCaseTool_PriorityEnum verifies the priority enum on update_test_case.

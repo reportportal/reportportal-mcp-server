@@ -276,7 +276,7 @@ func (lr *TestItemResources) toolGetTestItemsByFilter() (*mcp.Tool, ToolHandler[
 			InputSchema: &jsonschema.Schema{
 				Type:       "object",
 				Properties: properties,
-				Required:   utils.RequiredFields(),
+				Required:   nil,
 			},
 		}, utils.WithAnalytics(lr.analytics, "get_test_items_by_filter", func(ctx context.Context, request *mcp.CallToolRequest, args GetTestItemsByFilterArgs) (*mcp.CallToolResult, any, error) {
 			slog.Debug("START PROCESSING")
@@ -457,7 +457,7 @@ func (lr *TestItemResources) toolGetTestItemById() (*mcp.Tool, ToolHandler[GetTe
 			InputSchema: &jsonschema.Schema{
 				Type:       "object",
 				Properties: properties,
-				Required:   utils.RequiredFields("test_item_id"),
+				Required:   []string{"test_item_id"},
 			},
 		}, utils.WithAnalytics(lr.analytics, "get_test_item_by_id", func(ctx context.Context, request *mcp.CallToolRequest, args GetTestItemByIdArgs) (*mcp.CallToolResult, any, error) {
 			project, err := utils.ExtractProject(ctx, args.ProjectKey)
@@ -556,7 +556,7 @@ func (lr *TestItemResources) toolGetTestItemAttachment() (*mcp.Tool, ToolHandler
 			InputSchema: &jsonschema.Schema{
 				Type:       "object",
 				Properties: properties,
-				Required:   utils.RequiredFields("attachment-content-id"),
+				Required:   []string{"attachment-content-id"},
 			},
 		}, utils.WithAnalytics(lr.analytics, "get_test_item_attachment_by_id", func(ctx context.Context, request *mcp.CallToolRequest, args GetTestItemAttachmentArgs) (*mcp.CallToolResult, any, error) {
 			project, err := utils.ExtractProject(ctx, args.ProjectKey)
@@ -692,7 +692,7 @@ func (lr *TestItemResources) toolGetTestItemLogsByFilter() (*mcp.Tool, ToolHandl
 			InputSchema: &jsonschema.Schema{
 				Type:       "object",
 				Properties: properties,
-				Required:   utils.RequiredFields("parent-item-id"),
+				Required:   []string{"parent-item-id"},
 			},
 		}, utils.WithAnalytics(lr.analytics, "get_test_item_logs_by_filter", func(ctx context.Context, request *mcp.CallToolRequest, args GetTestItemLogsByFilterArgs) (*mcp.CallToolResult, any, error) {
 			slog.Debug("START PROCESSING")
@@ -832,7 +832,7 @@ func (lr *TestItemResources) toolGetTestSuitesByFilter() (*mcp.Tool, ToolHandler
 			InputSchema: &jsonschema.Schema{
 				Type:       "object",
 				Properties: properties,
-				Required:   utils.RequiredFields("launch-id"),
+				Required:   []string{"launch-id"},
 			},
 		}, utils.WithAnalytics(lr.analytics, "get_test_suites_by_filter", func(ctx context.Context, request *mcp.CallToolRequest, args GetTestSuitesByFilterArgs) (*mcp.CallToolResult, any, error) {
 			slog.Debug("START PROCESSING")
@@ -971,7 +971,7 @@ func (lr *TestItemResources) toolGetProjectDefectTypes() (*mcp.Tool, ToolHandler
 			InputSchema: &jsonschema.Schema{
 				Type:       "object",
 				Properties: properties,
-				Required:   utils.RequiredFields(),
+				Required:   nil,
 			},
 		}, utils.WithAnalytics(lr.analytics, "get_project_defect_types", func(ctx context.Context, request *mcp.CallToolRequest, args ProjectKeyArgs) (*mcp.CallToolResult, any, error) {
 			project, err := utils.ExtractProject(ctx, args.ProjectKey)
@@ -1049,10 +1049,7 @@ func (lr *TestItemResources) toolUpdateDefectTypeForTestItems() (*mcp.Tool, Tool
 			InputSchema: &jsonschema.Schema{
 				Type:       "object",
 				Properties: properties,
-				Required: utils.RequiredFields(
-					"test_items_ids",
-					"defect_type_id",
-				),
+				Required:   []string{"test_items_ids", "defect_type_id"},
 			},
 		}, utils.WithAnalytics(lr.analytics, "update_defect_type_for_test_items", func(ctx context.Context, request *mcp.CallToolRequest, args UpdateDefectTypeArgs) (*mcp.CallToolResult, any, error) {
 			project, err := utils.ExtractProject(ctx, args.ProjectKey)
@@ -1255,7 +1252,7 @@ func (lr *TestItemResources) toolGetTestItemsHistory() (*mcp.Tool, ToolHandler[G
 			InputSchema: &jsonschema.Schema{
 				Type:       "object",
 				Properties: properties,
-				Required:   utils.RequiredFields(),
+				Required:   nil,
 			},
 		}, utils.WithAnalytics(lr.analytics, "get_test_items_history", func(ctx context.Context, request *mcp.CallToolRequest, args GetTestItemsHistoryArgs) (*mcp.CallToolResult, any, error) {
 			slog.Debug("START PROCESSING")

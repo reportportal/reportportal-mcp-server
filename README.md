@@ -34,7 +34,7 @@ The URL of your ReportPortal instance:
 
 ### Project Key (`RP_PROJECT`) — Optional
 
-This value is optional. When set, it defines the default project key used for all requests; individual tools can still override it per call via the `projectKey` argument.
+This value is optional. When set, it defines the default project key used for all requests. The `projectKey` tool argument is only used as a fallback when no project is available from the context (i.e. `RP_PROJECT` env variable in stdio mode, or the `X-Project` HTTP header in HTTP mode).
 
 The project key is the **unique project identifier** within the ReportPortal instance, do not use the project display name as project key. Find this on the ReportPortal general settings page:
 
@@ -530,7 +530,7 @@ The server needs to know where your ReportPortal is and how to authenticate. Set
 
 Set `MCP_MODE=http` and configure the following:
 - `RP_HOST`: Required - The URL of your ReportPortal
-- `RP_PROJECT`: Optional - Your default project key (unique project identifier within the ReportPortal instance)
+- `RP_PROJECT`: **Not used** in HTTP mode — ignored even if set. Pass the `X-Project` request header per-request instead.
 - `MCP_SERVER_PORT`: Optional - HTTP server port (default: 8080)
 - `MCP_SERVER_HOST`: Optional - HTTP bind host (default: empty)
 - Authentication tokens must be passed per-request via `Authorization: Bearer <token>` header
@@ -550,10 +550,11 @@ export RP_API_TOKEN="your-api-token"
 ```bash
 export MCP_MODE=http
 export RP_HOST="https://your-reportportal-instance.com"
-export RP_PROJECT="YourProjectKeyFromReportPortal"
 export MCP_SERVER_PORT=8080
 ./reportportal-mcp-server
-# Tokens are passed per-request via HTTP Authorization header
+# Tokens and project key are passed per-request via HTTP headers:
+#   Authorization: Bearer <token>
+#   X-Project: <projectKey>
 ```
 
 ### HTTP API Endpoints
