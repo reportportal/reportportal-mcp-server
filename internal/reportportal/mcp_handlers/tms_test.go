@@ -699,6 +699,156 @@ func TestUpdateTestCaseTool_BothScenarioFieldsSendsSinglePatch(t *testing.T) {
 	require.Equal(t, "pass", manual["expectedResult"])
 }
 
+// TestCreateTestCaseTool_PreconditionsAndRequirementsReachHTTP verifies that the
+// preconditions and requirements fields are forwarded into the manual scenario of
+// the create_test_case POST payload.
+func TestCreateTestCaseTool_PreconditionsAndRequirementsReachHTTP(t *testing.T) {
+	ctx := context.Background()
+	type httpReq struct {
+		method string
+		path   string
+		body   string
+	}
+	reqCh := make(chan httpReq, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rawBody, _ := io.ReadAll(r.Body)
+		reqCh <- httpReq{method: r.Method, path: r.URL.Path, body: string(rawBody)}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":1,"name":"TC"}`))
+	}))
+	t.Cleanup(srv.Close)
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolCreateTestCase()
+
+	preconditions := "logged in as admin"
+	result, _, callErr := handler(ctx, &mcp.CallToolRequest{}, CreateTestCaseArgs{
+		ProjectKey:    "test-project",
+		Name:          "TC",
+		Preconditions: &preconditions,
+		Requirements:  []string{"must do X", "must do Y"},
+	})
+
+	require.NoError(t, callErr)
+	require.NotNil(t, result)
+	require.False(t, result.IsError)
+	captured := <-reqCh
+	require.Equal(t, http.MethodPost, captured.method)
+
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal([]byte(captured.body), &payload))
+	manual, ok := payload["manualScenario"].(map[string]any)
+	require.True(t, ok, "manualScenario should be present in POST payload")
+
+	precond, ok := manual["preconditions"].(map[string]any)
+	require.True(t, ok, "preconditions should be present in manual scenario")
+	require.Equal(t, "logged in as admin", precond["value"])
+
+	reqs, ok := manual["requirements"].([]any)
+	require.True(t, ok, "requirements should be present in manual scenario")
+	require.Len(t, reqs, 2)
+	first, ok := reqs[0].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "must do X", first["value"])
+	firstID, ok := first["id"].(string)
+	require.True(t, ok, "requirement id should be generated as a string")
+	require.Regexp(t, `^_[a-z0-9]{9}$`, firstID, "generated id should match the _xxxxxxxxx format")
+	second, ok := reqs[1].(map[string]any)
+	require.True(t, ok)
+	secondID, ok := second["id"].(string)
+	require.True(t, ok)
+	require.NotEqual(t, firstID, secondID, "generated requirement ids should be unique")
+}
+
+// TestUpdateTestCaseTool_PreconditionsOnlySendsScenario verifies that preconditions
+// can be set independently of instructions/expected-result on update_test_case.
+func TestUpdateTestCaseTool_PreconditionsOnlySendsScenario(t *testing.T) {
+	ctx := context.Background()
+	type httpReq struct {
+		method string
+		path   string
+		body   string
+	}
+	reqCh := make(chan httpReq, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rawBody, _ := io.ReadAll(r.Body)
+		reqCh <- httpReq{method: r.Method, path: r.URL.Path, body: string(rawBody)}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":7,"name":"TC"}`))
+	}))
+	t.Cleanup(srv.Close)
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolUpdateTestCase()
+
+	preconditions := "service is running"
+	result, _, callErr := handler(ctx, &mcp.CallToolRequest{}, UpdateTestCaseArgs{
+		ProjectKey:    "test-project",
+		TestCaseID:    7,
+		Preconditions: &preconditions,
+	})
+
+	require.NoError(t, callErr)
+	require.NotNil(t, result)
+	require.False(t, result.IsError)
+	captured := <-reqCh
+	require.Equal(t, http.MethodPatch, captured.method)
+
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal([]byte(captured.body), &payload))
+	manual, ok := payload["manualScenario"].(map[string]any)
+	require.True(t, ok, "manualScenario should be present in PATCH payload")
+	require.Equal(t, "TEXT", manual["manualScenarioType"])
+	precond, ok := manual["preconditions"].(map[string]any)
+	require.True(t, ok, "preconditions should be present in manual scenario")
+	require.Equal(t, "service is running", precond["value"])
+}
+
+// TestTestCaseTools_RequirementsSchema verifies the requirements array schema on
+// both create_test_case and update_test_case tools.
+func TestTestCaseTools_RequirementsSchema(t *testing.T) {
+	tr := newTMSResources(t)
+	for name, toolFn := range map[string]func() (*mcp.Tool, ToolHandler[CreateTestCaseArgs, any]){
+		"create_test_case": tr.toolCreateTestCase,
+	} {
+		tool, _ := toolFn()
+		schema, ok := tool.InputSchema.(*jsonschema.Schema)
+		require.True(t, ok, "%s InputSchema should be a *jsonschema.Schema", name)
+
+		_, ok = schema.Properties["preconditions"]
+		require.True(t, ok, "%s should expose preconditions property", name)
+
+		reqProp, ok := schema.Properties["requirements"]
+		require.True(t, ok, "%s should expose requirements property", name)
+		require.Equal(t, "array", reqProp.Type)
+		require.NotNil(t, reqProp.Items)
+		require.Equal(t, "string", reqProp.Items.Type)
+	}
+
+	updTool, _ := tr.toolUpdateTestCase()
+	updSchema, ok := updTool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok, "update_test_case InputSchema should be a *jsonschema.Schema")
+	_, ok = updSchema.Properties["preconditions"]
+	require.True(t, ok, "update_test_case should expose preconditions property")
+	updReqProp, ok := updSchema.Properties["requirements"]
+	require.True(t, ok, "update_test_case should expose requirements property")
+	require.Equal(t, "array", updReqProp.Type)
+	require.NotNil(t, updReqProp.Items)
+	require.Equal(t, "string", updReqProp.Items.Type)
+}
+
 // TestGetTestCasesByFilterTool_PriorityItemsSchema verifies that filter-in-priority
 // is an array with the correct enum on its items sub-schema.
 func TestGetTestCasesByFilterTool_PriorityItemsSchema(t *testing.T) {

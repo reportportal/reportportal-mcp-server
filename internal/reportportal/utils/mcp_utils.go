@@ -2,19 +2,28 @@ package utils
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"math"
 	"strings"
+	"time"
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/reportportal/goRP/v5/pkg/openapi"
 )
 
 // ProjectKeyField is the MCP parameter name for the ReportPortal project identifier.
 // Struct JSON tags (e.g. `json:"projectKey"`) must remain string literals and cannot
 // reference this constant.
 const ProjectKeyField = "projectKey"
+
+// requirementIDCharset is the alphabet used for generated requirement IDs.
+const requirementIDCharset = "abcdefghijklmnopqrstuvwxyz0123456789"
+
+// requirementIDLength is the number of random characters following the leading underscore.
+const requirementIDLength = 9
 
 // ProjectKeySchema returns a JSON schema for the projectKey MCP tool parameter.
 // Default is set only when defaultProjectKey is non-empty (JSON default is omitted otherwise).
@@ -103,4 +112,48 @@ func WithAnalytics[In any](
 		// Execute the original handler
 		return handler(ctx, req, args)
 	}
+}
+
+// GenerateRequirementID produces a unique requirement identifier such as "_h5cbt84tg".
+func GenerateRequirementID() string {
+	b := make([]byte, requirementIDLength)
+	if _, err := rand.Read(b); err != nil {
+		// crypto/rand should never fail; fall back to a time-based seed so the
+		// id stays unique-ish rather than returning an empty/duplicate value.
+		seed := time.Now().UnixNano()
+		for i := range b {
+			b[i] = byte((seed >> (uint(i) * 8)) & 0xff)
+		}
+	}
+	for i := range b {
+		b[i] = requirementIDCharset[int(b[i])%len(requirementIDCharset)]
+	}
+	return "_" + string(b)
+}
+
+// RequirementsSchema builds the JSON schema for the optional "requirements" array field.
+func RequirementsSchema() *jsonschema.Schema {
+	return &jsonschema.Schema{
+		Type:        "array",
+		Description: "Optional list of requirement values linked to the manual scenario. A unique id is generated automatically for each entry.",
+		Items: &jsonschema.Schema{
+			Type:        "string",
+			Description: "Requirement value/description",
+		},
+	}
+}
+
+// ToRequirementsRQ converts requirement values into the openapi request model,
+// generating a unique id for each entry.
+func ToRequirementsRQ(
+	values []string,
+) []openapi.ComEpamReportportalBaseCoreTmsDtoTmsRequirementRQ {
+	result := make([]openapi.ComEpamReportportalBaseCoreTmsDtoTmsRequirementRQ, 0, len(values))
+	for _, v := range values {
+		item := openapi.NewComEpamReportportalBaseCoreTmsDtoTmsRequirementRQ()
+		item.SetId(GenerateRequirementID())
+		item.SetValue(v)
+		result = append(result, *item)
+	}
+	return result
 }

@@ -682,13 +682,15 @@ func (tr *TMSResources) toolDeleteTestFolder() (*mcp.Tool, ToolHandler[DeleteFol
 
 // CreateTestCaseArgs represents the arguments for the create_test_case tool.
 type CreateTestCaseArgs struct {
-	ProjectKey     string  `json:"projectKey"`
-	Name           string  `json:"name"`
-	Description    *string `json:"description,omitempty"`
-	Priority       *string `json:"priority,omitempty"`
-	TestFolderID   *int64  `json:"test-folder-id,omitempty"`
-	Instructions   *string `json:"instructions,omitempty"`
-	ExpectedResult *string `json:"expected-result,omitempty"`
+	ProjectKey     string   `json:"projectKey"`
+	Name           string   `json:"name"`
+	Description    *string  `json:"description,omitempty"`
+	Priority       *string  `json:"priority,omitempty"`
+	TestFolderID   *int64   `json:"test-folder-id,omitempty"`
+	Instructions   *string  `json:"instructions,omitempty"`
+	ExpectedResult *string  `json:"expected-result,omitempty"`
+	Preconditions  *string  `json:"preconditions,omitempty"`
+	Requirements   []string `json:"requirements,omitempty"`
 }
 
 func (tr *TMSResources) toolCreateTestCase() (*mcp.Tool, ToolHandler[CreateTestCaseArgs, any]) {
@@ -736,6 +738,11 @@ func (tr *TMSResources) toolCreateTestCase() (*mcp.Tool, ToolHandler[CreateTestC
 						Type:        "string",
 						Description: "Optional expected result for the manual scenario",
 					},
+					"preconditions": {
+						Type:        "string",
+						Description: "Optional preconditions for the manual scenario",
+					},
+					"requirements": utils.RequirementsSchema(),
 				},
 				Required: []string{"name"},
 			},
@@ -763,6 +770,19 @@ func (tr *TMSResources) toolCreateTestCase() (*mcp.Tool, ToolHandler[CreateTestC
 				}
 				if args.ExpectedResult != nil {
 					textScenario.SetExpectedResult(*args.ExpectedResult)
+				}
+				if args.Preconditions != nil {
+					preconditions := openapi.NewComEpamReportportalBaseCoreTmsDtoTmsManualScenarioPreconditionsRQ()
+					preconditions.SetValue(*args.Preconditions)
+					textScenario.SetPreconditions(*preconditions)
+				}
+				for i, r := range args.Requirements {
+					if strings.TrimSpace(r) == "" {
+						return nil, nil, fmt.Errorf("requirements[%d] value must be non-empty", i)
+					}
+				}
+				if len(args.Requirements) > 0 {
+					textScenario.SetRequirements(utils.ToRequirementsRQ(args.Requirements))
 				}
 				scenario := openapi.ComEpamReportportalBaseCoreTmsDtoTmsTextManualScenarioRQAsComEpamReportportalBaseCoreTmsDtoTmsTestCaseRQManualScenario(
 					textScenario,
@@ -974,14 +994,16 @@ func (tr *TMSResources) toolCreateTestPlan() (*mcp.Tool, ToolHandler[CreateTestP
 
 // UpdateTestCaseArgs represents the arguments for the update_test_case tool.
 type UpdateTestCaseArgs struct {
-	ProjectKey     string  `json:"projectKey"`
-	TestCaseID     int64   `json:"testCaseId"`
-	Name           *string `json:"name,omitempty"`
-	Description    *string `json:"description,omitempty"`
-	Priority       *string `json:"priority,omitempty"`
-	TestFolderID   *int64  `json:"test-folder-id,omitempty"`
-	Instructions   *string `json:"instructions,omitempty"`
-	ExpectedResult *string `json:"expected-result,omitempty"`
+	ProjectKey     string   `json:"projectKey"`
+	TestCaseID     int64    `json:"testCaseId"`
+	Name           *string  `json:"name,omitempty"`
+	Description    *string  `json:"description,omitempty"`
+	Priority       *string  `json:"priority,omitempty"`
+	TestFolderID   *int64   `json:"test-folder-id,omitempty"`
+	Instructions   *string  `json:"instructions,omitempty"`
+	ExpectedResult *string  `json:"expected-result,omitempty"`
+	Preconditions  *string  `json:"preconditions,omitempty"`
+	Requirements   []string `json:"requirements,omitempty"`
 }
 
 func (tr *TMSResources) toolUpdateTestCase() (*mcp.Tool, ToolHandler[UpdateTestCaseArgs, any]) {
@@ -1034,6 +1056,11 @@ func (tr *TMSResources) toolUpdateTestCase() (*mcp.Tool, ToolHandler[UpdateTestC
 						Type:        "string",
 						Description: "Expected result for the manual scenario. Must be supplied together with instructions; providing only one of the two is an error.",
 					},
+					"preconditions": {
+						Type:        "string",
+						Description: "Preconditions for the manual scenario",
+					},
+					"requirements": utils.RequirementsSchema(),
 				},
 				Required: []string{"testCaseId"},
 			},
@@ -1063,8 +1090,10 @@ func (tr *TMSResources) toolUpdateTestCase() (*mcp.Tool, ToolHandler[UpdateTestC
 				if args.TestFolderID != nil {
 					rq.SetTestFolderId(*args.TestFolderID)
 				}
-				if args.Instructions != nil || args.ExpectedResult != nil {
-					if args.Instructions == nil || args.ExpectedResult == nil {
+				if args.Instructions != nil || args.ExpectedResult != nil ||
+					args.Preconditions != nil || len(args.Requirements) > 0 {
+					if (args.Instructions != nil || args.ExpectedResult != nil) &&
+						(args.Instructions == nil || args.ExpectedResult == nil) {
 						return nil, nil, fmt.Errorf(
 							"instructions and expected-result must both be provided together to set a TEXT manual scenario",
 						)
@@ -1072,8 +1101,28 @@ func (tr *TMSResources) toolUpdateTestCase() (*mcp.Tool, ToolHandler[UpdateTestC
 					textScenario := openapi.NewComEpamReportportalBaseCoreTmsDtoTmsTextManualScenarioRQ(
 						"TEXT",
 					)
-					textScenario.SetInstructions(*args.Instructions)
-					textScenario.SetExpectedResult(*args.ExpectedResult)
+					if args.Instructions != nil {
+						textScenario.SetInstructions(*args.Instructions)
+					}
+					if args.ExpectedResult != nil {
+						textScenario.SetExpectedResult(*args.ExpectedResult)
+					}
+					if args.Preconditions != nil {
+						preconditions := openapi.NewComEpamReportportalBaseCoreTmsDtoTmsManualScenarioPreconditionsRQ()
+						preconditions.SetValue(*args.Preconditions)
+						textScenario.SetPreconditions(*preconditions)
+					}
+					if len(args.Requirements) > 0 {
+						for i, r := range args.Requirements {
+							if strings.TrimSpace(r) == "" {
+								return nil, nil, fmt.Errorf(
+									"requirements[%d] value must be non-empty",
+									i,
+								)
+							}
+						}
+						textScenario.SetRequirements(utils.ToRequirementsRQ(args.Requirements))
+					}
 					scenario := openapi.ComEpamReportportalBaseCoreTmsDtoTmsTextManualScenarioRQAsComEpamReportportalBaseCoreTmsDtoTmsTestCaseRQManualScenario(
 						textScenario,
 					)
