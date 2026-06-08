@@ -682,13 +682,17 @@ func (tr *TMSResources) toolDeleteTestFolder() (*mcp.Tool, ToolHandler[DeleteFol
 
 // CreateTestCaseArgs represents the arguments for the create_test_case tool.
 type CreateTestCaseArgs struct {
-	ProjectKey     string  `json:"projectKey"`
-	Name           string  `json:"name"`
-	Description    *string `json:"description,omitempty"`
-	Priority       *string `json:"priority,omitempty"`
-	TestFolderID   *int64  `json:"test-folder-id,omitempty"`
-	Instructions   *string `json:"instructions,omitempty"`
-	ExpectedResult *string `json:"expected-result,omitempty"`
+	ProjectKey     string          `json:"projectKey"`
+	Name           string          `json:"name"`
+	Description    *string         `json:"description,omitempty"`
+	Priority       *string         `json:"priority,omitempty"`
+	TestFolderID   *int64          `json:"test-folder-id,omitempty"`
+	TestCaseType   *string         `json:"test-case-type,omitempty"`
+	Instructions   *string         `json:"instructions,omitempty"`
+	ExpectedResult *string         `json:"expected-result,omitempty"`
+	Steps          []utils.StepArg `json:"steps,omitempty"`
+	Preconditions  *string         `json:"preconditions,omitempty"`
+	Requirements   *[]string       `json:"requirements,omitempty"`
 }
 
 func (tr *TMSResources) toolCreateTestCase() (*mcp.Tool, ToolHandler[CreateTestCaseArgs, any]) {
@@ -698,7 +702,7 @@ func (tr *TMSResources) toolCreateTestCase() (*mcp.Tool, ToolHandler[CreateTestC
 	}
 	return &mcp.Tool{
 			Name:        "create_test_case",
-			Description: "Create a new test case in the ReportPortal TMS with a TEXT manual scenario type. This tool mutates TMS data.",
+			Description: `Create a new test case in the ReportPortal TMS. Use test-case-type to choose the manual scenario: "description" (default) for a plain text scenario via instructions/expected-result, or "test case with steps" for an ordered list of steps. This tool mutates TMS data.`,
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
@@ -728,14 +732,21 @@ func (tr *TMSResources) toolCreateTestCase() (*mcp.Tool, ToolHandler[CreateTestC
 						Description: "Optional ID of the folder to place the test case in",
 						Minimum:     openapi.PtrFloat64(1),
 					},
+					"test-case-type": utils.TestCaseTypeCreateSchema(),
 					"instructions": {
 						Type:        "string",
-						Description: "Optional manual scenario instructions / test steps (TEXT scenario type)",
+						Description: `Optional manual scenario instructions for the "description" type. Must be supplied together with expected-result.`,
 					},
 					"expected-result": {
 						Type:        "string",
-						Description: "Optional expected result for the manual scenario",
+						Description: `Optional expected result for the "description" type. Must be supplied together with instructions.`,
 					},
+					"steps": utils.StepsSchema(),
+					"preconditions": {
+						Type:        "string",
+						Description: "Optional preconditions for the manual scenario",
+					},
+					"requirements": utils.RequirementsSchema(),
 				},
 				Required: []string{"name"},
 			},
@@ -752,21 +763,19 @@ func (tr *TMSResources) toolCreateTestCase() (*mcp.Tool, ToolHandler[CreateTestC
 					return nil, nil, fmt.Errorf("name must not be empty or whitespace")
 				}
 
-				// The API requires a manual scenario object; TEXT is the only
-				// supported type, so it is always included even when instructions
-				// and expected-result are omitted.
-				textScenario := openapi.NewComEpamReportportalBaseCoreTmsDtoTmsTextManualScenarioRQ(
-					"TEXT",
-				)
-				if args.Instructions != nil {
-					textScenario.SetInstructions(*args.Instructions)
+				// The API requires a manual scenario object, so it is always
+				// included; an unspecified test-case-type defaults to TEXT.
+				scenario, err := utils.BuildManualScenario(utils.ManualScenarioArgs{
+					TestCaseType:   args.TestCaseType,
+					Instructions:   args.Instructions,
+					ExpectedResult: args.ExpectedResult,
+					Preconditions:  args.Preconditions,
+					Requirements:   args.Requirements,
+					Steps:          args.Steps,
+				})
+				if err != nil {
+					return nil, nil, err
 				}
-				if args.ExpectedResult != nil {
-					textScenario.SetExpectedResult(*args.ExpectedResult)
-				}
-				scenario := openapi.ComEpamReportportalBaseCoreTmsDtoTmsTextManualScenarioRQAsComEpamReportportalBaseCoreTmsDtoTmsTestCaseRQManualScenario(
-					textScenario,
-				)
 
 				rq := openapi.NewComEpamReportportalBaseCoreTmsDtoTmsTestCaseRQ()
 				rq.SetName(args.Name)
@@ -974,14 +983,18 @@ func (tr *TMSResources) toolCreateTestPlan() (*mcp.Tool, ToolHandler[CreateTestP
 
 // UpdateTestCaseArgs represents the arguments for the update_test_case tool.
 type UpdateTestCaseArgs struct {
-	ProjectKey     string  `json:"projectKey"`
-	TestCaseID     int64   `json:"testCaseId"`
-	Name           *string `json:"name,omitempty"`
-	Description    *string `json:"description,omitempty"`
-	Priority       *string `json:"priority,omitempty"`
-	TestFolderID   *int64  `json:"test-folder-id,omitempty"`
-	Instructions   *string `json:"instructions,omitempty"`
-	ExpectedResult *string `json:"expected-result,omitempty"`
+	ProjectKey     string          `json:"projectKey"`
+	TestCaseID     int64           `json:"testCaseId"`
+	Name           *string         `json:"name,omitempty"`
+	Description    *string         `json:"description,omitempty"`
+	Priority       *string         `json:"priority,omitempty"`
+	TestFolderID   *int64          `json:"test-folder-id,omitempty"`
+	TestCaseType   *string         `json:"test-case-type,omitempty"`
+	Instructions   *string         `json:"instructions,omitempty"`
+	ExpectedResult *string         `json:"expected-result,omitempty"`
+	Steps          []utils.StepArg `json:"steps,omitempty"`
+	Preconditions  *string         `json:"preconditions,omitempty"`
+	Requirements   *[]string       `json:"requirements,omitempty"`
 }
 
 func (tr *TMSResources) toolUpdateTestCase() (*mcp.Tool, ToolHandler[UpdateTestCaseArgs, any]) {
@@ -991,7 +1004,7 @@ func (tr *TMSResources) toolUpdateTestCase() (*mcp.Tool, ToolHandler[UpdateTestC
 	}
 	return &mcp.Tool{
 			Name:        "update_test_case",
-			Description: "Update an existing test case in the ReportPortal TMS. Only provided fields are updated; omitted fields remain unchanged. This tool mutates TMS data.",
+			Description: `Update an existing test case in the ReportPortal TMS. Only provided fields are updated; omitted fields remain unchanged. Provide test-case-type to set/replace the manual scenario: "description" uses instructions/expected-result, "test case with steps" uses the steps array. This tool mutates TMS data.`,
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
@@ -1026,14 +1039,21 @@ func (tr *TMSResources) toolUpdateTestCase() (*mcp.Tool, ToolHandler[UpdateTestC
 						Description: "ID of the folder to move the test case into",
 						Minimum:     openapi.PtrFloat64(1),
 					},
+					"test-case-type": utils.TestCaseTypeUpdateSchema(),
 					"instructions": {
 						Type:        "string",
-						Description: "Manual scenario instructions / test steps (TEXT scenario type). Must be supplied together with expected-result; providing only one of the two is an error.",
+						Description: `Manual scenario instructions for the "description" type. Must be supplied together with expected-result; providing only one of the two is an error.`,
 					},
 					"expected-result": {
 						Type:        "string",
-						Description: "Expected result for the manual scenario. Must be supplied together with instructions; providing only one of the two is an error.",
+						Description: `Expected result for the "description" type. Must be supplied together with instructions; providing only one of the two is an error.`,
 					},
+					"steps": utils.StepsSchema(),
+					"preconditions": {
+						Type:        "string",
+						Description: "Preconditions for the manual scenario",
+					},
+					"requirements": utils.RequirementsSchema(),
 				},
 				Required: []string{"testCaseId"},
 			},
@@ -1063,20 +1083,26 @@ func (tr *TMSResources) toolUpdateTestCase() (*mcp.Tool, ToolHandler[UpdateTestC
 				if args.TestFolderID != nil {
 					rq.SetTestFolderId(*args.TestFolderID)
 				}
-				if args.Instructions != nil || args.ExpectedResult != nil {
-					if args.Instructions == nil || args.ExpectedResult == nil {
+				hasScenarioFields := args.Instructions != nil ||
+					args.ExpectedResult != nil || args.Preconditions != nil ||
+					args.Requirements != nil || len(args.Steps) > 0
+				if args.TestCaseType != nil || hasScenarioFields {
+					if args.TestCaseType == nil && hasScenarioFields {
 						return nil, nil, fmt.Errorf(
-							"instructions and expected-result must both be provided together to set a TEXT manual scenario",
+							"test-case-type must be specified when updating manual scenario fields (instructions, expected-result, preconditions, requirements, steps)",
 						)
 					}
-					textScenario := openapi.NewComEpamReportportalBaseCoreTmsDtoTmsTextManualScenarioRQ(
-						"TEXT",
-					)
-					textScenario.SetInstructions(*args.Instructions)
-					textScenario.SetExpectedResult(*args.ExpectedResult)
-					scenario := openapi.ComEpamReportportalBaseCoreTmsDtoTmsTextManualScenarioRQAsComEpamReportportalBaseCoreTmsDtoTmsTestCaseRQManualScenario(
-						textScenario,
-					)
+					scenario, scenarioErr := utils.BuildManualScenario(utils.ManualScenarioArgs{
+						TestCaseType:   args.TestCaseType,
+						Instructions:   args.Instructions,
+						ExpectedResult: args.ExpectedResult,
+						Preconditions:  args.Preconditions,
+						Requirements:   args.Requirements,
+						Steps:          args.Steps,
+					})
+					if scenarioErr != nil {
+						return nil, nil, scenarioErr
+					}
 					rq.SetManualScenario(scenario)
 				}
 
