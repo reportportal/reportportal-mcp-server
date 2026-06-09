@@ -1224,6 +1224,151 @@ func TestGetTestCasesByFilterTool_FiltersReachHTTP(t *testing.T) {
 	require.Empty(t, capturedQuery.Get("filter.eq.name"), "filter.eq.name should not be set")
 }
 
+// TestResolveTestCaseAttributes_ConflictOnCreateRetriesLookup verifies the TOCTOU
+// race window where two concurrent callers both issue a GET (miss) then a POST for
+// the same attribute. The losing caller receives 409 Conflict on POST. The
+// implementation must then retry the GET, obtain the id created by the winner, and
+// succeed rather than surfacing a spurious duplicate-attribute error.
+func TestResolveTestCaseAttributes_ConflictOnCreateRetriesLookup(t *testing.T) {
+	ctx := context.Background()
+
+	var callCount atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := callCount.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		switch n {
+		case 1:
+			// Initial GET – attribute not found yet (both concurrent callers see this).
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"content":[],"page":{"totalElements":0}}`))
+		case 2:
+			// POST – race loser: the attribute was already created by the concurrent winner.
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write([]byte(`{"message":"attribute already exists"}`))
+		case 3:
+			// Retry GET – attribute now exists with id 42.
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(
+				[]byte(
+					`{"content":[{"id":42,"key":"env","value":"staging"}],"page":{"totalElements":1}}`,
+				),
+			)
+		case 4:
+			// Final POST to create the test case itself.
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"id":99,"name":"TC"}`))
+		default:
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolCreateTestCase()
+
+	result, _, callErr := handler(ctx, &mcp.CallToolRequest{}, CreateTestCaseArgs{
+		ProjectKey: "test-project",
+		Name:       "TC",
+		Attributes: []utils.AttributeArg{{Key: "env", Value: "staging"}},
+	})
+
+	require.NoError(t, callErr)
+	require.NotNil(t, result)
+	require.False(t, result.IsError, "expected success after 409 retry, got: %v", result)
+	require.Equal(t, int64(4), callCount.Load(),
+		"expected exactly 4 HTTP calls: GET (miss), POST (409), retry GET (hit), POST test-case")
+}
+
+// TestUpdateTestCaseTool_OmittedAttributesLeavesFieldAbsent verifies that when
+// Attributes is nil (field omitted) the PATCH payload does not contain an
+// "attributes" key, so existing server-side attributes are left unchanged.
+func TestUpdateTestCaseTool_OmittedAttributesLeavesFieldAbsent(t *testing.T) {
+	ctx := context.Background()
+
+	var capturedBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		capturedBody = string(raw)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":7,"name":"TC"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolUpdateTestCase()
+
+	name := "TC"
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, UpdateTestCaseArgs{
+		ProjectKey: "test-project",
+		TestCaseID: 7,
+		Name:       &name,
+		// Attributes intentionally omitted (nil pointer)
+	})
+
+	require.NoError(t, callErr)
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal([]byte(capturedBody), &payload))
+	_, present := payload["attributes"]
+	require.False(t, present, "omitted Attributes must not appear in PATCH payload")
+}
+
+// TestUpdateTestCaseTool_EmptyAttributesClears verifies that passing an explicit
+// empty Attributes slice sends "attributes":[] in the PATCH body so the server
+// clears all existing attributes on the test case.
+func TestUpdateTestCaseTool_EmptyAttributesClears(t *testing.T) {
+	ctx := context.Background()
+
+	var capturedBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		capturedBody = string(raw)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":7,"name":"TC"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolUpdateTestCase()
+
+	name := "TC"
+	emptyAttrs := []utils.AttributeArg{}
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, UpdateTestCaseArgs{
+		ProjectKey: "test-project",
+		TestCaseID: 7,
+		Name:       &name,
+		Attributes: &emptyAttrs,
+	})
+
+	require.NoError(t, callErr)
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal([]byte(capturedBody), &payload))
+	attrs, present := payload["attributes"]
+	require.True(t, present, "explicit empty Attributes must appear in PATCH payload to clear them")
+	attrSlice, ok := attrs.([]any)
+	require.True(t, ok, "attributes value should be a JSON array")
+	require.Empty(t, attrSlice, "attributes array should be empty to clear existing attributes")
+}
+
 // TestGetTestFoldersByFilterTool_LargeParentIDReachesHTTP verifies that a
 // filter-eq-parentId greater than math.MaxInt32 is accepted and forwarded as a
 // query parameter to the HTTP layer.

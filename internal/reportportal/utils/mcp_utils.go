@@ -174,6 +174,56 @@ type StepArg struct {
 	ExpectedResult *string `json:"expected-result,omitempty"`
 }
 
+// AttributeArg represents a single test case attribute (key/value pair) from tool input.
+type AttributeArg struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+// attributesItemSchema returns the shared object schema for a single attribute entry.
+func attributesItemSchema() *jsonschema.Schema {
+	return &jsonschema.Schema{
+		Type: "object",
+		Properties: map[string]*jsonschema.Schema{
+			"key": {
+				Type:        "string",
+				Description: "Attribute key (must contain at least one non-whitespace character)",
+				MinLength:   openapi.PtrInt(1),
+				Pattern:     `\S`,
+			},
+			"value": {
+				Type:        "string",
+				Description: "Attribute value (must contain at least one non-whitespace character)",
+				MinLength:   openapi.PtrInt(1),
+				Pattern:     `\S`,
+			},
+		},
+		Required: []string{"key", "value"},
+	}
+}
+
+// AttributesCreateSchema returns the JSON schema for the "attributes" field on
+// create_test_case. Existing project attributes that match are reused; missing
+// ones are created automatically.
+func AttributesCreateSchema() *jsonschema.Schema {
+	return &jsonschema.Schema{
+		Type:        "array",
+		Description: "Optional list of attributes (key/value pairs) to attach to the test case. Existing project attributes that match both key and value are reused; missing ones are created automatically before being linked to the test case.",
+		Items:       attributesItemSchema(),
+	}
+}
+
+// AttributesUpdateSchema returns the JSON schema for the "attributes" field on
+// update_test_case. Pass an empty array ([]) to clear all existing attributes;
+// omit the field entirely to leave them unchanged.
+func AttributesUpdateSchema() *jsonschema.Schema {
+	return &jsonschema.Schema{
+		Type:        "array",
+		Description: "Optional list of attributes (key/value pairs) to attach to the test case. Existing project attributes that match both key and value are reused; missing ones are created automatically before being linked to the test case. Pass an empty array ([]) to clear all existing attributes; omit the field to leave them unchanged.",
+		Items:       attributesItemSchema(),
+	}
+}
+
 // ManualScenarioArgs carries the manual scenario inputs shared by the
 // create_test_case and update_test_case tools. Requirements is a pointer so a
 // nil value (field omitted) can be distinguished from an explicit empty slice

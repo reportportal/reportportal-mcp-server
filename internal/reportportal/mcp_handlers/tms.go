@@ -680,19 +680,119 @@ func (tr *TMSResources) toolDeleteTestFolder() (*mcp.Tool, ToolHandler[DeleteFol
 		)
 }
 
+// resolveTestCaseAttributes ensures that every requested attribute (key/value
+// pair) exists for the project and returns the request models that link them to
+// a test case. For each attribute it first looks the attribute up via
+// GET /v1/project/{projectKey}/tms/attribute (filtered by key and value); if no
+// match exists it creates the attribute via POST to the same endpoint. The
+// resulting list references each attribute by its id and key so it can be
+// attached during test case creation or update.
+func (tr *TMSResources) resolveTestCaseAttributes(
+	ctx context.Context,
+	project string,
+	attributes []utils.AttributeArg,
+) ([]openapi.ComEpamReportportalBaseCoreTmsDtoTmsTestCaseAttributeRQ, error) {
+	result := make(
+		[]openapi.ComEpamReportportalBaseCoreTmsDtoTmsTestCaseAttributeRQ,
+		0,
+		len(attributes),
+	)
+	for i, attr := range attributes {
+		key := strings.TrimSpace(attr.Key)
+		value := strings.TrimSpace(attr.Value)
+		if key == "" {
+			return nil, fmt.Errorf("attributes[%d] key must not be empty or whitespace", i)
+		}
+		if value == "" {
+			return nil, fmt.Errorf("attributes[%d] value must not be empty or whitespace", i)
+		}
+
+		// 1. Look up an existing attribute matching both key and value.
+		page, response, err := tr.client.TMSAttributeControllerAPI.GetAllAttributes(ctx, project).
+			FilterEqKey(key).
+			FilterEqValue(value).
+			Execute()
+		if err != nil {
+			return nil, fmt.Errorf(
+				"failed to look up attribute %q=%q: %s: %w",
+				key, value, utils.ExtractResponseError(err, response), err,
+			)
+		}
+
+		var attributeID int64
+		found := false
+		for _, existing := range page.GetContent() {
+			if existing.GetKey() == key && existing.GetValue() == value {
+				attributeID = existing.GetId()
+				found = true
+				break
+			}
+		}
+
+		// 2. Create the attribute when it does not exist yet.
+		if !found {
+			createRQ := openapi.NewComEpamReportportalBaseCoreTmsDtoTmsAttributeRQ()
+			createRQ.SetKey(key)
+			createRQ.SetValue(value)
+			created, createResp, createErr := tr.client.TMSAttributeControllerAPI.
+				CreateAttribute(ctx, project).
+				ComEpamReportportalBaseCoreTmsDtoTmsAttributeRQ(*createRQ).
+				Execute()
+			if createErr != nil {
+				// A 409 Conflict means a concurrent caller raced through the
+				// same GET→POST window and created this attribute first. Retry
+				// the lookup to obtain the id it just created instead of
+				// surfacing a spurious duplicate error.
+				if createResp != nil && createResp.StatusCode == http.StatusConflict {
+					retryPage, _, retryErr := tr.client.TMSAttributeControllerAPI.
+						GetAllAttributes(ctx, project).
+						FilterEqKey(key).
+						FilterEqValue(value).
+						Execute()
+					if retryErr == nil {
+						for _, existing := range retryPage.GetContent() {
+							if existing.GetKey() == key && existing.GetValue() == value {
+								attributeID = existing.GetId()
+								found = true
+								break
+							}
+						}
+					}
+				}
+				if !found {
+					return nil, fmt.Errorf(
+						"failed to create attribute %q=%q: %s: %w",
+						key, value, utils.ExtractResponseError(createErr, createResp), createErr,
+					)
+				}
+			} else {
+				attributeID = created.GetId()
+			}
+		}
+
+		// 3. Link the (existing or newly created) attribute to the test case.
+		tcAttr := openapi.NewComEpamReportportalBaseCoreTmsDtoTmsTestCaseAttributeRQ()
+		tcAttr.SetId(attributeID)
+		tcAttr.SetKey(key)
+		result = append(result, *tcAttr)
+	}
+	return result, nil
+}
+
 // CreateTestCaseArgs represents the arguments for the create_test_case tool.
 type CreateTestCaseArgs struct {
-	ProjectKey     string          `json:"projectKey"`
-	Name           string          `json:"name"`
-	Description    *string         `json:"description,omitempty"`
-	Priority       *string         `json:"priority,omitempty"`
-	TestFolderID   *int64          `json:"test-folder-id,omitempty"`
-	TestCaseType   *string         `json:"test-case-type,omitempty"`
-	Instructions   *string         `json:"instructions,omitempty"`
-	ExpectedResult *string         `json:"expected-result,omitempty"`
-	Steps          []utils.StepArg `json:"steps,omitempty"`
-	Preconditions  *string         `json:"preconditions,omitempty"`
-	Requirements   *[]string       `json:"requirements,omitempty"`
+	ProjectKey     string               `json:"projectKey"`
+	Name           string               `json:"name"`
+	Description    *string              `json:"description,omitempty"`
+	Priority       *string              `json:"priority,omitempty"`
+	TestFolderID   *int64               `json:"test-folder-id,omitempty"`
+	TestCaseType   *string              `json:"test-case-type,omitempty"`
+	Instructions   *string              `json:"instructions,omitempty"`
+	ExpectedResult *string              `json:"expected-result,omitempty"`
+	Steps          []utils.StepArg      `json:"steps,omitempty"`
+	Preconditions  *string              `json:"preconditions,omitempty"`
+	Requirements   *[]string            `json:"requirements,omitempty"`
+	Attributes     []utils.AttributeArg `json:"attributes,omitempty"`
 }
 
 func (tr *TMSResources) toolCreateTestCase() (*mcp.Tool, ToolHandler[CreateTestCaseArgs, any]) {
@@ -747,6 +847,7 @@ func (tr *TMSResources) toolCreateTestCase() (*mcp.Tool, ToolHandler[CreateTestC
 						Description: "Optional preconditions for the manual scenario",
 					},
 					"requirements": utils.RequirementsSchema(),
+					"attributes":   utils.AttributesCreateSchema(),
 				},
 				Required: []string{"name"},
 			},
@@ -788,6 +889,13 @@ func (tr *TMSResources) toolCreateTestCase() (*mcp.Tool, ToolHandler[CreateTestC
 				}
 				if args.TestFolderID != nil {
 					rq.SetTestFolderId(*args.TestFolderID)
+				}
+				if len(args.Attributes) > 0 {
+					attrs, attrErr := tr.resolveTestCaseAttributes(ctx, project, args.Attributes)
+					if attrErr != nil {
+						return nil, nil, attrErr
+					}
+					rq.SetAttributes(attrs)
 				}
 
 				_, response, err := tr.client.TestCaseAPI.CreateTestCase(ctx, project).
@@ -983,18 +1091,19 @@ func (tr *TMSResources) toolCreateTestPlan() (*mcp.Tool, ToolHandler[CreateTestP
 
 // UpdateTestCaseArgs represents the arguments for the update_test_case tool.
 type UpdateTestCaseArgs struct {
-	ProjectKey     string          `json:"projectKey"`
-	TestCaseID     int64           `json:"testCaseId"`
-	Name           *string         `json:"name,omitempty"`
-	Description    *string         `json:"description,omitempty"`
-	Priority       *string         `json:"priority,omitempty"`
-	TestFolderID   *int64          `json:"test-folder-id,omitempty"`
-	TestCaseType   *string         `json:"test-case-type,omitempty"`
-	Instructions   *string         `json:"instructions,omitempty"`
-	ExpectedResult *string         `json:"expected-result,omitempty"`
-	Steps          []utils.StepArg `json:"steps,omitempty"`
-	Preconditions  *string         `json:"preconditions,omitempty"`
-	Requirements   *[]string       `json:"requirements,omitempty"`
+	ProjectKey     string                `json:"projectKey"`
+	TestCaseID     int64                 `json:"testCaseId"`
+	Name           *string               `json:"name,omitempty"`
+	Description    *string               `json:"description,omitempty"`
+	Priority       *string               `json:"priority,omitempty"`
+	TestFolderID   *int64                `json:"test-folder-id,omitempty"`
+	TestCaseType   *string               `json:"test-case-type,omitempty"`
+	Instructions   *string               `json:"instructions,omitempty"`
+	ExpectedResult *string               `json:"expected-result,omitempty"`
+	Steps          []utils.StepArg       `json:"steps,omitempty"`
+	Preconditions  *string               `json:"preconditions,omitempty"`
+	Requirements   *[]string             `json:"requirements,omitempty"`
+	Attributes     *[]utils.AttributeArg `json:"attributes,omitempty"`
 }
 
 func (tr *TMSResources) toolUpdateTestCase() (*mcp.Tool, ToolHandler[UpdateTestCaseArgs, any]) {
@@ -1054,6 +1163,7 @@ func (tr *TMSResources) toolUpdateTestCase() (*mcp.Tool, ToolHandler[UpdateTestC
 						Description: "Preconditions for the manual scenario",
 					},
 					"requirements": utils.RequirementsSchema(),
+					"attributes":   utils.AttributesUpdateSchema(),
 				},
 				Required: []string{"testCaseId"},
 			},
@@ -1104,6 +1214,14 @@ func (tr *TMSResources) toolUpdateTestCase() (*mcp.Tool, ToolHandler[UpdateTestC
 						return nil, nil, scenarioErr
 					}
 					rq.SetManualScenario(scenario)
+				}
+
+				if args.Attributes != nil {
+					attrs, attrErr := tr.resolveTestCaseAttributes(ctx, project, *args.Attributes)
+					if attrErr != nil {
+						return nil, nil, attrErr
+					}
+					rq.SetAttributes(attrs)
 				}
 
 				_, response, err := tr.client.TestCaseAPI.PatchTestCase(ctx, project, args.TestCaseID).
