@@ -618,38 +618,92 @@ func TestUpdateTestCaseTool_SuccessReachesHTTP(t *testing.T) {
 	require.False(t, result.IsError)
 }
 
-// TestUpdateTestCaseTool_PartialScenarioRejected verifies that supplying only one of
-// instructions / expected-result is rejected before any HTTP request is made.
-func TestUpdateTestCaseTool_PartialScenarioRejected(t *testing.T) {
+// TestUpdateTestCaseTool_PartialScenarioAllowed verifies that instructions and
+// expected-result can each be supplied independently for the "text" type.
+func TestUpdateTestCaseTool_PartialScenarioAllowed(t *testing.T) {
 	ctx := context.Background()
-	res, requestCount := newTMSResourcesWithCounter(t)
-	_, handler := res.toolUpdateTestCase()
+	type httpReq struct {
+		method string
+		path   string
+		body   string
+	}
+	makeServer := func(t *testing.T) (*httptest.Server, chan httpReq) {
+		t.Helper()
+		ch := make(chan httpReq, 1)
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			rawBody, _ := io.ReadAll(r.Body)
+			ch <- httpReq{method: r.Method, path: r.URL.Path, body: string(rawBody)}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"id":1,"name":"TC"}`))
+		}))
+		t.Cleanup(srv.Close)
+		return srv, ch
+	}
+	makeHandler := func(t *testing.T, srv *httptest.Server) func(context.Context, *mcp.CallToolRequest, UpdateTestCaseArgs) (*mcp.CallToolResult, any, error) {
+		t.Helper()
+		serverURL, err := url.Parse(srv.URL)
+		require.NoError(t, err)
+		res := NewTMSResources(
+			gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+			nil,
+			"",
+		)
+		_, h := res.toolUpdateTestCase()
+		return h
+	}
 
-	descriptionType := "description"
-	instructionsOnly := "step 1"
-	_, _, err := handler(ctx, &mcp.CallToolRequest{}, UpdateTestCaseArgs{
-		ProjectKey:   "test-project",
-		TestCaseID:   1,
-		TestCaseType: &descriptionType,
-		Instructions: &instructionsOnly,
-		// ExpectedResult intentionally omitted
-	})
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "must both be provided together")
-	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+	descriptionType := "text"
 
-	requestCount.Store(0)
-	expectedOnly := "pass"
-	_, _, err = handler(ctx, &mcp.CallToolRequest{}, UpdateTestCaseArgs{
-		ProjectKey:     "test-project",
-		TestCaseID:     1,
-		TestCaseType:   &descriptionType,
-		ExpectedResult: &expectedOnly,
-		// Instructions intentionally omitted
+	t.Run("instructions only", func(t *testing.T) {
+		srv, reqCh := makeServer(t)
+		handler := makeHandler(t, srv)
+		instructions := "step 1"
+		result, _, callErr := handler(ctx, &mcp.CallToolRequest{}, UpdateTestCaseArgs{
+			ProjectKey:   "test-project",
+			TestCaseID:   1,
+			TestCaseType: &descriptionType,
+			Instructions: &instructions,
+		})
+		require.NoError(t, callErr)
+		require.NotNil(t, result)
+		require.False(t, result.IsError)
+		require.Len(t, reqCh, 1)
+		captured := <-reqCh
+		require.Equal(t, http.MethodPatch, captured.method)
+		var payload map[string]any
+		require.NoError(t, json.Unmarshal([]byte(captured.body), &payload))
+		manual, ok := payload["manualScenario"].(map[string]any)
+		require.True(t, ok, "manualScenario should be present")
+		require.Equal(t, "TEXT", manual["manualScenarioType"])
+		require.Equal(t, "step 1", manual["instructions"])
+		require.NotContains(t, manual, "expectedResult")
 	})
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "must both be provided together")
-	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+
+	t.Run("expected-result only", func(t *testing.T) {
+		srv, reqCh := makeServer(t)
+		handler := makeHandler(t, srv)
+		expected := "pass"
+		result, _, callErr := handler(ctx, &mcp.CallToolRequest{}, UpdateTestCaseArgs{
+			ProjectKey:     "test-project",
+			TestCaseID:     1,
+			TestCaseType:   &descriptionType,
+			ExpectedResult: &expected,
+		})
+		require.NoError(t, callErr)
+		require.NotNil(t, result)
+		require.False(t, result.IsError)
+		require.Len(t, reqCh, 1)
+		captured := <-reqCh
+		require.Equal(t, http.MethodPatch, captured.method)
+		var payload map[string]any
+		require.NoError(t, json.Unmarshal([]byte(captured.body), &payload))
+		manual, ok := payload["manualScenario"].(map[string]any)
+		require.True(t, ok, "manualScenario should be present")
+		require.Equal(t, "TEXT", manual["manualScenarioType"])
+		require.Equal(t, "pass", manual["expectedResult"])
+		require.NotContains(t, manual, "instructions")
+	})
 }
 
 // TestUpdateTestCaseTool_ScenarioFieldsRequireType verifies that supplying manual
@@ -699,7 +753,7 @@ func TestUpdateTestCaseTool_BothScenarioFieldsSendsSinglePatch(t *testing.T) {
 		"",
 	)
 	_, handler := res.toolUpdateTestCase()
-	descriptionType := "description"
+	descriptionType := "text"
 	instructions := "step 1"
 	expected := "pass"
 	result, _, callErr := handler(ctx, &mcp.CallToolRequest{}, UpdateTestCaseArgs{
@@ -820,7 +874,7 @@ func TestUpdateTestCaseTool_PreconditionsOnlySendsScenario(t *testing.T) {
 	)
 	_, handler := res.toolUpdateTestCase()
 
-	descriptionType := "description"
+	descriptionType := "text"
 	preconditions := "service is running"
 	result, _, callErr := handler(ctx, &mcp.CallToolRequest{}, UpdateTestCaseArgs{
 		ProjectKey:    "test-project",
@@ -872,7 +926,7 @@ func TestUpdateTestCaseTool_EmptyRequirementsClears(t *testing.T) {
 	)
 	_, handler := res.toolUpdateTestCase()
 
-	descriptionType := "description"
+	descriptionType := "text"
 	result, _, callErr := handler(ctx, &mcp.CallToolRequest{}, UpdateTestCaseArgs{
 		ProjectKey:   "test-project",
 		TestCaseID:   7,
@@ -945,7 +999,7 @@ func TestTestCaseTools_TypeAndStepsSchema(t *testing.T) {
 		require.True(t, ok, "%s should expose test-case-type property", name)
 		require.Equal(t, "string", typeProp.Type)
 		require.ElementsMatch(t,
-			[]any{"description", "test case with steps"},
+			[]any{"text", "steps"},
 			typeProp.Enum,
 			"%s test-case-type enum should match expected values", name,
 		)
@@ -989,13 +1043,13 @@ func TestCreateTestCaseTool_StepsReachHTTP(t *testing.T) {
 	)
 	_, handler := res.toolCreateTestCase()
 
-	tcType := "test case with steps"
+	tcType := "steps"
 	expected := "page loads"
 	result, _, callErr := handler(ctx, &mcp.CallToolRequest{}, CreateTestCaseArgs{
 		ProjectKey:   "test-project",
 		Name:         "TC",
 		TestCaseType: &tcType,
-		Steps: []utils.StepArg{
+		Steps: &[]utils.StepArg{
 			{Instructions: "open the page", ExpectedResult: &expected},
 			{Instructions: "click submit"},
 		},
@@ -1028,7 +1082,7 @@ func TestCreateTestCaseTool_StepsRequiredForStepsType(t *testing.T) {
 	res, requestCount := newTMSResourcesWithCounter(t)
 	_, handler := res.toolCreateTestCase()
 
-	tcType := "test case with steps"
+	tcType := "steps"
 	_, _, err := handler(ctx, &mcp.CallToolRequest{}, CreateTestCaseArgs{
 		ProjectKey:   "test-project",
 		Name:         "TC",
@@ -1041,7 +1095,7 @@ func TestCreateTestCaseTool_StepsRequiredForStepsType(t *testing.T) {
 }
 
 // TestCreateTestCaseTool_StepsRejectedForDescriptionType verifies that supplying
-// steps with the default "description" type is rejected.
+// steps with the default "text" type is rejected.
 func TestCreateTestCaseTool_StepsRejectedForDescriptionType(t *testing.T) {
 	ctx := context.Background()
 	res, requestCount := newTMSResourcesWithCounter(t)
@@ -1050,14 +1104,14 @@ func TestCreateTestCaseTool_StepsRejectedForDescriptionType(t *testing.T) {
 	_, _, err := handler(ctx, &mcp.CallToolRequest{}, CreateTestCaseArgs{
 		ProjectKey: "test-project",
 		Name:       "TC",
-		Steps:      []utils.StepArg{{Instructions: "do thing"}},
+		Steps:      &[]utils.StepArg{{Instructions: "do thing"}},
 	})
 
 	require.Error(t, err)
 	require.Contains(
 		t,
 		err.Error(),
-		`steps are only valid when test-case-type is "test case with steps"`,
+		`steps are only valid when test-case-type is "steps"`,
 	)
 	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
 }
@@ -1087,12 +1141,12 @@ func TestUpdateTestCaseTool_StepsReachHTTP(t *testing.T) {
 	)
 	_, handler := res.toolUpdateTestCase()
 
-	tcType := "test case with steps"
+	tcType := "steps"
 	result, _, callErr := handler(ctx, &mcp.CallToolRequest{}, UpdateTestCaseArgs{
 		ProjectKey:   "test-project",
 		TestCaseID:   7,
 		TestCaseType: &tcType,
-		Steps:        []utils.StepArg{{Instructions: "step one"}},
+		Steps:        &[]utils.StepArg{{Instructions: "step one"}},
 	})
 
 	require.NoError(t, callErr)
@@ -1111,6 +1165,119 @@ func TestUpdateTestCaseTool_StepsReachHTTP(t *testing.T) {
 	require.Len(t, steps, 1)
 }
 
+// TestUpdateTestCaseTool_StepsTypeWithoutStepsUpdatesRequirements verifies that
+// when test-case-type is "steps" but no steps are supplied, the
+// update is accepted and only the provided scenario fields (e.g. requirements)
+// are included in the PATCH payload without a "steps" key.
+func TestUpdateTestCaseTool_StepsTypeWithoutStepsUpdatesRequirements(t *testing.T) {
+	ctx := context.Background()
+	type httpReq struct {
+		method string
+		body   string
+	}
+	reqCh := make(chan httpReq, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rawBody, _ := io.ReadAll(r.Body)
+		reqCh <- httpReq{method: r.Method, body: string(rawBody)}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":374,"name":"TC"}`))
+	}))
+	t.Cleanup(srv.Close)
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolUpdateTestCase()
+
+	tcType := "steps"
+	reqs := []string{"https://www.google.com"}
+	result, _, callErr := handler(ctx, &mcp.CallToolRequest{}, UpdateTestCaseArgs{
+		ProjectKey:   "test-project",
+		TestCaseID:   374,
+		TestCaseType: &tcType,
+		Requirements: &reqs,
+	})
+
+	require.NoError(t, callErr)
+	require.NotNil(t, result)
+	require.False(t, result.IsError)
+
+	captured := <-reqCh
+	require.Equal(t, http.MethodPatch, captured.method)
+
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal([]byte(captured.body), &payload))
+	manual, ok := payload["manualScenario"].(map[string]any)
+	require.True(t, ok, "manualScenario should be present in PATCH payload")
+	require.Equal(t, "STEPS", manual["manualScenarioType"])
+	_, hasSteps := manual["steps"]
+	require.False(t, hasSteps, "steps key must be absent when no steps were provided")
+	requirements, ok := manual["requirements"].([]any)
+	require.True(t, ok, "requirements should be present in the scenario")
+	require.Len(t, requirements, 1)
+	first, ok := requirements[0].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "https://www.google.com", first["value"])
+}
+
+// TestUpdateTestCaseTool_EmptyStepsClearsSteps verifies that passing an
+// explicit empty steps slice (steps: []) on update serialises a "steps" key
+// with an empty array in the PATCH payload, allowing the caller to clear all
+// existing steps rather than leave them unchanged.
+func TestUpdateTestCaseTool_EmptyStepsClearsSteps(t *testing.T) {
+	ctx := context.Background()
+	type httpReq struct {
+		method string
+		body   string
+	}
+	reqCh := make(chan httpReq, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rawBody, _ := io.ReadAll(r.Body)
+		reqCh <- httpReq{method: r.Method, body: string(rawBody)}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":8,"name":"TC"}`))
+	}))
+	t.Cleanup(srv.Close)
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolUpdateTestCase()
+
+	tcType := "steps"
+	emptySteps := []utils.StepArg{}
+	result, _, callErr := handler(ctx, &mcp.CallToolRequest{}, UpdateTestCaseArgs{
+		ProjectKey:   "test-project",
+		TestCaseID:   8,
+		TestCaseType: &tcType,
+		Steps:        &emptySteps,
+	})
+
+	require.NoError(t, callErr)
+	require.NotNil(t, result)
+	require.False(t, result.IsError)
+
+	captured := <-reqCh
+	require.Equal(t, http.MethodPatch, captured.method)
+
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal([]byte(captured.body), &payload))
+	manual, ok := payload["manualScenario"].(map[string]any)
+	require.True(t, ok, "manualScenario should be present in PATCH payload")
+	require.Equal(t, "STEPS", manual["manualScenarioType"])
+	steps, ok := manual["steps"].([]any)
+	require.True(t, ok, "steps key must be present when an explicit empty slice is passed")
+	require.Empty(t, steps, "steps array must be empty to clear existing steps")
+}
+
 // TestUpdateTestCaseTool_InstructionsRejectedForStepsType verifies that
 // instructions/expected-result are rejected when the steps type is selected.
 func TestUpdateTestCaseTool_InstructionsRejectedForStepsType(t *testing.T) {
@@ -1118,18 +1285,18 @@ func TestUpdateTestCaseTool_InstructionsRejectedForStepsType(t *testing.T) {
 	res, requestCount := newTMSResourcesWithCounter(t)
 	_, handler := res.toolUpdateTestCase()
 
-	tcType := "test case with steps"
+	tcType := "steps"
 	instructions := "do thing"
 	_, _, err := handler(ctx, &mcp.CallToolRequest{}, UpdateTestCaseArgs{
 		ProjectKey:   "test-project",
 		TestCaseID:   1,
 		TestCaseType: &tcType,
 		Instructions: &instructions,
-		Steps:        []utils.StepArg{{Instructions: "step one"}},
+		Steps:        &[]utils.StepArg{{Instructions: "step one"}},
 	})
 
 	require.Error(t, err)
-	require.Contains(t, err.Error(), `not valid for "test case with steps"`)
+	require.Contains(t, err.Error(), `not valid for "steps"`)
 	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
 }
 

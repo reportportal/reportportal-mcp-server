@@ -132,10 +132,15 @@ func GenerateRequirementID() string {
 }
 
 // RequirementsSchema builds the JSON schema for the optional "requirements" array field.
-func RequirementsSchema() *jsonschema.Schema {
+// When isUpdate is true the description includes the clear/omit semantics for update operations.
+func RequirementsSchema(isUpdate bool) *jsonschema.Schema {
+	desc := "Optional list of requirement values linked to the test case. A unique id is generated automatically for each entry."
+	if isUpdate {
+		desc += " Pass an empty array ([]) to clear all existing requirements; omit the field to leave them unchanged."
+	}
 	return &jsonschema.Schema{
 		Type:        "array",
-		Description: "Optional list of requirement values linked to the manual scenario. A unique id is generated automatically for each entry. On update, pass an empty array ([]) to clear all existing requirements; omit the field to leave them unchanged.",
+		Description: desc,
 		Items: &jsonschema.Schema{
 			Type:        "string",
 			Description: "Requirement value/description (must contain at least one non-whitespace character)",
@@ -161,11 +166,10 @@ func ToRequirementsRQ(
 }
 
 // Manual scenario type input values exposed to MCP clients. These map onto the
-// API discriminator manualScenarioType: "description" -> TEXT, "test case with
-// steps" -> STEPS.
+// API discriminator manualScenarioType: "text" -> TEXT, "steps" -> STEPS.
 const (
-	TestCaseTypeDescription = "description"
-	TestCaseTypeWithSteps   = "test case with steps"
+	TestCaseTypeDescription = "text"
+	TestCaseTypeWithSteps   = "steps"
 )
 
 // StepArg represents a single manual scenario step from tool input.
@@ -202,24 +206,16 @@ func attributesItemSchema() *jsonschema.Schema {
 	}
 }
 
-// AttributesCreateSchema returns the JSON schema for the "attributes" field on
-// create_test_case. Existing project attributes that match are reused; missing
-// ones are created automatically.
-func AttributesCreateSchema() *jsonschema.Schema {
-	return &jsonschema.Schema{
-		Type:        "array",
-		Description: "Optional list of attributes (key/value pairs) to attach to the test case. Existing project attributes that match both key and value are reused; missing ones are created automatically before being linked to the test case.",
-		Items:       attributesItemSchema(),
+// AttributesSchema returns the JSON schema for the "attributes" field on test case tools.
+// When isUpdate is true the description includes the clear/omit semantics for update operations.
+func AttributesSchema(isUpdate bool) *jsonschema.Schema {
+	desc := "Optional list of attributes (key/value pairs) to attach to the test case. Existing project attributes that match both key and value are reused; missing ones are created automatically before being linked to the test case."
+	if isUpdate {
+		desc += " Pass an empty array ([]) to clear all existing attributes; omit the field to leave them unchanged."
 	}
-}
-
-// AttributesUpdateSchema returns the JSON schema for the "attributes" field on
-// update_test_case. Pass an empty array ([]) to clear all existing attributes;
-// omit the field entirely to leave them unchanged.
-func AttributesUpdateSchema() *jsonschema.Schema {
 	return &jsonschema.Schema{
 		Type:        "array",
-		Description: "Optional list of attributes (key/value pairs) to attach to the test case. Existing project attributes that match both key and value are reused; missing ones are created automatically before being linked to the test case. Pass an empty array ([]) to clear all existing attributes; omit the field to leave them unchanged.",
+		Description: desc,
 		Items:       attributesItemSchema(),
 	}
 }
@@ -228,33 +224,31 @@ func AttributesUpdateSchema() *jsonschema.Schema {
 // create_test_case and update_test_case tools. Requirements is a pointer so a
 // nil value (field omitted) can be distinguished from an explicit empty slice
 // (field provided as []), which clears the existing requirements.
+// IsUpdate relaxes the "steps must not be empty" rule: on an update, omitting
+// steps means "leave the existing steps unchanged" rather than "clear them".
 type ManualScenarioArgs struct {
 	TestCaseType   *string
 	Instructions   *string
 	ExpectedResult *string
 	Preconditions  *string
 	Requirements   *[]string
-	Steps          []StepArg
+	Steps          *[]StepArg
+	IsUpdate       bool
 }
 
-// TestCaseTypeCreateSchema builds the JSON schema for the optional "test-case-type"
-// field on create_test_case, where an omitted type defaults to "description".
-func TestCaseTypeCreateSchema() *jsonschema.Schema {
-	return &jsonschema.Schema{
-		Type:        "string",
-		Description: `Manual scenario type. "description" stores a plain text scenario via instructions/expected-result without test steps; "test case with steps" stores an ordered list of steps. Defaults to "description".`,
-		Enum:        []any{TestCaseTypeDescription, TestCaseTypeWithSteps},
+// TestCaseTypeSchema builds the JSON schema for the optional "test-case-type" field.
+// When isUpdate is true the description reflects update semantics (no default, omit to leave unchanged);
+// otherwise it reflects create semantics (omitted type defaults to "text").
+func TestCaseTypeSchema(isUpdate bool) *jsonschema.Schema {
+	var desc string
+	if isUpdate {
+		desc = `Manual scenario type. "text" stores a plain text scenario via instructions/expected-result without test steps; "steps" stores an ordered list of steps. Required when changing any manual scenario field (instructions, expected-result, preconditions, requirements, steps); omit it to leave the entire scenario unchanged. When set to "steps", steps are optional: omit them to leave existing steps unchanged and only update other scenario fields (e.g. requirements).`
+	} else {
+		desc = `Manual scenario type. "text" stores a plain text scenario via instructions/expected-result without test steps; "steps" stores an ordered list of steps. Defaults to "text".`
 	}
-}
-
-// TestCaseTypeUpdateSchema builds the JSON schema for the optional "test-case-type"
-// field on update_test_case. Unlike create there is no default: the type must be
-// provided whenever any manual scenario field is changed, and omitting it leaves
-// the existing scenario unchanged.
-func TestCaseTypeUpdateSchema() *jsonschema.Schema {
 	return &jsonschema.Schema{
 		Type:        "string",
-		Description: `Manual scenario type. "description" stores a plain text scenario via instructions/expected-result without test steps; "test case with steps" stores an ordered list of steps. Required when changing the manual scenario (instructions, expected-result, preconditions, requirements, steps); omit it to leave the scenario unchanged.`,
+		Description: desc,
 		Enum:        []any{TestCaseTypeDescription, TestCaseTypeWithSteps},
 	}
 }
@@ -263,7 +257,7 @@ func TestCaseTypeUpdateSchema() *jsonschema.Schema {
 func StepsSchema() *jsonschema.Schema {
 	return &jsonschema.Schema{
 		Type:        "array",
-		Description: `Ordered list of manual test steps. Required when test-case-type is "test case with steps"; must be omitted for "description".`,
+		Description: `Ordered list of manual test steps. Required on create when test-case-type is "steps". On update, omit to leave existing steps unchanged; provide to replace them entirely. Must be omitted for "text".`,
 		Items: &jsonschema.Schema{
 			Type: "object",
 			Properties: map[string]*jsonschema.Schema{
@@ -306,8 +300,8 @@ func newPreconditionsRQ(
 }
 
 // BuildManualScenario constructs a test case manual scenario request from tool
-// input. The test case type selects between a TEXT ("description") scenario and a
-// STEPS ("test case with steps") scenario; an empty/nil type defaults to TEXT.
+// input. The test case type selects between a TEXT ("text") scenario and a
+// STEPS ("steps") scenario; an empty/nil type defaults to TEXT.
 func BuildManualScenario(
 	a ManualScenarioArgs,
 ) (openapi.ComEpamReportportalBaseCoreTmsDtoTmsTestCaseRQManualScenario, error) {
@@ -328,14 +322,9 @@ func BuildManualScenario(
 
 	switch tcType {
 	case TestCaseTypeDescription:
-		if len(a.Steps) > 0 {
+		if a.Steps != nil {
 			return zero, fmt.Errorf(
-				`steps are only valid when test-case-type is "test case with steps"`,
-			)
-		}
-		if (a.Instructions != nil) != (a.ExpectedResult != nil) {
-			return zero, fmt.Errorf(
-				"instructions and expected-result must both be provided together to set a TEXT manual scenario",
+				`steps are only valid when test-case-type is "steps"`,
 			)
 		}
 		text := openapi.NewComEpamReportportalBaseCoreTmsDtoTmsTextManualScenarioRQ("TEXT")
@@ -358,21 +347,25 @@ func BuildManualScenario(
 	case TestCaseTypeWithSteps:
 		if a.Instructions != nil || a.ExpectedResult != nil {
 			return zero, fmt.Errorf(
-				`instructions and expected-result are not valid for "test case with steps"; provide them inside each step`,
+				`instructions and expected-result are not valid for "steps"; provide them inside each step`,
 			)
 		}
-		if len(a.Steps) == 0 {
+		if (a.Steps == nil || len(*a.Steps) == 0) && !a.IsUpdate {
 			return zero, fmt.Errorf(
-				`steps must not be empty when test-case-type is "test case with steps"`,
+				`steps must not be empty when test-case-type is "steps"`,
 			)
 		}
-		for i, s := range a.Steps {
-			if strings.TrimSpace(s.Instructions) == "" {
-				return zero, fmt.Errorf("steps[%d] instructions must be non-empty", i)
+		if a.Steps != nil {
+			for i, s := range *a.Steps {
+				if strings.TrimSpace(s.Instructions) == "" {
+					return zero, fmt.Errorf("steps[%d] instructions must be non-empty", i)
+				}
 			}
 		}
 		steps := openapi.NewComEpamReportportalBaseCoreTmsDtoTmsStepsManualScenarioRQ("STEPS")
-		steps.SetSteps(ToStepsRQ(a.Steps))
+		if a.Steps != nil {
+			steps.SetSteps(ToStepsRQ(*a.Steps))
+		}
 		if a.Preconditions != nil {
 			steps.SetPreconditions(newPreconditionsRQ(*a.Preconditions))
 		}

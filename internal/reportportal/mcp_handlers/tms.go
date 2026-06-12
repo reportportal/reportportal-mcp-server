@@ -789,7 +789,7 @@ type CreateTestCaseArgs struct {
 	TestCaseType   *string              `json:"test-case-type,omitempty"`
 	Instructions   *string              `json:"instructions,omitempty"`
 	ExpectedResult *string              `json:"expected-result,omitempty"`
-	Steps          []utils.StepArg      `json:"steps,omitempty"`
+	Steps          *[]utils.StepArg     `json:"steps,omitempty"`
 	Preconditions  *string              `json:"preconditions,omitempty"`
 	Requirements   *[]string            `json:"requirements,omitempty"`
 	Attributes     []utils.AttributeArg `json:"attributes,omitempty"`
@@ -802,7 +802,7 @@ func (tr *TMSResources) toolCreateTestCase() (*mcp.Tool, ToolHandler[CreateTestC
 	}
 	return &mcp.Tool{
 			Name:        "create_test_case",
-			Description: `Create a new test case in the ReportPortal TMS. Use test-case-type to choose the manual scenario: "description" (default) for a plain text scenario via instructions/expected-result, or "test case with steps" for an ordered list of steps. This tool mutates TMS data.`,
+			Description: `Create a new test case in the ReportPortal TMS. Use test-case-type to choose the scenario type: "text" (default) for a plain text scenario via instructions/expected-result, or "steps" for an ordered list of steps. This tool mutates TMS data.`,
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
@@ -832,22 +832,22 @@ func (tr *TMSResources) toolCreateTestCase() (*mcp.Tool, ToolHandler[CreateTestC
 						Description: "Optional ID of the folder to place the test case in",
 						Minimum:     openapi.PtrFloat64(1),
 					},
-					"test-case-type": utils.TestCaseTypeCreateSchema(),
+					"test-case-type": utils.TestCaseTypeSchema(false),
 					"instructions": {
 						Type:        "string",
-						Description: `Optional manual scenario instructions for the "description" type. Must be supplied together with expected-result.`,
+						Description: `Optional instructions for the "text" type.`,
 					},
 					"expected-result": {
 						Type:        "string",
-						Description: `Optional expected result for the "description" type. Must be supplied together with instructions.`,
+						Description: `Optional expected result for the "text" type.`,
 					},
 					"steps": utils.StepsSchema(),
 					"preconditions": {
 						Type:        "string",
-						Description: "Optional preconditions for the manual scenario",
+						Description: "Optional preconditions for the test case",
 					},
-					"requirements": utils.RequirementsSchema(),
-					"attributes":   utils.AttributesCreateSchema(),
+					"requirements": utils.RequirementsSchema(false),
+					"attributes":   utils.AttributesSchema(false),
 				},
 				Required: []string{"name"},
 			},
@@ -1100,7 +1100,7 @@ type UpdateTestCaseArgs struct {
 	TestCaseType   *string               `json:"test-case-type,omitempty"`
 	Instructions   *string               `json:"instructions,omitempty"`
 	ExpectedResult *string               `json:"expected-result,omitempty"`
-	Steps          []utils.StepArg       `json:"steps,omitempty"`
+	Steps          *[]utils.StepArg      `json:"steps,omitempty"`
 	Preconditions  *string               `json:"preconditions,omitempty"`
 	Requirements   *[]string             `json:"requirements,omitempty"`
 	Attributes     *[]utils.AttributeArg `json:"attributes,omitempty"`
@@ -1113,7 +1113,7 @@ func (tr *TMSResources) toolUpdateTestCase() (*mcp.Tool, ToolHandler[UpdateTestC
 	}
 	return &mcp.Tool{
 			Name:        "update_test_case",
-			Description: `Update an existing test case in the ReportPortal TMS. Only provided fields are updated; omitted fields remain unchanged. Provide test-case-type to set/replace the manual scenario: "description" uses instructions/expected-result, "test case with steps" uses the steps array. This tool mutates TMS data.`,
+			Description: `Update an existing test case in the ReportPortal TMS. Only provided fields are updated; omitted fields remain unchanged. Provide test-case-type to change the scenario type: "text" uses instructions/expected-result, "steps" uses the steps array. When test-case-type is "steps", steps may be omitted to leave existing steps unchanged and only update other fields such as requirements or preconditions. This tool mutates TMS data.`,
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
@@ -1148,22 +1148,22 @@ func (tr *TMSResources) toolUpdateTestCase() (*mcp.Tool, ToolHandler[UpdateTestC
 						Description: "ID of the folder to move the test case into",
 						Minimum:     openapi.PtrFloat64(1),
 					},
-					"test-case-type": utils.TestCaseTypeUpdateSchema(),
+					"test-case-type": utils.TestCaseTypeSchema(true),
 					"instructions": {
 						Type:        "string",
-						Description: `Manual scenario instructions for the "description" type. Must be supplied together with expected-result; providing only one of the two is an error.`,
+						Description: `Optional instructions for the "text" type. Can be provided independently of expected-result.`,
 					},
 					"expected-result": {
 						Type:        "string",
-						Description: `Expected result for the "description" type. Must be supplied together with instructions; providing only one of the two is an error.`,
+						Description: `Optional expected result for the "text" type. Can be provided independently of instructions.`,
 					},
 					"steps": utils.StepsSchema(),
 					"preconditions": {
 						Type:        "string",
-						Description: "Preconditions for the manual scenario",
+						Description: "Preconditions for the test case",
 					},
-					"requirements": utils.RequirementsSchema(),
-					"attributes":   utils.AttributesUpdateSchema(),
+					"requirements": utils.RequirementsSchema(true),
+					"attributes":   utils.AttributesSchema(true),
 				},
 				Required: []string{"testCaseId"},
 			},
@@ -1195,7 +1195,7 @@ func (tr *TMSResources) toolUpdateTestCase() (*mcp.Tool, ToolHandler[UpdateTestC
 				}
 				hasScenarioFields := args.Instructions != nil ||
 					args.ExpectedResult != nil || args.Preconditions != nil ||
-					args.Requirements != nil || len(args.Steps) > 0
+					args.Requirements != nil || args.Steps != nil
 				if args.TestCaseType != nil || hasScenarioFields {
 					if args.TestCaseType == nil && hasScenarioFields {
 						return nil, nil, fmt.Errorf(
@@ -1209,6 +1209,7 @@ func (tr *TMSResources) toolUpdateTestCase() (*mcp.Tool, ToolHandler[UpdateTestC
 						Preconditions:  args.Preconditions,
 						Requirements:   args.Requirements,
 						Steps:          args.Steps,
+						IsUpdate:       true,
 					})
 					if scenarioErr != nil {
 						return nil, nil, scenarioErr
