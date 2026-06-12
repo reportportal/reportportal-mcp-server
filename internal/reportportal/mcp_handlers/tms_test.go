@@ -812,6 +812,7 @@ func TestCreateTestCaseTool_PreconditionsAndRequirementsReachHTTP(t *testing.T) 
 	result, _, callErr := handler(ctx, &mcp.CallToolRequest{}, CreateTestCaseArgs{
 		ProjectKey:    "test-project",
 		Name:          "TC",
+		TestFolderID:  1,
 		Preconditions: &preconditions,
 		Requirements:  &[]string{"must do X", "must do Y"},
 	})
@@ -1048,6 +1049,7 @@ func TestCreateTestCaseTool_StepsReachHTTP(t *testing.T) {
 	result, _, callErr := handler(ctx, &mcp.CallToolRequest{}, CreateTestCaseArgs{
 		ProjectKey:   "test-project",
 		Name:         "TC",
+		TestFolderID: 1,
 		TestCaseType: &tcType,
 		Steps: &[]utils.StepArg{
 			{Instructions: "open the page", ExpectedResult: &expected},
@@ -1086,6 +1088,7 @@ func TestCreateTestCaseTool_StepsRequiredForStepsType(t *testing.T) {
 	_, _, err := handler(ctx, &mcp.CallToolRequest{}, CreateTestCaseArgs{
 		ProjectKey:   "test-project",
 		Name:         "TC",
+		TestFolderID: 1,
 		TestCaseType: &tcType,
 	})
 
@@ -1102,9 +1105,10 @@ func TestCreateTestCaseTool_StepsRejectedForDescriptionType(t *testing.T) {
 	_, handler := res.toolCreateTestCase()
 
 	_, _, err := handler(ctx, &mcp.CallToolRequest{}, CreateTestCaseArgs{
-		ProjectKey: "test-project",
-		Name:       "TC",
-		Steps:      &[]utils.StepArg{{Instructions: "do thing"}},
+		ProjectKey:   "test-project",
+		Name:         "TC",
+		TestFolderID: 1,
+		Steps:        &[]utils.StepArg{{Instructions: "do thing"}},
 	})
 
 	require.Error(t, err)
@@ -1440,9 +1444,10 @@ func TestResolveTestCaseAttributes_ConflictOnCreateRetriesLookup(t *testing.T) {
 	_, handler := res.toolCreateTestCase()
 
 	result, _, callErr := handler(ctx, &mcp.CallToolRequest{}, CreateTestCaseArgs{
-		ProjectKey: "test-project",
-		Name:       "TC",
-		Attributes: []utils.AttributeArg{{Key: "env", Value: "staging"}},
+		ProjectKey:   "test-project",
+		Name:         "TC",
+		TestFolderID: 1,
+		Attributes:   []utils.AttributeArg{{Key: "env", Value: "staging"}},
 	})
 
 	require.NoError(t, callErr)

@@ -785,7 +785,7 @@ type CreateTestCaseArgs struct {
 	Name           string               `json:"name"`
 	Description    *string              `json:"description,omitempty"`
 	Priority       *string              `json:"priority,omitempty"`
-	TestFolderID   *int64               `json:"test-folder-id,omitempty"`
+	TestFolderID   int64                `json:"test-folder-id"`
 	TestCaseType   *string              `json:"test-case-type,omitempty"`
 	Instructions   *string              `json:"instructions,omitempty"`
 	ExpectedResult *string              `json:"expected-result,omitempty"`
@@ -829,7 +829,7 @@ func (tr *TMSResources) toolCreateTestCase() (*mcp.Tool, ToolHandler[CreateTestC
 					},
 					"test-folder-id": {
 						Type:        "integer",
-						Description: "Optional ID of the folder to place the test case in",
+						Description: "ID of the folder to place the test case in",
 						Minimum:     openapi.PtrFloat64(1),
 					},
 					"test-case-type": utils.TestCaseTypeSchema(false),
@@ -849,7 +849,7 @@ func (tr *TMSResources) toolCreateTestCase() (*mcp.Tool, ToolHandler[CreateTestC
 					"requirements": utils.RequirementsSchema(false),
 					"attributes":   utils.AttributesSchema(false),
 				},
-				Required: []string{"name"},
+				Required: []string{"name", "test-folder-id"},
 			},
 		},
 		utils.WithAnalytics(
@@ -862,6 +862,9 @@ func (tr *TMSResources) toolCreateTestCase() (*mcp.Tool, ToolHandler[CreateTestC
 				}
 				if strings.TrimSpace(args.Name) == "" {
 					return nil, nil, fmt.Errorf("name must not be empty or whitespace")
+				}
+				if args.TestFolderID < 1 {
+					return nil, nil, fmt.Errorf("test-folder-id out of range: must be >= 1")
 				}
 
 				// The API requires a manual scenario object, so it is always
@@ -887,9 +890,7 @@ func (tr *TMSResources) toolCreateTestCase() (*mcp.Tool, ToolHandler[CreateTestC
 				if args.Priority != nil {
 					rq.SetPriority(*args.Priority)
 				}
-				if args.TestFolderID != nil {
-					rq.SetTestFolderId(*args.TestFolderID)
-				}
+				rq.SetTestFolderId(args.TestFolderID)
 				if len(args.Attributes) > 0 {
 					attrs, attrErr := tr.resolveTestCaseAttributes(ctx, project, args.Attributes)
 					if attrErr != nil {
