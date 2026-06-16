@@ -680,49 +680,54 @@ func (tr *TMSResources) toolDeleteTestFolder() (*mcp.Tool, ToolHandler[DeleteFol
 		)
 }
 
-// resolveTestCaseAttributes ensures that every requested attribute (key/value
-// pair) exists for the project and returns the request models that link them to
-// a test case. For each attribute it first looks the attribute up via
-// GET /v1/project/{projectKey}/tms/attribute (filtered by key and value); if no
-// match exists it creates the attribute via POST to the same endpoint. The
-// resulting list references each attribute by its id and key so it can be
-// attached during test case creation or update.
+// resolveTestCaseAttributes ensures that every requested attribute (tag, identified
+// by key only) exists for the project and returns the request models that link them
+// to a test case. For each attribute it first looks the attribute up via
+// GET /v1/project/{projectKey}/tms/attribute (filtered by key); if no match exists
+// it creates the attribute via POST to the same endpoint. The resulting list
+// references each attribute by its id and key so it can be attached during test
+// case creation or update.
 func (tr *TMSResources) resolveTestCaseAttributes(
 	ctx context.Context,
 	project string,
 	attributes []utils.AttributeArg,
 ) ([]openapi.ComEpamReportportalBaseCoreTmsDtoTmsTestCaseAttributeRQ, error) {
+	// Pre-validate all keys before making any HTTP calls.
+	seen := make(map[string]struct{}, len(attributes))
+	for i, attr := range attributes {
+		key := strings.TrimSpace(attr.Key)
+		if key == "" {
+			return nil, fmt.Errorf("attributes[%d] key must not be empty or whitespace", i)
+		}
+		if _, dup := seen[key]; dup {
+			return nil, fmt.Errorf("attributes[%d] duplicate key %q", i, key)
+		}
+		seen[key] = struct{}{}
+	}
+
 	result := make(
 		[]openapi.ComEpamReportportalBaseCoreTmsDtoTmsTestCaseAttributeRQ,
 		0,
 		len(attributes),
 	)
-	for i, attr := range attributes {
+	for _, attr := range attributes {
 		key := strings.TrimSpace(attr.Key)
-		value := strings.TrimSpace(attr.Value)
-		if key == "" {
-			return nil, fmt.Errorf("attributes[%d] key must not be empty or whitespace", i)
-		}
-		if value == "" {
-			return nil, fmt.Errorf("attributes[%d] value must not be empty or whitespace", i)
-		}
 
-		// 1. Look up an existing attribute matching both key and value.
+		// 1. Look up an existing attribute matching the key.
 		page, response, err := tr.client.TMSAttributeControllerAPI.GetAllAttributes(ctx, project).
 			FilterEqKey(key).
-			FilterEqValue(value).
 			Execute()
 		if err != nil {
 			return nil, fmt.Errorf(
-				"failed to look up attribute %q=%q: %s: %w",
-				key, value, utils.ExtractResponseError(err, response), err,
+				"failed to look up attribute %q: %s: %w",
+				key, utils.ExtractResponseError(err, response), err,
 			)
 		}
 
 		var attributeID int64
 		found := false
 		for _, existing := range page.GetContent() {
-			if existing.GetKey() == key && existing.GetValue() == value {
+			if existing.GetKey() == key {
 				attributeID = existing.GetId()
 				found = true
 				break
@@ -733,7 +738,6 @@ func (tr *TMSResources) resolveTestCaseAttributes(
 		if !found {
 			createRQ := openapi.NewComEpamReportportalBaseCoreTmsDtoTmsAttributeRQ()
 			createRQ.SetKey(key)
-			createRQ.SetValue(value)
 			created, createResp, createErr := tr.client.TMSAttributeControllerAPI.
 				CreateAttribute(ctx, project).
 				ComEpamReportportalBaseCoreTmsDtoTmsAttributeRQ(*createRQ).
@@ -747,11 +751,10 @@ func (tr *TMSResources) resolveTestCaseAttributes(
 					retryPage, _, retryErr := tr.client.TMSAttributeControllerAPI.
 						GetAllAttributes(ctx, project).
 						FilterEqKey(key).
-						FilterEqValue(value).
 						Execute()
 					if retryErr == nil {
 						for _, existing := range retryPage.GetContent() {
-							if existing.GetKey() == key && existing.GetValue() == value {
+							if existing.GetKey() == key {
 								attributeID = existing.GetId()
 								found = true
 								break
@@ -761,8 +764,8 @@ func (tr *TMSResources) resolveTestCaseAttributes(
 				}
 				if !found {
 					return nil, fmt.Errorf(
-						"failed to create attribute %q=%q: %s: %w",
-						key, value, utils.ExtractResponseError(createErr, createResp), createErr,
+						"failed to create attribute %q: %s: %w",
+						key, utils.ExtractResponseError(createErr, createResp), createErr,
 					)
 				}
 			} else {
