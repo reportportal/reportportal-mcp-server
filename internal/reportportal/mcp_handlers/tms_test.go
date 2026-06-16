@@ -1365,11 +1365,34 @@ func TestGetTestCasesByFilterTool_FiltersReachHTTP(t *testing.T) {
 	require.Empty(t, capturedQuery.Get("filter.eq.name"), "filter.eq.name should not be set")
 }
 
+// TestCreateTestCaseTool_DuplicateAttributeKeyRejected verifies that two attribute
+// entries whose keys are identical after whitespace trimming are rejected before
+// any HTTP call is made.
+func TestCreateTestCaseTool_DuplicateAttributeKeyRejected(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolCreateTestCase()
+
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, CreateTestCaseArgs{
+		ProjectKey:   "test-project",
+		Name:         "TC",
+		TestFolderID: 1,
+		Attributes: []utils.AttributeArg{
+			{Key: "env"},
+			{Key: " env "},
+		},
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "duplicate key")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
 // TestResolveTestCaseAttributes_ConflictOnCreateRetriesLookup verifies the TOCTOU
 // race window where two concurrent callers both issue a GET (miss) then a POST for
-// the same attribute. The losing caller receives 409 Conflict on POST. The
-// implementation must then retry the GET, obtain the id created by the winner, and
-// succeed rather than surfacing a spurious duplicate-attribute error.
+// the same attribute (tag key). The losing caller receives 409 Conflict on POST.
+// The implementation must then retry the GET, obtain the id created by the winner,
+// and succeed rather than surfacing a spurious duplicate-attribute error.
 func TestResolveTestCaseAttributes_ConflictOnCreateRetriesLookup(t *testing.T) {
 	ctx := context.Background()
 
@@ -1417,7 +1440,7 @@ func TestResolveTestCaseAttributes_ConflictOnCreateRetriesLookup(t *testing.T) {
 		ProjectKey:   "test-project",
 		Name:         "TC",
 		TestFolderID: 1,
-		Attributes:   []utils.AttributeArg{{Key: "env", Value: "staging"}},
+		Attributes:   []utils.AttributeArg{{Key: "env"}},
 	})
 
 	require.NoError(t, callErr)

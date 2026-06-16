@@ -178,10 +178,10 @@ type StepArg struct {
 	ExpectedResult *string `json:"expected-result,omitempty"`
 }
 
-// AttributeArg represents a single test case attribute (key/value pair) from tool input.
+// AttributeArg represents a single test case attribute (tag) from tool input.
+// Only the key is required; value is not used for the TMS test case tag flow.
 type AttributeArg struct {
-	Key   string `json:"key"`
-	Value string `json:"value"`
+	Key string `json:"key"`
 }
 
 // attributesItemSchema returns the shared object schema for a single attribute entry.
@@ -191,25 +191,20 @@ func attributesItemSchema() *jsonschema.Schema {
 		Properties: map[string]*jsonschema.Schema{
 			"key": {
 				Type:        "string",
-				Description: "Attribute key (must contain at least one non-whitespace character)",
-				MinLength:   openapi.PtrInt(1),
-				Pattern:     `\S`,
-			},
-			"value": {
-				Type:        "string",
-				Description: "Attribute value (must contain at least one non-whitespace character)",
+				Description: "Attribute key (tag name; must contain at least one non-whitespace character)",
 				MinLength:   openapi.PtrInt(1),
 				Pattern:     `\S`,
 			},
 		},
-		Required: []string{"key", "value"},
+		Required:             []string{"key"},
+		AdditionalProperties: &jsonschema.Schema{Not: &jsonschema.Schema{}},
 	}
 }
 
 // AttributesSchema returns the JSON schema for the "attributes" field on test case tools.
 // When isUpdate is true the description includes the clear/omit semantics for update operations.
 func AttributesSchema(isUpdate bool) *jsonschema.Schema {
-	desc := "Optional list of attributes (key/value pairs) to attach to the test case. Existing project attributes that match both key and value are reused; missing ones are created automatically before being linked to the test case."
+	desc := "Optional list of attributes (tags) to attach to the test case. Existing project attributes that match key are reused; missing ones are created automatically before being linked to the test case."
 	if isUpdate {
 		desc += " Pass an empty array ([]) to clear all existing attributes; omit the field to leave them unchanged."
 	}
@@ -273,7 +268,8 @@ func StepsSchema() *jsonschema.Schema {
 					Description: "Optional expected result of the step",
 				},
 			},
-			Required: []string{"instructions"},
+			Required:             []string{"instructions"},
+			AdditionalProperties: &jsonschema.Schema{Not: &jsonschema.Schema{}},
 		},
 	}
 }
