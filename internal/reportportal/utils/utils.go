@@ -147,6 +147,12 @@ func parseTimestampToEpoch(timestampStr string) (int64, error) {
 	return 0, fmt.Errorf("unable to parse timestamp: %s", timestampStr)
 }
 
+// ParseTimestampMillis parses a timestamp string (RFC3339 format or Unix epoch seconds/milliseconds)
+// and returns the time as Unix milliseconds. Accepts the same formats as other timestamp filters.
+func ParseTimestampMillis(timestampStr string) (int64, error) {
+	return parseTimestampToEpoch(timestampStr)
+}
+
 // processStartTimeFilter processes start time interval filter and returns the formatted filter string
 func ProcessStartTimeFilter(filterStartTimeFrom, filterStartTimeTo string) (string, error) {
 	// Process start time interval filter

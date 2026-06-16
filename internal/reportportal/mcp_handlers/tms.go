@@ -65,6 +65,8 @@ func RegisterTMSTools(
 	registerTool(s, tms.toolGetTestCasesForTestPlan)
 	registerTool(s, tms.toolUpdateTestCase)
 	registerTool(s, tms.toolDeleteTestCase)
+
+	registerTool(s, tms.toolGetManualLaunches)
 }
 
 // GetMilestonesByFilterArgs represents the arguments for the get_milestones_by_filter tool.
@@ -1303,6 +1305,190 @@ func (tr *TMSResources) toolDeleteTestCase() (*mcp.Tool, ToolHandler[DeleteTestC
 						},
 					},
 				}, nil, nil
+			},
+		)
+}
+
+// GetManualLaunchesArgs represents the arguments for the get_manual_launches tool.
+type GetManualLaunchesArgs struct {
+	ProjectKey                  string   `json:"projectKey"`
+	Limit                       uint     `json:"limit"`
+	Offset                      uint     `json:"offset"`
+	FilterCntName               string   `json:"filter-cnt-name,omitempty"`
+	FilterInItemStatus          []string `json:"filter-in-itemStatus,omitempty"`
+	FilterEqCompletion          string   `json:"filter-eq-completion,omitempty"`
+	FilterGtStartTime           string   `json:"filter-gt-startTime,omitempty"`
+	FilterLtEndTime             string   `json:"filter-lt-endTime,omitempty"`
+	FilterEqTestPlanID          *int64   `json:"filter-eq-testPlanId,omitempty"`
+	FilterHasCompositeAttribute string   `json:"filter-has-compositeAttribute,omitempty"`
+}
+
+func (tr *TMSResources) toolGetManualLaunches() (*mcp.Tool, ToolHandler[GetManualLaunchesArgs, any]) {
+	pkSchema, err := utils.ProjectKeySchema(tr.defaultProjectKey)
+	if err != nil {
+		slog.Error("failed to build project key schema", "error", err)
+	}
+	return &mcp.Tool{
+			Name:        "get_manual_launches",
+			Description: "Get manual launches from ReportPortal TMS by filter. All filters and pagination parameters are optional.",
+			InputSchema: &jsonschema.Schema{
+				Type: "object",
+				Properties: map[string]*jsonschema.Schema{
+					utils.ProjectKeyField: pkSchema,
+					"limit": {
+						Type:        "integer",
+						Description: "Maximum number of results to return",
+						Minimum:     openapi.PtrFloat64(1),
+					},
+					"offset": {
+						Type:        "integer",
+						Description: "Number of results to skip (for pagination)",
+						Minimum:     openapi.PtrFloat64(0),
+					},
+					"filter-cnt-name": {
+						Type:        "string",
+						Description: "Filter manual launches by name substring",
+					},
+					"filter-in-itemStatus": {
+						Type:        "array",
+						Description: "Filter by one or more item execution statuses",
+						Items: &jsonschema.Schema{
+							Type: "string",
+							Enum: []any{"PASSED", "FAILED", "SKIPPED", "IN_PROGRESS"},
+						},
+					},
+					"filter-eq-completion": {
+						Type:        "string",
+						Description: "Filter by completion status; omit to return all results",
+						Enum:        []any{"has_not_executed", "done"},
+					},
+					"filter-gt-startTime": {
+						Type:        "string",
+						Description: "Return launches with start time after this timestamp (GMT timezone(UTC+00:00), RFC3339 format or Unix epoch)",
+					},
+					"filter-lt-endTime": {
+						Type:        "string",
+						Description: "Return launches with end time before this timestamp (GMT timezone(UTC+00:00), RFC3339 format or Unix epoch)",
+					},
+					"filter-eq-testPlanId": {
+						Type:        "integer",
+						Description: "Filter launches by test plan ID",
+						Minimum:     openapi.PtrFloat64(1),
+					},
+					"filter-has-compositeAttribute": {
+						Type:        "string",
+						Description: "Filter launches that have this combination of attributes (format: key1:value1,key2:value2)",
+					},
+				},
+				Required: nil,
+			},
+		},
+		utils.WithAnalytics(
+			tr.analytics,
+			"get_manual_launches",
+			func(ctx context.Context, req *mcp.CallToolRequest, args GetManualLaunchesArgs) (*mcp.CallToolResult, any, error) {
+				project, err := utils.ExtractProject(ctx, args.ProjectKey)
+				if err != nil {
+					return nil, nil, fmt.Errorf("failed to extract project: %w", err)
+				}
+
+				if args.FilterEqTestPlanID != nil && *args.FilterEqTestPlanID < 1 {
+					return nil, nil, fmt.Errorf("filter-eq-testPlanId out of range: must be >= 1")
+				}
+
+				cfg := tr.client.GetConfig()
+				manualLaunchURL := fmt.Sprintf(
+					"%s://%s/api/v1/project/%s/launch/manual",
+					cfg.Scheme, cfg.Host, url.PathEscape(project),
+				)
+
+				httpReq, err := http.NewRequestWithContext(
+					ctx,
+					http.MethodGet,
+					manualLaunchURL,
+					nil,
+				)
+				if err != nil {
+					return nil, nil, fmt.Errorf("failed to build manual launches request: %w", err)
+				}
+
+				for k, v := range cfg.DefaultHeader {
+					httpReq.Header.Set(k, v)
+				}
+				httpReq.Header.Set("Accept", "application/json")
+
+				query := httpReq.URL.Query()
+				if args.Limit > 0 {
+					query.Set("limit", strconv.FormatUint(uint64(args.Limit), 10))
+				}
+				if args.Offset > 0 {
+					query.Set("offset", strconv.FormatUint(uint64(args.Offset), 10))
+				}
+				if args.FilterCntName != "" {
+					query.Set("filter.cnt.name", args.FilterCntName)
+				}
+				if len(args.FilterInItemStatus) > 0 {
+					query.Set("filter.in.itemStatus", strings.Join(args.FilterInItemStatus, ","))
+				}
+				if args.FilterEqCompletion != "" {
+					query.Set("filter.eq.completion", args.FilterEqCompletion)
+				}
+				if args.FilterGtStartTime != "" {
+					epoch, parseErr := utils.ParseTimestampMillis(args.FilterGtStartTime)
+					if parseErr != nil {
+						return nil, nil, fmt.Errorf("invalid filter-gt-startTime: %w", parseErr)
+					}
+					query.Set("filter.gt.startTime", strconv.FormatInt(epoch, 10))
+				}
+				if args.FilterLtEndTime != "" {
+					epoch, parseErr := utils.ParseTimestampMillis(args.FilterLtEndTime)
+					if parseErr != nil {
+						return nil, nil, fmt.Errorf("invalid filter-lt-endTime: %w", parseErr)
+					}
+					query.Set("filter.lt.endTime", strconv.FormatInt(epoch, 10))
+				}
+				if args.FilterEqTestPlanID != nil {
+					query.Set(
+						"filter.eq.testPlanId",
+						strconv.FormatInt(*args.FilterEqTestPlanID, 10),
+					)
+				}
+				if args.FilterHasCompositeAttribute != "" {
+					query.Set("filter.has.compositeAttribute", args.FilterHasCompositeAttribute)
+				}
+				httpReq.URL.RawQuery = query.Encode()
+
+				if cfg.Middleware != nil {
+					cfg.Middleware(httpReq)
+				}
+
+				httpClient := cfg.HTTPClient
+				if httpClient == nil {
+					httpClient = &http.Client{Timeout: importHTTPClientTimeout}
+				}
+
+				resp, err := httpClient.Do(httpReq)
+				if err != nil {
+					return nil, nil, fmt.Errorf("manual launches request failed: %w", err)
+				}
+
+				if resp.StatusCode >= 300 {
+					defer resp.Body.Close() //nolint:errcheck
+					respBody, readErr := io.ReadAll(resp.Body)
+					if readErr != nil {
+						return nil, nil, fmt.Errorf(
+							"manual launches request failed (HTTP %d)",
+							resp.StatusCode,
+						)
+					}
+					return nil, nil, fmt.Errorf(
+						"manual launches request failed (HTTP %d): %s",
+						resp.StatusCode,
+						string(respBody),
+					)
+				}
+
+				return utils.ReadResponseBody(resp)
 			},
 		)
 }
