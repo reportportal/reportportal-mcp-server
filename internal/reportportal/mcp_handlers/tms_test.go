@@ -1365,11 +1365,34 @@ func TestGetTestCasesByFilterTool_FiltersReachHTTP(t *testing.T) {
 	require.Empty(t, capturedQuery.Get("filter.eq.name"), "filter.eq.name should not be set")
 }
 
+// TestCreateTestCaseTool_DuplicateAttributeKeyRejected verifies that two attribute
+// entries whose keys are identical after whitespace trimming are rejected before
+// any HTTP call is made.
+func TestCreateTestCaseTool_DuplicateAttributeKeyRejected(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolCreateTestCase()
+
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, CreateTestCaseArgs{
+		ProjectKey:   "test-project",
+		Name:         "TC",
+		TestFolderID: 1,
+		Attributes: []utils.AttributeArg{
+			{Key: "env"},
+			{Key: " env "},
+		},
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "duplicate key")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
 // TestResolveTestCaseAttributes_ConflictOnCreateRetriesLookup verifies the TOCTOU
 // race window where two concurrent callers both issue a GET (miss) then a POST for
-// the same attribute. The losing caller receives 409 Conflict on POST. The
-// implementation must then retry the GET, obtain the id created by the winner, and
-// succeed rather than surfacing a spurious duplicate-attribute error.
+// the same attribute (tag key). The losing caller receives 409 Conflict on POST.
+// The implementation must then retry the GET, obtain the id created by the winner,
+// and succeed rather than surfacing a spurious duplicate-attribute error.
 func TestResolveTestCaseAttributes_ConflictOnCreateRetriesLookup(t *testing.T) {
 	ctx := context.Background()
 
@@ -1417,7 +1440,7 @@ func TestResolveTestCaseAttributes_ConflictOnCreateRetriesLookup(t *testing.T) {
 		ProjectKey:   "test-project",
 		Name:         "TC",
 		TestFolderID: 1,
-		Attributes:   []utils.AttributeArg{{Key: "env", Value: "staging"}},
+		Attributes:   []utils.AttributeArg{{Key: "env"}},
 	})
 
 	require.NoError(t, callErr)
@@ -1544,4 +1567,237 @@ func TestGetTestFoldersByFilterTool_LargeParentIDReachesHTTP(t *testing.T) {
 	require.NoError(t, callErr, "large int64 parent ID should be accepted and forwarded")
 	require.NotNil(t, capturedQuery, "HTTP request should reach the server")
 	require.Equal(t, strconv.FormatInt(largeParentID, 10), capturedQuery.Get("filter.eq.parentId"))
+}
+
+// TestGetManualLaunchesTool_Schema verifies that all expected properties are present in the schema.
+func TestGetManualLaunchesTool_Schema(t *testing.T) {
+	tool, _ := newTMSResources(t).toolGetManualLaunches()
+
+	schema, ok := tool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok, "InputSchema should be a *jsonschema.Schema")
+
+	expectedProps := []string{
+		"projectKey",
+		"limit",
+		"offset",
+		"filter-cnt-name",
+		"filter-in-itemStatus",
+		"filter-eq-completion",
+		"filter-gt-startTime",
+		"filter-lt-endTime",
+		"filter-eq-testPlanId",
+		"filter-has-compositeAttribute",
+	}
+	for _, prop := range expectedProps {
+		_, exists := schema.Properties[prop]
+		require.True(t, exists, "property %q should exist in schema", prop)
+	}
+	require.Nil(t, schema.Required, "no properties should be required")
+}
+
+// TestGetManualLaunchesTool_ItemStatusEnum verifies the filter-in-itemStatus array schema.
+func TestGetManualLaunchesTool_ItemStatusEnum(t *testing.T) {
+	tool, _ := newTMSResources(t).toolGetManualLaunches()
+
+	schema, ok := tool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok)
+
+	prop, ok := schema.Properties["filter-in-itemStatus"]
+	require.True(t, ok, "filter-in-itemStatus should exist")
+	require.Equal(t, "array", prop.Type)
+	require.NotNil(t, prop.Items, "filter-in-itemStatus must have items sub-schema")
+	require.Equal(t, "string", prop.Items.Type)
+	require.ElementsMatch(t,
+		[]any{"PASSED", "FAILED", "SKIPPED", "IN_PROGRESS"},
+		prop.Items.Enum,
+	)
+}
+
+// TestGetManualLaunchesTool_CompletionEnum verifies the filter-eq-completion enum values.
+func TestGetManualLaunchesTool_CompletionEnum(t *testing.T) {
+	tool, _ := newTMSResources(t).toolGetManualLaunches()
+
+	schema, ok := tool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok)
+
+	prop, ok := schema.Properties["filter-eq-completion"]
+	require.True(t, ok, "filter-eq-completion should exist")
+	require.Equal(t, "string", prop.Type)
+	require.ElementsMatch(t,
+		[]any{"has_not_executed", "done"},
+		prop.Enum,
+	)
+}
+
+// TestGetManualLaunchesTool_FiltersReachHTTP verifies that all supported filter params
+// and pagination are forwarded correctly as HTTP query parameters.
+func TestGetManualLaunchesTool_FiltersReachHTTP(t *testing.T) {
+	ctx := context.Background()
+
+	var capturedQuery url.Values
+	var capturedPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedQuery = r.URL.Query()
+		capturedPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"content":[],"page":{"totalElements":0}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolGetManualLaunches()
+
+	testPlanID := int64(42)
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, GetManualLaunchesArgs{
+		ProjectKey:                  "my-project",
+		Limit:                       25,
+		Offset:                      50,
+		FilterCntName:               "smoke",
+		FilterInItemStatus:          []string{"PASSED", "FAILED"},
+		FilterEqCompletion:          "done",
+		FilterGtStartTime:           "2024-01-01T00:00:00Z",
+		FilterLtEndTime:             "2024-12-31T23:59:59Z",
+		FilterEqTestPlanID:          &testPlanID,
+		FilterHasCompositeAttribute: "env:prod,team:backend",
+	})
+
+	require.NoError(t, callErr)
+	require.NotNil(t, capturedQuery, "HTTP request should reach the server")
+	require.Contains(t, capturedPath, "/launch/manual")
+	require.Equal(t, "25", capturedQuery.Get("limit"))
+	require.Equal(t, "50", capturedQuery.Get("offset"))
+	require.Equal(t, "smoke", capturedQuery.Get("filter.cnt.name"))
+	require.Equal(t, "PASSED,FAILED", capturedQuery.Get("filter.in.itemStatus"))
+	require.Equal(t, "done", capturedQuery.Get("filter.eq.completion"))
+	require.NotEmpty(
+		t,
+		capturedQuery.Get("filter.gt.startTime"),
+		"filter.gt.startTime should be forwarded",
+	)
+	require.NotEmpty(
+		t,
+		capturedQuery.Get("filter.lt.endTime"),
+		"filter.lt.endTime should be forwarded",
+	)
+	require.Equal(t, "42", capturedQuery.Get("filter.eq.testPlanId"))
+	require.Equal(t, "env:prod,team:backend", capturedQuery.Get("filter.has.compositeAttribute"))
+}
+
+// TestGetManualLaunchesTool_ZeroTestPlanIDRejected verifies that a filter-eq-testPlanId
+// of 0 is rejected before any HTTP call is made.
+func TestGetManualLaunchesTool_ZeroTestPlanIDRejected(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolGetManualLaunches()
+
+	zero := int64(0)
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, GetManualLaunchesArgs{
+		ProjectKey:         "test-project",
+		FilterEqTestPlanID: &zero,
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "filter-eq-testPlanId out of range")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestGetManualLaunchesTool_TimestampConvertedToEpoch verifies that RFC3339 timestamps
+// are converted to epoch milliseconds before forwarding to the API.
+func TestGetManualLaunchesTool_TimestampConvertedToEpoch(t *testing.T) {
+	ctx := context.Background()
+
+	var capturedQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedQuery = r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"content":[]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolGetManualLaunches()
+
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, GetManualLaunchesArgs{
+		ProjectKey:        "test-project",
+		FilterGtStartTime: "2024-06-01T00:00:00Z",
+		FilterLtEndTime:   "2024-06-30T23:59:59Z",
+	})
+
+	require.NoError(t, callErr)
+	require.NotNil(t, capturedQuery)
+
+	startMs, parseErr := strconv.ParseInt(capturedQuery.Get("filter.gt.startTime"), 10, 64)
+	require.NoError(t, parseErr, "filter.gt.startTime should be a valid integer (epoch ms)")
+	require.Greater(t, startMs, int64(0))
+
+	endMs, parseErr := strconv.ParseInt(capturedQuery.Get("filter.lt.endTime"), 10, 64)
+	require.NoError(t, parseErr, "filter.lt.endTime should be a valid integer (epoch ms)")
+	require.Greater(t, endMs, startMs, "end time should be after start time")
+}
+
+// TestGetManualLaunchesTool_InvalidTimestampRejected verifies that an unparseable
+// timestamp string returns an error before any HTTP call.
+func TestGetManualLaunchesTool_InvalidTimestampRejected(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolGetManualLaunches()
+
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, GetManualLaunchesArgs{
+		ProjectKey:        "test-project",
+		FilterGtStartTime: "not-a-timestamp",
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid filter-gt-startTime")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestGetManualLaunchesTool_NoFiltersReachesAPI verifies that calling with only
+// a project key (no filters, no pagination) results in a valid HTTP request.
+func TestGetManualLaunchesTool_NoFiltersReachesAPI(t *testing.T) {
+	ctx := context.Background()
+
+	var capturedQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedQuery = r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"content":[],"page":{"totalElements":0}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolGetManualLaunches()
+
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, GetManualLaunchesArgs{
+		ProjectKey: "test-project",
+	})
+
+	require.NoError(t, callErr)
+	require.NotNil(t, capturedQuery, "HTTP request should reach the server")
+	require.Empty(t, capturedQuery.Get("filter.cnt.name"))
+	require.Empty(t, capturedQuery.Get("filter.in.itemStatus"))
+	require.Empty(t, capturedQuery.Get("filter.eq.completion"))
+	require.Empty(t, capturedQuery.Get("limit"))
+	require.Empty(t, capturedQuery.Get("offset"))
 }

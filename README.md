@@ -418,6 +418,7 @@ Available from MCP server version 2.x (requires ReportPortal 26.1+).
 - Create, update, and delete manual test cases (`TEXT` scenario type with instructions and expected results)
 - Create milestones and test plans, then assign test cases to plans
 - Retrieve test cases linked to a specific test plan
+- List manual launches by filter (name, item status, completion state, time range, test plan, attributes) with pagination
 
 > **Note:** TMS write tools (`create_*`, `update_*`, `delete_*`, `add_test_cases_to_test_plan`) mutate data in ReportPortal. Use them with care in production projects.
 
@@ -459,12 +460,13 @@ Available from MCP server version 2.x. Requires ReportPortal 26.1+ with TMS enab
 | Get Test Cases by Filter | Lists TMS test cases for a project. All filters are optional; without filters returns the first page. To detect truncation compare `page.totalElements` with `len(content)` and narrow results with `filter-eq-testFolderId`, `filter-cnt-name`, `filter-eq-id`, `filter-has-attributeKey`, or `filter-in-priority`. | `filter-eq-id` (optional, integer ≥ 1), `filter-eq-testFolderId` (optional, integer ≥ 1), `filter-cnt-name` (optional), `filter-has-attributeKey` (optional), `filter-in-priority` (optional, enum array: `BLOCKER` \| `CRITICAL` \| `HIGH` \| `LOW` \| `MEDIUM` \| `UNSPECIFIED`) |
 | Create Folder | Creates a new test folder (or subfolder) in the TMS. **Mutates TMS data.** | `name` (required), `description` (optional), `parent-test-folder-id` (optional, integer ≥ 1) |
 | Delete Folder | Deletes a test folder by its ID from the TMS. **Mutates TMS data. Irreversible.** | `folderId` (required, integer ≥ 1) |
-| Create Test Case | Creates a new test case. Use `test-case-type` to choose the manual scenario. **Mutates TMS data.** | `name` (required), `test-folder-id` (required, integer ≥ 1 — ID of the folder to place the test case in), `description` (optional), `priority` (optional, enum: `LOW` \| `MEDIUM` \| `HIGH` \| `CRITICAL` \| `BLOCKER` \| `UNSPECIFIED`), `test-case-type` (optional, enum: `text` (default) \| `steps`), `instructions` (optional, for `text` type), `expected-result` (optional, for `text` type), `steps` (optional, array of `{ instructions, expected-result }`, for `steps` type), `preconditions` (optional), `requirements` (optional, array of value strings; a unique id is generated automatically per entry) |
-| Update Test Case | Updates an existing test case; only provided fields are changed. **Mutates TMS data.** | `testCaseId` (required, integer ≥ 1), `name` (optional), `description` (optional), `priority` (optional, enum: `LOW` \| `MEDIUM` \| `HIGH` \| `CRITICAL` \| `BLOCKER` \| `UNSPECIFIED`), `test-folder-id` (optional, integer ≥ 1), `test-case-type` (optional, enum: `description` \| `test case with steps`; required if any of `instructions`, `expected-result`, `preconditions`, `requirements`, or `steps` is provided), `instructions` (optional, for `description` type), `expected-result` (optional, for `description` type), `steps` (optional, array of `{ instructions, expected-result }`, for `test case with steps` type), `preconditions` (optional), `requirements` (optional, array of value strings; a unique id is generated automatically per entry) |
+| Create Test Case | Creates a new test case. Use `test-case-type` to choose the manual scenario. **Mutates TMS data.** | `name` (required), `test-folder-id` (required, integer ≥ 1 — ID of the folder to place the test case in), `description` (optional), `priority` (optional, enum: `LOW` \| `MEDIUM` \| `HIGH` \| `CRITICAL` \| `BLOCKER` \| `UNSPECIFIED`), `test-case-type` (optional, enum: `text` (default) \| `steps`), `instructions` (optional, for `text` type), `expected-result` (optional, for `text` type), `steps` (optional, array of `{ instructions, expected-result }`, for `steps` type), `preconditions` (optional), `requirements` (optional, array of value strings; a unique id is generated automatically per entry), `attributes` (optional, array of `{ key }` objects — tags to attach; existing project attributes matching the key are reused, missing ones are created automatically) |
+| Update Test Case | Updates an existing test case; only provided fields are changed. **Mutates TMS data.** | `testCaseId` (required, integer ≥ 1), `name` (optional), `description` (optional), `priority` (optional, enum: `LOW` \| `MEDIUM` \| `HIGH` \| `CRITICAL` \| `BLOCKER` \| `UNSPECIFIED`), `test-folder-id` (optional, integer ≥ 1), `test-case-type` (optional, enum: `text` \| `steps`; required if any of `instructions`, `expected-result`, `preconditions`, `requirements`, or `steps` is provided), `instructions` (optional, for `text` type), `expected-result` (optional, for `text` type), `steps` (optional, array of `{ instructions, expected-result }`, for `steps` type), `preconditions` (optional), `requirements` (optional, array of value strings; a unique id is generated automatically per entry), `attributes` (optional, array of `{ key }` objects — tags to attach; pass `[]` to clear all existing tags; omit to leave unchanged) |
 | Delete Test Case | Deletes a test case by its ID from the TMS. **Mutates TMS data. Irreversible.** | `testCaseId` (required, integer ≥ 1) |
 | Create Milestone | Creates a new milestone in the TMS. **Mutates TMS data.** Dates must be RFC3339 (e.g. `2026-01-01T00:00:00Z`); `end-date` must not precede `start-date`. | `name` (required), `type` (required, enum: `SPRINT` \| `RELEASE` \| `OTHER`), `start-date` (required, RFC3339), `end-date` (required, RFC3339), `status` (optional, enum: `ACTIVE` \| `CLOSED`) |
 | Create Test Plan | Creates a new test plan linked to an existing milestone. **Mutates TMS data.** | `name` (required), `milestone-id` (required, integer ≥ 1), `description` (optional) |
 | Add Test Cases to Test Plan | Adds one or more test cases to an existing TMS test plan. **Mutates TMS data.** | `test-plan-id` (required, integer ≥ 1), `test-case-ids` (required, non-empty array of integers) |
+| Get Manual Launches | Lists manual launches for a project from the TMS, filtered by name, execution status, completion state, time range, test plan, or attributes. Supports limit/offset pagination. | `filter-cnt-name` (optional), `filter-in-itemStatus` (optional, array: `PASSED` \| `FAILED` \| `SKIPPED` \| `IN_PROGRESS`), `filter-eq-completion` (optional, enum: `has_not_executed` \| `done`; omit for all), `filter-gt-startTime` (optional, RFC3339 or Unix epoch), `filter-lt-endTime` (optional, RFC3339 or Unix epoch), `filter-eq-testPlanId` (optional, integer ≥ 1), `filter-has-compositeAttribute` (optional, format: `key1:value1,key2:value2`), `limit` (optional, integer ≥ 1), `offset` (optional, integer ≥ 0) |
 
 ### Available Prompts
 
@@ -835,7 +837,7 @@ Ask your AI assistant:
 "What ReportPortal tools are available?"
 ```
 
-Expected response: A list of 31 tools including launches, test items, analysis tools, TMS tools, etc.
+Expected response: A list of 32 tools including launches, test items, analysis tools, TMS tools, etc.
 
 **Step 2: Test Basic Query**
 
@@ -1035,3 +1037,5 @@ If you're still experiencing issues:
 ## License
 
 This project is licensed under the [Apache 2.0 License](LICENSE).
+
+
