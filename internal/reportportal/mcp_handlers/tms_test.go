@@ -1228,32 +1228,13 @@ func TestUpdateTestCaseTool_StepsTypeWithoutStepsUpdatesRequirements(t *testing.
 	require.Equal(t, "https://www.google.com", first["value"])
 }
 
-// TestUpdateTestCaseTool_EmptyStepsClearsSteps verifies that passing an
-// explicit empty steps slice (steps: []) on update serialises a "steps" key
-// with an empty array in the PATCH payload, allowing the caller to clear all
-// existing steps rather than leave them unchanged.
-func TestUpdateTestCaseTool_EmptyStepsClearsSteps(t *testing.T) {
+// TestUpdateTestCaseTool_EmptyStepsRejected verifies that passing an explicit
+// empty steps slice (steps: []) on update is rejected with a validation error.
+// Steps must contain at least one entry whether on create or update; omit the
+// field entirely to leave existing steps unchanged.
+func TestUpdateTestCaseTool_EmptyStepsRejected(t *testing.T) {
 	ctx := context.Background()
-	type httpReq struct {
-		method string
-		body   string
-	}
-	reqCh := make(chan httpReq, 1)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		rawBody, _ := io.ReadAll(r.Body)
-		reqCh <- httpReq{method: r.Method, body: string(rawBody)}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"id":8,"name":"TC"}`))
-	}))
-	t.Cleanup(srv.Close)
-	serverURL, err := url.Parse(srv.URL)
-	require.NoError(t, err)
-	res := NewTMSResources(
-		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
-		nil,
-		"",
-	)
+	res, requestCount := newTMSResourcesWithCounter(t)
 	_, handler := res.toolUpdateTestCase()
 
 	tcType := "steps"
@@ -1265,21 +1246,10 @@ func TestUpdateTestCaseTool_EmptyStepsClearsSteps(t *testing.T) {
 		Steps:        &emptySteps,
 	})
 
-	require.NoError(t, callErr)
-	require.NotNil(t, result)
-	require.False(t, result.IsError)
-
-	captured := <-reqCh
-	require.Equal(t, http.MethodPatch, captured.method)
-
-	var payload map[string]any
-	require.NoError(t, json.Unmarshal([]byte(captured.body), &payload))
-	manual, ok := payload["manualScenario"].(map[string]any)
-	require.True(t, ok, "manualScenario should be present in PATCH payload")
-	require.Equal(t, "STEPS", manual["manualScenarioType"])
-	steps, ok := manual["steps"].([]any)
-	require.True(t, ok, "steps key must be present when an explicit empty slice is passed")
-	require.Empty(t, steps, "steps array must be empty to clear existing steps")
+	require.Error(t, callErr)
+	require.Nil(t, result)
+	require.Contains(t, callErr.Error(), "steps must not be empty")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
 }
 
 // TestUpdateTestCaseTool_InstructionsRejectedForStepsType verifies that

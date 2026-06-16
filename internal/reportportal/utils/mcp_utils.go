@@ -224,8 +224,9 @@ func AttributesSchema(isUpdate bool) *jsonschema.Schema {
 // create_test_case and update_test_case tools. Requirements is a pointer so a
 // nil value (field omitted) can be distinguished from an explicit empty slice
 // (field provided as []), which clears the existing requirements.
-// IsUpdate relaxes the "steps must not be empty" rule: on an update, omitting
-// steps means "leave the existing steps unchanged" rather than "clear them".
+// IsUpdate changes the steps validation rule: on a create, Steps must be
+// non-nil and non-empty; on an update, Steps may be nil (leave existing steps
+// unchanged), but if provided must still be non-empty.
 type ManualScenarioArgs struct {
 	TestCaseType   *string
 	Instructions   *string
@@ -257,7 +258,7 @@ func TestCaseTypeSchema(isUpdate bool) *jsonschema.Schema {
 func StepsSchema() *jsonschema.Schema {
 	return &jsonschema.Schema{
 		Type:        "array",
-		Description: `Ordered list of manual test steps. Required on create when test-case-type is "steps". On update, omit to leave existing steps unchanged; provide to replace them entirely. Must be omitted for "text".`,
+		Description: `Ordered list of manual test steps. Required on create when test-case-type is "steps"; must contain at least one step. On update, omit to leave existing steps unchanged; if provided, must contain at least one step. Must be omitted for "text".`,
 		Items: &jsonschema.Schema{
 			Type: "object",
 			Properties: map[string]*jsonschema.Schema{
@@ -350,7 +351,12 @@ func BuildManualScenario(
 				`instructions and expected-result are not valid for "steps"; provide them inside each step`,
 			)
 		}
-		if (a.Steps == nil || len(*a.Steps) == 0) && !a.IsUpdate {
+		if a.Steps == nil && !a.IsUpdate {
+			return zero, fmt.Errorf(
+				`steps must not be empty when test-case-type is "steps"`,
+			)
+		}
+		if a.Steps != nil && len(*a.Steps) == 0 {
 			return zero, fmt.Errorf(
 				`steps must not be empty when test-case-type is "steps"`,
 			)
