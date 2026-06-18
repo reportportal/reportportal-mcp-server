@@ -1801,3 +1801,144 @@ func TestGetManualLaunchesTool_NoFiltersReachesAPI(t *testing.T) {
 	require.Empty(t, capturedQuery.Get("limit"))
 	require.Empty(t, capturedQuery.Get("offset"))
 }
+
+// TestGetManualLaunchExecutionsTool_Schema verifies that all expected properties are present
+// in the schema and that launchId is required.
+func TestGetManualLaunchExecutionsTool_Schema(t *testing.T) {
+	tool, _ := newTMSResources(t).toolGetManualLaunchExecutions()
+
+	schema, ok := tool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok, "InputSchema should be a *jsonschema.Schema")
+
+	expectedProps := []string{
+		"projectKey",
+		"launchId",
+		"limit",
+		"offset",
+		"filter-cnt-name",
+		"filter-in-priority",
+		"filter-in-attributeKey",
+	}
+	for _, prop := range expectedProps {
+		_, exists := schema.Properties[prop]
+		require.True(t, exists, "property %q should exist in schema", prop)
+	}
+	require.Equal(t, []string{"launchId"}, schema.Required, "launchId should be required")
+}
+
+// TestGetManualLaunchExecutionsTool_PriorityEnum verifies the filter-in-priority array schema.
+func TestGetManualLaunchExecutionsTool_PriorityEnum(t *testing.T) {
+	tool, _ := newTMSResources(t).toolGetManualLaunchExecutions()
+
+	schema, ok := tool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok)
+
+	prop, ok := schema.Properties["filter-in-priority"]
+	require.True(t, ok, "filter-in-priority should exist")
+	require.Equal(t, "array", prop.Type)
+	require.NotNil(t, prop.Items, "filter-in-priority must have items sub-schema")
+	require.Equal(t, "string", prop.Items.Type)
+	require.ElementsMatch(t,
+		[]any{"BLOCKER", "CRITICAL", "HIGH", "LOW", "MEDIUM", "UNSPECIFIED"},
+		prop.Items.Enum,
+	)
+}
+
+// TestGetManualLaunchExecutionsTool_FiltersReachHTTP verifies that all filter params
+// and pagination are forwarded correctly as HTTP query parameters.
+func TestGetManualLaunchExecutionsTool_FiltersReachHTTP(t *testing.T) {
+	ctx := context.Background()
+
+	var capturedQuery url.Values
+	var capturedPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedQuery = r.URL.Query()
+		capturedPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"content":[],"page":{"totalElements":0}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolGetManualLaunchExecutions()
+
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, GetManualLaunchExecutionsArgs{
+		ProjectKey:           "my-project",
+		LaunchID:             99,
+		Limit:                10,
+		Offset:               20,
+		FilterCntName:        "login",
+		FilterInPriority:     []string{"HIGH", "CRITICAL"},
+		FilterInAttributeKey: "smoke,regression",
+	})
+
+	require.NoError(t, callErr)
+	require.NotNil(t, capturedQuery, "HTTP request should reach the server")
+	require.Contains(t, capturedPath, "/launch/manual/99/test-case/execution")
+	require.Equal(t, "10", capturedQuery.Get("limit"))
+	require.Equal(t, "20", capturedQuery.Get("offset"))
+	require.Equal(t, "login", capturedQuery.Get("filter.cnt.name"))
+	require.Equal(t, "HIGH,CRITICAL", capturedQuery.Get("filter.in.priority"))
+	require.Equal(t, "smoke,regression", capturedQuery.Get("filter.in.attributeKey"))
+}
+
+// TestGetManualLaunchExecutionsTool_ZeroLaunchIDRejected verifies that a launchId
+// of 0 is rejected before any HTTP call is made.
+func TestGetManualLaunchExecutionsTool_ZeroLaunchIDRejected(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolGetManualLaunchExecutions()
+
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, GetManualLaunchExecutionsArgs{
+		ProjectKey: "test-project",
+		LaunchID:   0,
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "launchId out of range")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestGetManualLaunchExecutionsTool_NoFiltersReachesAPI verifies that calling with only
+// a project key and launch ID (no filters, no pagination) results in a valid HTTP request.
+func TestGetManualLaunchExecutionsTool_NoFiltersReachesAPI(t *testing.T) {
+	ctx := context.Background()
+
+	var capturedQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedQuery = r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"content":[],"page":{"totalElements":0}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolGetManualLaunchExecutions()
+
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, GetManualLaunchExecutionsArgs{
+		ProjectKey: "test-project",
+		LaunchID:   5,
+	})
+
+	require.NoError(t, callErr)
+	require.NotNil(t, capturedQuery, "HTTP request should reach the server")
+	require.Empty(t, capturedQuery.Get("filter.cnt.name"))
+	require.Empty(t, capturedQuery.Get("filter.in.priority"))
+	require.Empty(t, capturedQuery.Get("filter.in.attributeKey"))
+	require.Empty(t, capturedQuery.Get("limit"))
+	require.Empty(t, capturedQuery.Get("offset"))
+}
