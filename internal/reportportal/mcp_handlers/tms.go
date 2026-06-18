@@ -67,6 +67,7 @@ func RegisterTMSTools(
 	registerTool(s, tms.toolDeleteTestCase)
 
 	registerTool(s, tms.toolGetManualLaunches)
+	registerTool(s, tms.toolGetManualLaunchExecutions)
 }
 
 // GetMilestonesByFilterArgs represents the arguments for the get_milestones_by_filter tool.
@@ -1483,6 +1484,156 @@ func (tr *TMSResources) toolGetManualLaunches() (*mcp.Tool, ToolHandler[GetManua
 					}
 					return nil, nil, fmt.Errorf(
 						"manual launches request failed (HTTP %d): %s",
+						resp.StatusCode,
+						string(respBody),
+					)
+				}
+
+				return utils.ReadResponseBody(resp)
+			},
+		)
+}
+
+// GetManualLaunchExecutionsArgs represents the arguments for the get_manual_launch_executions tool.
+type GetManualLaunchExecutionsArgs struct {
+	ProjectKey           string   `json:"projectKey"`
+	LaunchID             int64    `json:"launchId"`
+	Limit                uint     `json:"limit"`
+	Offset               uint     `json:"offset"`
+	FilterCntName        string   `json:"filter-cnt-name,omitempty"`
+	FilterInPriority     []string `json:"filter-in-priority,omitempty"`
+	FilterInAttributeKey string   `json:"filter-in-attributeKey,omitempty"`
+}
+
+func (tr *TMSResources) toolGetManualLaunchExecutions() (*mcp.Tool, ToolHandler[GetManualLaunchExecutionsArgs, any]) {
+	pkSchema, err := utils.ProjectKeySchema(tr.defaultProjectKey)
+	if err != nil {
+		slog.Error("failed to build project key schema", "error", err)
+	}
+	return &mcp.Tool{
+			Name:        "get_manual_launch_executions",
+			Description: "Get test case executions for a manual launch from ReportPortal TMS by filter. All filters and pagination parameters are optional.",
+			InputSchema: &jsonschema.Schema{
+				Type: "object",
+				Properties: map[string]*jsonschema.Schema{
+					utils.ProjectKeyField: pkSchema,
+					"launchId": {
+						Type:        "integer",
+						Description: "ID of the manual launch",
+						Minimum:     openapi.PtrFloat64(1),
+					},
+					"limit": {
+						Type:        "integer",
+						Description: "Maximum number of results to return",
+						Minimum:     openapi.PtrFloat64(1),
+					},
+					"offset": {
+						Type:        "integer",
+						Description: "Number of results to skip (for pagination)",
+						Minimum:     openapi.PtrFloat64(0),
+					},
+					"filter-cnt-name": {
+						Type:        "string",
+						Description: "Filter executions by test case name substring",
+					},
+					"filter-in-priority": {
+						Type:        "array",
+						Description: "Filter by one or more test case priority values",
+						Items: &jsonschema.Schema{
+							Type: "string",
+							Enum: []any{
+								"BLOCKER",
+								"CRITICAL",
+								"HIGH",
+								"LOW",
+								"MEDIUM",
+								"UNSPECIFIED",
+							},
+						},
+					},
+					"filter-in-attributeKey": {
+						Type:        "string",
+						Description: "Filter executions by tags (format: tag1,tag2,tag3)",
+					},
+				},
+				Required: []string{"launchId"},
+			},
+		},
+		utils.WithAnalytics(
+			tr.analytics,
+			"get_manual_launch_executions",
+			func(ctx context.Context, req *mcp.CallToolRequest, args GetManualLaunchExecutionsArgs) (*mcp.CallToolResult, any, error) {
+				project, err := utils.ExtractProject(ctx, args.ProjectKey)
+				if err != nil {
+					return nil, nil, fmt.Errorf("failed to extract project: %w", err)
+				}
+
+				if args.LaunchID < 1 {
+					return nil, nil, fmt.Errorf("launchId out of range: must be >= 1")
+				}
+
+				cfg := tr.client.GetConfig()
+				executionURL := fmt.Sprintf(
+					"%s://%s/api/v1/project/%s/launch/manual/%d/test-case/execution",
+					cfg.Scheme, cfg.Host, url.PathEscape(project), args.LaunchID,
+				)
+
+				httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, executionURL, nil)
+				if err != nil {
+					return nil, nil, fmt.Errorf(
+						"failed to build manual launch executions request: %w",
+						err,
+					)
+				}
+
+				for k, v := range cfg.DefaultHeader {
+					httpReq.Header.Set(k, v)
+				}
+				httpReq.Header.Set("Accept", "application/json")
+
+				query := httpReq.URL.Query()
+				if args.Limit > 0 {
+					query.Set("limit", strconv.FormatUint(uint64(args.Limit), 10))
+				}
+				if args.Offset > 0 {
+					query.Set("offset", strconv.FormatUint(uint64(args.Offset), 10))
+				}
+				if args.FilterCntName != "" {
+					query.Set("filter.cnt.name", args.FilterCntName)
+				}
+				if len(args.FilterInPriority) > 0 {
+					query.Set("filter.in.priority", strings.Join(args.FilterInPriority, ","))
+				}
+				if args.FilterInAttributeKey != "" {
+					query.Set("filter.in.attributeKey", args.FilterInAttributeKey)
+				}
+				httpReq.URL.RawQuery = query.Encode()
+
+				if cfg.Middleware != nil {
+					cfg.Middleware(httpReq)
+				}
+
+				httpClient := cfg.HTTPClient
+				if httpClient == nil {
+					httpClient = &http.Client{Timeout: importHTTPClientTimeout}
+				}
+
+				resp, err := httpClient.Do(httpReq)
+				if err != nil {
+					return nil, nil, fmt.Errorf("manual launch executions request failed: %w", err)
+				}
+
+				if resp.StatusCode >= 300 {
+					defer resp.Body.Close() //nolint:errcheck
+					respBody, readErr := io.ReadAll(resp.Body)
+					if readErr != nil {
+						return nil, nil, fmt.Errorf(
+							"manual launch executions request failed (HTTP %d)",
+							resp.StatusCode,
+						)
+					}
+					return nil, nil, fmt.Errorf(
+						"manual launch executions request failed (HTTP %d): %s",
 						resp.StatusCode,
 						string(respBody),
 					)
