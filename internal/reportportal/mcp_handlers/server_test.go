@@ -33,7 +33,7 @@ func connectInProcess(t *testing.T, s *mcp.Server) *mcp.ClientSession {
 // that the gorp-generated client can unmarshal without errors.
 func emptyLaunchPageJSON(t *testing.T) []byte {
 	t.Helper()
-	page := openapi.NewPageLaunchResource()
+	page := openapi.NewPageLaunchViewModel()
 	page.SetPage(openapi.PageMetadata{
 		TotalPages:    openapi.PtrInt64(0),
 		HasNext:       openapi.PtrBool(false),

@@ -285,9 +285,9 @@ func TestRunAutoAnalysisTool(t *testing.T) {
 	assert.Equal(t, []string{"to_investigate", "auto_analyzed"}, capturedRequest.AnalyzeItemsMode)
 }
 
-func testLaunches() *openapi.PageLaunchResource {
-	launches := openapi.NewPageLaunchResource()
-	launches.SetContent([]openapi.LaunchResource{
+func testLaunches() *openapi.PageLaunchViewModel {
+	launches := openapi.NewPageLaunchViewModel()
+	launches.SetContent([]openapi.LaunchViewModel{
 		{
 			Id:        1,
 			Name:      "Test Launch 1",
