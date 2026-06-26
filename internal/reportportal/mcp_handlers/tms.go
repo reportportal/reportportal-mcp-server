@@ -1024,12 +1024,12 @@ func (tr *TMSResources) toolCreateMilestone() (*mcp.Tool, ToolHandler[CreateMile
 					"type": {
 						Type:        "string",
 						Description: "Type of the milestone",
-						Enum:        []any{"SPRINT", "RELEASE", "OTHER"},
+						Enum:        []any{"RELEASE", "SPRINT", "PLAN", "FEATURE", "OTHER"},
 					},
 					"status": {
 						Type:        "string",
 						Description: "Optional status of the milestone",
-						Enum:        []any{"ACTIVE", "CLOSED"},
+						Enum:        []any{"SCHEDULED", "TESTING", "COMPLETED"},
 					},
 					"start-date": {
 						Type:        "string",
@@ -1053,6 +1053,25 @@ func (tr *TMSResources) toolCreateMilestone() (*mcp.Tool, ToolHandler[CreateMile
 				}
 				if strings.TrimSpace(args.Name) == "" {
 					return nil, nil, fmt.Errorf("name must not be empty or whitespace")
+				}
+
+				switch args.Type {
+				case "RELEASE", "SPRINT", "PLAN", "FEATURE", "OTHER":
+				default:
+					return nil, nil, fmt.Errorf(
+						"type %q is not valid; must be one of: RELEASE, SPRINT, PLAN, FEATURE, OTHER",
+						args.Type,
+					)
+				}
+				if args.Status != nil {
+					switch *args.Status {
+					case "SCHEDULED", "TESTING", "COMPLETED":
+					default:
+						return nil, nil, fmt.Errorf(
+							"status %q is not valid; must be one of: SCHEDULED, TESTING, COMPLETED",
+							*args.Status,
+						)
+					}
 				}
 
 				rq := openapi.NewComEpamReportportalBaseCoreTmsDtoTmsMilestoneRQ()
@@ -1147,6 +1166,9 @@ func (tr *TMSResources) toolCreateTestPlan() (*mcp.Tool, ToolHandler[CreateTestP
 				}
 				if strings.TrimSpace(args.Name) == "" {
 					return nil, nil, fmt.Errorf("name must not be empty or whitespace")
+				}
+				if args.MilestoneID <= 0 {
+					return nil, nil, fmt.Errorf("milestone-id must be a positive integer")
 				}
 
 				rq := openapi.NewComEpamReportportalBaseCoreTmsDtoTmsTestPlanRQ()
@@ -1720,6 +1742,7 @@ func (tr *TMSResources) toolAddTestCasesToTestPlan() (*mcp.Tool, ToolHandler[Add
 					"test-case-ids": {
 						Type:        "array",
 						Description: "List of test case IDs (each ≥ 1) to add to the test plan (must not be empty)",
+						MinItems:    openapi.PtrInt(1),
 						Items: &jsonschema.Schema{
 							Type:    "integer",
 							Minimum: openapi.PtrFloat64(1),
@@ -1737,8 +1760,19 @@ func (tr *TMSResources) toolAddTestCasesToTestPlan() (*mcp.Tool, ToolHandler[Add
 				if err != nil {
 					return nil, nil, fmt.Errorf("failed to extract project: %w", err)
 				}
+				if args.TestPlanID <= 0 {
+					return nil, nil, fmt.Errorf("test-plan-id must be a positive integer")
+				}
 				if len(args.TestCaseIDs) == 0 {
 					return nil, nil, fmt.Errorf("test-case-ids must not be empty")
+				}
+				for _, id := range args.TestCaseIDs {
+					if id <= 0 {
+						return nil, nil, fmt.Errorf(
+							"each test case ID must be a positive integer, got %d",
+							id,
+						)
+					}
 				}
 
 				rq := openapi.NewComEpamReportportalBaseCoreTmsDtoBatchBatchAddTestCasesToPlanRQ(

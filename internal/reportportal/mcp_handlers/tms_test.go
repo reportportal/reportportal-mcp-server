@@ -82,9 +82,9 @@ func TestCreateMilestoneTool_TypeEnum(t *testing.T) {
 	typeProp, ok := schema.Properties["type"]
 	require.True(t, ok, "type property should exist")
 	require.ElementsMatch(t,
-		[]any{"SPRINT", "RELEASE", "OTHER"},
+		[]any{"RELEASE", "SPRINT", "PLAN", "FEATURE", "OTHER"},
 		typeProp.Enum,
-		"type enum should contain SPRINT, RELEASE, OTHER",
+		"type enum should contain RELEASE, SPRINT, PLAN, FEATURE, OTHER",
 	)
 }
 
@@ -98,9 +98,9 @@ func TestCreateMilestoneTool_StatusEnum(t *testing.T) {
 	statusProp, ok := schema.Properties["status"]
 	require.True(t, ok, "status property should exist")
 	require.ElementsMatch(t,
-		[]any{"ACTIVE", "CLOSED"},
+		[]any{"SCHEDULED", "TESTING", "COMPLETED"},
 		statusProp.Enum,
-		"status enum should contain ACTIVE, CLOSED",
+		"status enum should contain SCHEDULED, TESTING, COMPLETED",
 	)
 }
 
@@ -247,6 +247,60 @@ func TestAddTestCasesToTestPlanTool_InvalidEmptyArray(t *testing.T) {
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "must not be empty")
+}
+
+// TestCreateTestPlanTool_WhitespaceName verifies that a name consisting entirely
+// of whitespace is rejected before any API call is made.
+func TestCreateTestPlanTool_WhitespaceName(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolCreateTestPlan()
+
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, CreateTestPlanArgs{
+		ProjectKey:  "test-project",
+		Name:        "   ",
+		MilestoneID: 1,
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "empty or whitespace")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestCreateTestPlanTool_ZeroMilestoneID verifies that a milestone-id of 0 is
+// rejected before any API call is made.
+func TestCreateTestPlanTool_ZeroMilestoneID(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolCreateTestPlan()
+
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, CreateTestPlanArgs{
+		ProjectKey:  "test-project",
+		Name:        "My Plan",
+		MilestoneID: 0,
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "milestone-id must be a positive integer")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestAddTestCasesToTestPlanTool_ZeroTestPlanID verifies that a test-plan-id of 0
+// is rejected before any API call is made.
+func TestAddTestCasesToTestPlanTool_ZeroTestPlanID(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolAddTestCasesToTestPlan()
+
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, AddTestCasesToTestPlanArgs{
+		ProjectKey:  "test-project",
+		TestPlanID:  0,
+		TestCaseIDs: []int64{1},
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "test-plan-id must be a positive integer")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
 }
 
 // TestGetTestFoldersByFilterTool_IntegerFilterBounds verifies that the JSON schema
