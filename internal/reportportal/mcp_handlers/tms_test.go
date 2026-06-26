@@ -1942,3 +1942,314 @@ func TestGetManualLaunchExecutionsTool_NoFiltersReachesAPI(t *testing.T) {
 	require.Empty(t, capturedQuery.Get("limit"))
 	require.Empty(t, capturedQuery.Get("offset"))
 }
+
+// TestGetMilestonesByFilterTool_CntNameReachesHTTP verifies that filter-cnt-name is
+// forwarded as filter.cnt.name (not filter.eq.name) to the API.
+func TestGetMilestonesByFilterTool_CntNameReachesHTTP(t *testing.T) {
+	ctx := context.Background()
+
+	var capturedQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedQuery = r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"content":[],"page":{"totalElements":0}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolGetMilestonesByFilter()
+
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, GetMilestonesByFilterArgs{
+		ProjectKey:    "test-project",
+		FilterCntName: "sprint",
+	})
+
+	require.NoError(t, callErr)
+	require.NotNil(t, capturedQuery, "HTTP request should reach the server")
+	require.Equal(t, "sprint", capturedQuery.Get("filter.cnt.name"))
+	require.Empty(t, capturedQuery.Get("filter.eq.name"), "filter.eq.name must not be set")
+}
+
+// TestGetMilestonesByFilterTool_DefaultLimitApplied verifies that when no limit is provided,
+// the default of 50 is sent to the API.
+func TestGetMilestonesByFilterTool_DefaultLimitApplied(t *testing.T) {
+	ctx := context.Background()
+
+	var capturedQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedQuery = r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"content":[],"page":{"totalElements":0}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolGetMilestonesByFilter()
+
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, GetMilestonesByFilterArgs{
+		ProjectKey: "test-project",
+	})
+
+	require.NoError(t, callErr)
+	require.NotNil(t, capturedQuery, "HTTP request should reach the server")
+	require.Equal(t, "50", capturedQuery.Get("limit"), "default limit should be 50")
+	require.Equal(t, "0", capturedQuery.Get("offset"), "default offset should be 0")
+}
+
+// TestGetMilestonesByFilterTool_PaginationReachesHTTP verifies that explicit limit and offset
+// are forwarded as HTTP query parameters.
+func TestGetMilestonesByFilterTool_PaginationReachesHTTP(t *testing.T) {
+	ctx := context.Background()
+
+	var capturedQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedQuery = r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"content":[],"page":{"totalElements":0}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolGetMilestonesByFilter()
+
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, GetMilestonesByFilterArgs{
+		ProjectKey: "test-project",
+		Limit:      25,
+		Offset:     100,
+	})
+
+	require.NoError(t, callErr)
+	require.NotNil(t, capturedQuery, "HTTP request should reach the server")
+	require.Equal(t, "25", capturedQuery.Get("limit"))
+	require.Equal(t, "100", capturedQuery.Get("offset"))
+}
+
+// TestGetTestCasesForTestPlanTool_DefaultLimitApplied verifies that when no limit is provided,
+// the default of 50 is sent to the API.
+func TestGetTestCasesForTestPlanTool_DefaultLimitApplied(t *testing.T) {
+	ctx := context.Background()
+
+	var capturedQuery url.Values
+	var capturedPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedQuery = r.URL.Query()
+		capturedPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"content":[],"page":{"totalElements":0}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolGetTestCasesForTestPlan()
+
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, GetTestCasesForTestPlanArgs{
+		ProjectKey: "test-project",
+		TestPlanID: 7,
+	})
+
+	require.NoError(t, callErr)
+	require.NotNil(t, capturedQuery, "HTTP request should reach the server")
+	require.Contains(t, capturedPath, "/tms/test-plan/7/test-case")
+	require.Equal(t, "50", capturedQuery.Get("limit"), "default limit should be 50")
+	require.Equal(t, "0", capturedQuery.Get("offset"), "default offset should be 0")
+}
+
+// TestGetTestCasesForTestPlanTool_PaginationReachesHTTP verifies that explicit limit and offset
+// are forwarded as HTTP query parameters.
+func TestGetTestCasesForTestPlanTool_PaginationReachesHTTP(t *testing.T) {
+	ctx := context.Background()
+
+	var capturedQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedQuery = r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"content":[],"page":{"totalElements":0}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolGetTestCasesForTestPlan()
+
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, GetTestCasesForTestPlanArgs{
+		ProjectKey: "test-project",
+		TestPlanID: 7,
+		Limit:      10,
+		Offset:     20,
+	})
+
+	require.NoError(t, callErr)
+	require.NotNil(t, capturedQuery, "HTTP request should reach the server")
+	require.Equal(t, "10", capturedQuery.Get("limit"))
+	require.Equal(t, "20", capturedQuery.Get("offset"))
+}
+
+// TestGetTestCasesByFilterTool_DefaultLimitApplied verifies that when no limit is provided,
+// the default of 50 is sent to the API.
+func TestGetTestCasesByFilterTool_DefaultLimitApplied(t *testing.T) {
+	ctx := context.Background()
+
+	var capturedQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedQuery = r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"content":[],"page":{"totalElements":0}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolGetTestCasesByFilter()
+
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, GetTestCasesByFilterArgs{
+		ProjectKey: "test-project",
+	})
+
+	require.NoError(t, callErr)
+	require.NotNil(t, capturedQuery, "HTTP request should reach the server")
+	require.Equal(t, "50", capturedQuery.Get("limit"), "default limit should be 50")
+	require.Equal(t, "0", capturedQuery.Get("offset"), "default offset should be 0")
+}
+
+// TestGetTestCasesByFilterTool_PaginationReachesHTTP verifies that explicit limit and offset
+// are forwarded as HTTP query parameters.
+func TestGetTestCasesByFilterTool_PaginationReachesHTTP(t *testing.T) {
+	ctx := context.Background()
+
+	var capturedQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedQuery = r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"content":[],"page":{"totalElements":0}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolGetTestCasesByFilter()
+
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, GetTestCasesByFilterArgs{
+		ProjectKey: "test-project",
+		Limit:      15,
+		Offset:     30,
+	})
+
+	require.NoError(t, callErr)
+	require.NotNil(t, capturedQuery, "HTTP request should reach the server")
+	require.Equal(t, "15", capturedQuery.Get("limit"))
+	require.Equal(t, "30", capturedQuery.Get("offset"))
+}
+
+// TestGetTestFoldersByFilterTool_DefaultLimitApplied verifies that when no limit is provided,
+// the default of 50 is sent to the API.
+func TestGetTestFoldersByFilterTool_DefaultLimitApplied(t *testing.T) {
+	ctx := context.Background()
+
+	var capturedQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedQuery = r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"content":[],"page":{"totalElements":0}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolGetTestFoldersByFilter()
+
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, GetTestFoldersByFilterArgs{
+		ProjectKey: "test-project",
+	})
+
+	require.NoError(t, callErr)
+	require.NotNil(t, capturedQuery, "HTTP request should reach the server")
+	require.Equal(t, "50", capturedQuery.Get("limit"), "default limit should be 50")
+	require.Equal(t, "0", capturedQuery.Get("offset"), "default offset should be 0")
+}
+
+// TestGetTestFoldersByFilterTool_PaginationReachesHTTP verifies that explicit limit and offset
+// are forwarded as HTTP query parameters.
+func TestGetTestFoldersByFilterTool_PaginationReachesHTTP(t *testing.T) {
+	ctx := context.Background()
+
+	var capturedQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedQuery = r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"content":[],"page":{"totalElements":0}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolGetTestFoldersByFilter()
+
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, GetTestFoldersByFilterArgs{
+		ProjectKey: "test-project",
+		Limit:      20,
+		Offset:     40,
+	})
+
+	require.NoError(t, callErr)
+	require.NotNil(t, capturedQuery, "HTTP request should reach the server")
+	require.Equal(t, "20", capturedQuery.Get("limit"))
+	require.Equal(t, "40", capturedQuery.Get("offset"))
+}
