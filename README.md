@@ -413,11 +413,12 @@ The ReportPortal MCP server provides a comprehensive set of capabilities for int
 
 Available from MCP server version 2.x (requires ReportPortal 26.1+).
 
-- Browse milestones, test plans, test folders, and test cases with optional filters
+- Browse milestones, test folders, and test cases with optional filters and limit/offset pagination
+- Retrieve a specific test plan by its ID
 - Create and organize test folders (including nested subfolders)
-- Create, update, and delete manual test cases (`TEXT` scenario type with instructions and expected results)
+- Create, update, and delete manual test cases in either supported format: `text` scenarios (instructions and expected results) or `steps` scenarios (an ordered list of steps)
 - Create milestones and test plans, then assign test cases to plans
-- Retrieve test cases linked to a specific test plan
+- Retrieve test cases linked to a specific test plan with optional limit/offset pagination
 - List manual launches by filter (name, item status, completion state, time range, test plan, attributes) with pagination
 - List test case executions for a manual launch by filter (name, priority, tags) with pagination
 
@@ -454,11 +455,11 @@ Available from MCP server version 2.x. Requires ReportPortal 26.1+ with TMS enab
 
 | Tool Name                  | Description                                      | Parameters                                                                                                    |
 |----------------------------|--------------------------------------------------|---------------------------------------------------------------------------------------------------------------|
-| Get Milestones by filter | Lists TMS milestones for a project, optionally filtered by name or ID | `filter-name` (optional), `filter-id` (optional) |
+| Get Milestones by filter | Lists TMS milestones for a project, optionally filtered by name or ID. Supports limit/offset pagination. | `filter-cnt-name` (optional), `filter-id` (optional), `limit` (optional, integer ≥ 1, default 50), `offset` (optional, integer ≥ 0, default 0) |
 | Get Test Plan by ID | Retrieves a TMS test plan by its ID | `id` (required) |
-| Get Test Cases for Test Plan | Lists test cases assigned to a TMS test plan | `test-plan-id` (required) |
-| Get Test Folders by Filter | Lists TMS test folders for a project. All filters are optional; without filters returns the first page. To detect truncation compare `page.totalElements` with `len(content)` and narrow results with `filter-eq-parentId`, `filter-eq-name`, or `filter-cnt-name`. | `filter-eq-id` (optional, integer ≥ 1), `filter-eq-parentId` (optional, integer ≥ 1), `filter-eq-name` (optional), `filter-cnt-name` (optional) |
-| Get Test Cases by Filter | Lists TMS test cases for a project. All filters are optional; without filters returns the first page. To detect truncation compare `page.totalElements` with `len(content)` and narrow results with `filter-eq-testFolderId`, `filter-cnt-name`, `filter-eq-id`, `filter-has-attributeKey`, or `filter-in-priority`. | `filter-eq-id` (optional, integer ≥ 1), `filter-eq-testFolderId` (optional, integer ≥ 1), `filter-cnt-name` (optional), `filter-has-attributeKey` (optional), `filter-in-priority` (optional, enum array: `BLOCKER` \| `CRITICAL` \| `HIGH` \| `LOW` \| `MEDIUM` \| `UNSPECIFIED`) |
+| Get Test Cases for Test Plan | Lists test cases assigned to a TMS test plan. Supports limit/offset pagination. | `test-plan-id` (required), `limit` (optional, integer ≥ 1, default 50), `offset` (optional, integer ≥ 0, default 0) |
+| Get Test Folders by Filter | Lists TMS test folders for a project. All filters and pagination parameters are optional. | `filter-eq-id` (optional, integer ≥ 1), `filter-eq-parentId` (optional, integer ≥ 1), `filter-eq-name` (optional), `filter-cnt-name` (optional), `limit` (optional, integer ≥ 1, default 50), `offset` (optional, integer ≥ 0, default 0) |
+| Get Test Cases by Filter | Lists TMS test cases for a project. All filters and pagination parameters are optional. | `filter-eq-id` (optional, integer ≥ 1), `filter-eq-testFolderId` (optional, integer ≥ 1), `filter-cnt-name` (optional), `filter-has-attributeKey` (optional), `filter-in-priority` (optional, enum array: `BLOCKER` \| `CRITICAL` \| `HIGH` \| `LOW` \| `MEDIUM` \| `UNSPECIFIED`), `limit` (optional, integer ≥ 1, default 50), `offset` (optional, integer ≥ 0, default 0) |
 | Create Folder | Creates a new test folder (or subfolder) in the TMS. **Mutates TMS data.** | `name` (required), `description` (optional), `parent-test-folder-id` (optional, integer ≥ 1) |
 | Delete Folder | Deletes a test folder by its ID from the TMS. **Mutates TMS data. Irreversible.** | `folderId` (required, integer ≥ 1) |
 | Create Test Case | Creates a new test case. Use `test-case-type` to choose the manual scenario. **Mutates TMS data.** | `name` (required), `test-folder-id` (required, integer ≥ 1 — ID of the folder to place the test case in), `description` (optional), `priority` (optional, enum: `LOW` \| `MEDIUM` \| `HIGH` \| `CRITICAL` \| `BLOCKER` \| `UNSPECIFIED`), `test-case-type` (optional, enum: `text` (default) \| `steps`), `instructions` (optional, for `text` type), `expected-result` (optional, for `text` type), `steps` (optional, array of `{ instructions, expected-result }`, for `steps` type), `preconditions` (optional), `requirements` (optional, array of value strings; a unique id is generated automatically per entry), `attributes` (optional, array of `{ key }` objects — tags to attach; existing project attributes matching the key are reused, missing ones are created automatically) |
