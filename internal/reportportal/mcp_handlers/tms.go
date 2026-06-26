@@ -54,6 +54,7 @@ func RegisterTMSTools(
 
 	registerTool(s, tms.toolCreateTestPlan)
 	registerTool(s, tms.toolAddTestCasesToTestPlan)
+	registerTool(s, tms.toolDeleteTestCasesFromTestPlan)
 	registerTool(s, tms.toolGetTestPlanByID)
 
 	registerTool(s, tms.toolCreateTestFolder)
@@ -1024,12 +1025,12 @@ func (tr *TMSResources) toolCreateMilestone() (*mcp.Tool, ToolHandler[CreateMile
 					"type": {
 						Type:        "string",
 						Description: "Type of the milestone",
-						Enum:        []any{"SPRINT", "RELEASE", "OTHER"},
+						Enum:        []any{"RELEASE", "SPRINT", "PLAN", "FEATURE", "OTHER"},
 					},
 					"status": {
 						Type:        "string",
 						Description: "Optional status of the milestone",
-						Enum:        []any{"ACTIVE", "CLOSED"},
+						Enum:        []any{"SCHEDULED", "TESTING", "COMPLETED"},
 					},
 					"start-date": {
 						Type:        "string",
@@ -1053,6 +1054,25 @@ func (tr *TMSResources) toolCreateMilestone() (*mcp.Tool, ToolHandler[CreateMile
 				}
 				if strings.TrimSpace(args.Name) == "" {
 					return nil, nil, fmt.Errorf("name must not be empty or whitespace")
+				}
+
+				switch args.Type {
+				case "RELEASE", "SPRINT", "PLAN", "FEATURE", "OTHER":
+				default:
+					return nil, nil, fmt.Errorf(
+						"type %q is not valid; must be one of: RELEASE, SPRINT, PLAN, FEATURE, OTHER",
+						args.Type,
+					)
+				}
+				if args.Status != nil {
+					switch *args.Status {
+					case "SCHEDULED", "TESTING", "COMPLETED":
+					default:
+						return nil, nil, fmt.Errorf(
+							"status %q is not valid; must be one of: SCHEDULED, TESTING, COMPLETED",
+							*args.Status,
+						)
+					}
 				}
 
 				rq := openapi.NewComEpamReportportalBaseCoreTmsDtoTmsMilestoneRQ()
@@ -1147,6 +1167,9 @@ func (tr *TMSResources) toolCreateTestPlan() (*mcp.Tool, ToolHandler[CreateTestP
 				}
 				if strings.TrimSpace(args.Name) == "" {
 					return nil, nil, fmt.Errorf("name must not be empty or whitespace")
+				}
+				if args.MilestoneID <= 0 {
+					return nil, nil, fmt.Errorf("milestone-id must be a positive integer")
 				}
 
 				rq := openapi.NewComEpamReportportalBaseCoreTmsDtoTmsTestPlanRQ()
@@ -1720,6 +1743,7 @@ func (tr *TMSResources) toolAddTestCasesToTestPlan() (*mcp.Tool, ToolHandler[Add
 					"test-case-ids": {
 						Type:        "array",
 						Description: "List of test case IDs (each ≥ 1) to add to the test plan (must not be empty)",
+						MinItems:    openapi.PtrInt(1),
 						Items: &jsonschema.Schema{
 							Type:    "integer",
 							Minimum: openapi.PtrFloat64(1),
@@ -1737,8 +1761,19 @@ func (tr *TMSResources) toolAddTestCasesToTestPlan() (*mcp.Tool, ToolHandler[Add
 				if err != nil {
 					return nil, nil, fmt.Errorf("failed to extract project: %w", err)
 				}
+				if args.TestPlanID <= 0 {
+					return nil, nil, fmt.Errorf("test-plan-id must be a positive integer")
+				}
 				if len(args.TestCaseIDs) == 0 {
 					return nil, nil, fmt.Errorf("test-case-ids must not be empty")
+				}
+				for _, id := range args.TestCaseIDs {
+					if id <= 0 {
+						return nil, nil, fmt.Errorf(
+							"each test case ID must be a positive integer, got %d",
+							id,
+						)
+					}
 				}
 
 				rq := openapi.NewComEpamReportportalBaseCoreTmsDtoBatchBatchAddTestCasesToPlanRQ(
@@ -1747,6 +1782,85 @@ func (tr *TMSResources) toolAddTestCasesToTestPlan() (*mcp.Tool, ToolHandler[Add
 
 				_, response, err := tr.client.TestPlanAPI.AddTestCasesToPlan(ctx, args.TestPlanID, project).
 					ComEpamReportportalBaseCoreTmsDtoBatchBatchAddTestCasesToPlanRQ(*rq).
+					Execute()
+				if err != nil {
+					return nil, nil, fmt.Errorf(
+						"%s: %w",
+						utils.ExtractResponseError(err, response),
+						err,
+					)
+				}
+				return utils.ReadResponseBody(response)
+			},
+		)
+}
+
+// DeleteTestCasesFromTestPlanArgs represents the arguments for the delete_test_cases_from_test_plan tool.
+type DeleteTestCasesFromTestPlanArgs struct {
+	ProjectKey  string  `json:"projectKey"`
+	TestPlanID  int64   `json:"test-plan-id"`
+	TestCaseIDs []int64 `json:"test-case-ids"`
+}
+
+func (tr *TMSResources) toolDeleteTestCasesFromTestPlan() (*mcp.Tool, ToolHandler[DeleteTestCasesFromTestPlanArgs, any]) {
+	pkSchema, err := utils.ProjectKeySchema(tr.defaultProjectKey)
+	if err != nil {
+		slog.Error("failed to build project key schema", "error", err)
+	}
+	return &mcp.Tool{
+			Name:        "delete_test_cases_from_test_plan",
+			Description: "Remove multiple test cases from an existing TMS test plan. This tool mutates TMS data.",
+			InputSchema: &jsonschema.Schema{
+				Type: "object",
+				Properties: map[string]*jsonschema.Schema{
+					utils.ProjectKeyField: pkSchema,
+					"test-plan-id": {
+						Type:        "integer",
+						Description: "ID of the test plan to remove test cases from",
+						Minimum:     openapi.PtrFloat64(1),
+					},
+					"test-case-ids": {
+						Type:        "array",
+						Description: "List of test case IDs (each ≥ 1) to remove from the test plan (must not be empty)",
+						MinItems:    openapi.PtrInt(1),
+						Items: &jsonschema.Schema{
+							Type:    "integer",
+							Minimum: openapi.PtrFloat64(1),
+						},
+					},
+				},
+				Required: []string{"test-plan-id", "test-case-ids"},
+			},
+		},
+		utils.WithAnalytics(
+			tr.analytics,
+			"delete_test_cases_from_test_plan",
+			func(ctx context.Context, req *mcp.CallToolRequest, args DeleteTestCasesFromTestPlanArgs) (*mcp.CallToolResult, any, error) {
+				project, err := utils.ExtractProject(ctx, args.ProjectKey)
+				if err != nil {
+					return nil, nil, fmt.Errorf("failed to extract project: %w", err)
+				}
+				if args.TestPlanID <= 0 {
+					return nil, nil, fmt.Errorf("test-plan-id must be a positive integer")
+				}
+				if len(args.TestCaseIDs) == 0 {
+					return nil, nil, fmt.Errorf("test-case-ids must not be empty")
+				}
+				for _, id := range args.TestCaseIDs {
+					if id <= 0 {
+						return nil, nil, fmt.Errorf(
+							"each test case ID must be a positive integer, got %d",
+							id,
+						)
+					}
+				}
+
+				rq := openapi.NewComEpamReportportalBaseCoreTmsDtoBatchBatchRemoveTestCasesFromPlanRQ(
+					args.TestCaseIDs,
+				)
+
+				_, response, err := tr.client.TestPlanAPI.RemoveTestCasesFromPlan(ctx, args.TestPlanID, project).
+					ComEpamReportportalBaseCoreTmsDtoBatchBatchRemoveTestCasesFromPlanRQ(*rq).
 					Execute()
 				if err != nil {
 					return nil, nil, fmt.Errorf(
