@@ -72,9 +72,11 @@ func RegisterTMSTools(
 
 // GetMilestonesByFilterArgs represents the arguments for the get_milestones_by_filter tool.
 type GetMilestonesByFilterArgs struct {
-	ProjectKey string `json:"projectKey"`
-	FilterName string `json:"filter-name"`
-	FilterID   *int64 `json:"filter-id"`
+	ProjectKey    string `json:"projectKey"`
+	FilterCntName string `json:"filter-cnt-name"`
+	FilterID      *int64 `json:"filter-id"`
+	Limit         uint   `json:"limit"`
+	Offset        uint   `json:"offset"`
 }
 
 func (tr *TMSResources) toolGetMilestonesByFilter() (*mcp.Tool, ToolHandler[GetMilestonesByFilterArgs, any]) {
@@ -89,14 +91,16 @@ func (tr *TMSResources) toolGetMilestonesByFilter() (*mcp.Tool, ToolHandler[GetM
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
 					utils.ProjectKeyField: pkSchema,
-					"filter-name": {
+					"filter-cnt-name": {
 						Type:        "string",
-						Description: "Filter milestones by name (exact match)",
+						Description: "Filter milestones by name substring (API filter.cnt.name)",
 					},
 					"filter-id": {
 						Type:        "integer",
 						Description: "Filter milestones by ID",
 					},
+					"limit":  utils.LimitSchema(utils.DefaultLimitOffset),
+					"offset": utils.OffsetSchema(),
 				},
 				Required: nil,
 			},
@@ -127,8 +131,9 @@ func (tr *TMSResources) toolGetMilestonesByFilter() (*mcp.Tool, ToolHandler[GetM
 				httpReq.Header.Set("Accept", "application/json")
 
 				query := httpReq.URL.Query()
-				if args.FilterName != "" {
-					query.Set("filter.eq.name", args.FilterName)
+				utils.ApplyLimitOffset(query, args.Limit, args.Offset, utils.DefaultLimitOffset)
+				if args.FilterCntName != "" {
+					query.Set("filter.cnt.name", args.FilterCntName)
 				}
 				if args.FilterID != nil {
 					query.Set("filter.eq.id", strconv.FormatInt(*args.FilterID, 10))
@@ -226,6 +231,8 @@ func (tr *TMSResources) toolGetTestPlanByID() (*mcp.Tool, ToolHandler[GetTestPla
 type GetTestCasesForTestPlanArgs struct {
 	ProjectKey string `json:"projectKey"`
 	TestPlanID int64  `json:"test-plan-id"`
+	Limit      uint   `json:"limit"`
+	Offset     uint   `json:"offset"`
 }
 
 func (tr *TMSResources) toolGetTestCasesForTestPlan() (*mcp.Tool, ToolHandler[GetTestCasesForTestPlanArgs, any]) {
@@ -245,6 +252,8 @@ func (tr *TMSResources) toolGetTestCasesForTestPlan() (*mcp.Tool, ToolHandler[Ge
 						Description: "Test plan ID to retrieve test cases for",
 						Minimum:     openapi.PtrFloat64(1),
 					},
+					"limit":  utils.LimitSchema(utils.DefaultLimitOffset),
+					"offset": utils.OffsetSchema(),
 				},
 				Required: []string{"test-plan-id"},
 			},
@@ -258,17 +267,65 @@ func (tr *TMSResources) toolGetTestCasesForTestPlan() (*mcp.Tool, ToolHandler[Ge
 					return nil, nil, fmt.Errorf("failed to extract project: %w", err)
 				}
 
-				_, response, err := tr.client.TestPlanAPI.GetTestCasesAddedToPlan(ctx, project, args.TestPlanID).
-					Execute()
+				cfg := tr.client.GetConfig()
+				testCasePlanURL := fmt.Sprintf(
+					"%s://%s/api/v1/project/%s/tms/test-plan/%d/test-case",
+					cfg.Scheme, cfg.Host, url.PathEscape(project), args.TestPlanID,
+				)
+
+				httpReq, err := http.NewRequestWithContext(
+					ctx,
+					http.MethodGet,
+					testCasePlanURL,
+					nil,
+				)
 				if err != nil {
 					return nil, nil, fmt.Errorf(
-						"%s: %w",
-						utils.ExtractResponseError(err, response),
+						"failed to build test cases for test plan request: %w",
 						err,
 					)
 				}
 
-				return utils.ReadResponseBody(response)
+				for k, v := range cfg.DefaultHeader {
+					httpReq.Header.Set(k, v)
+				}
+				httpReq.Header.Set("Accept", "application/json")
+
+				query := httpReq.URL.Query()
+				utils.ApplyLimitOffset(query, args.Limit, args.Offset, utils.DefaultLimitOffset)
+				httpReq.URL.RawQuery = query.Encode()
+
+				if cfg.Middleware != nil {
+					cfg.Middleware(httpReq)
+				}
+
+				httpClient := cfg.HTTPClient
+				if httpClient == nil {
+					httpClient = &http.Client{Timeout: importHTTPClientTimeout}
+				}
+
+				resp, err := httpClient.Do(httpReq)
+				if err != nil {
+					return nil, nil, fmt.Errorf("test cases for test plan request failed: %w", err)
+				}
+
+				if resp.StatusCode >= 300 {
+					defer resp.Body.Close() //nolint:errcheck
+					respBody, readErr := io.ReadAll(resp.Body)
+					if readErr != nil {
+						return nil, nil, fmt.Errorf(
+							"test cases for test plan request failed (HTTP %d)",
+							resp.StatusCode,
+						)
+					}
+					return nil, nil, fmt.Errorf(
+						"test cases for test plan request failed (HTTP %d): %s",
+						resp.StatusCode,
+						string(respBody),
+					)
+				}
+
+				return utils.ReadResponseBody(resp)
 			},
 		)
 }
@@ -280,6 +337,8 @@ type GetTestFoldersByFilterArgs struct {
 	FilterEqParentID *int64 `json:"filter-eq-parentId,omitempty"`
 	FilterEqName     string `json:"filter-eq-name,omitempty"`
 	FilterCntName    string `json:"filter-cnt-name,omitempty"`
+	Limit            uint   `json:"limit"`
+	Offset           uint   `json:"offset"`
 }
 
 func (tr *TMSResources) toolGetTestFoldersByFilter() (*mcp.Tool, ToolHandler[GetTestFoldersByFilterArgs, any]) {
@@ -290,7 +349,7 @@ func (tr *TMSResources) toolGetTestFoldersByFilter() (*mcp.Tool, ToolHandler[Get
 	}
 	return &mcp.Tool{
 			Name:        "get_test_folders_by_filter",
-			Description: "Get test folders for a project from ReportPortal TMS. All filters are optional. Without filters, returns the first page of folders for the project; pagination is not supported by this tool, so the response may be incomplete for large folder sets. To detect truncation, compare page.totalElements with len(content) (or check page.hasNext); if more items exist than returned, narrow the results using filter-eq-parentId, filter-eq-name, or filter-cnt-name.",
+			Description: "Get test folders for a project from ReportPortal TMS. All filters and pagination parameters are optional.",
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
@@ -313,6 +372,8 @@ func (tr *TMSResources) toolGetTestFoldersByFilter() (*mcp.Tool, ToolHandler[Get
 						Type:        "string",
 						Description: "Filter folders by name substring (API filter.cnt.name)",
 					},
+					"limit":  utils.LimitSchema(utils.DefaultLimitOffset),
+					"offset": utils.OffsetSchema(),
 				},
 				Required: nil,
 			},
@@ -350,6 +411,7 @@ func (tr *TMSResources) toolGetTestFoldersByFilter() (*mcp.Tool, ToolHandler[Get
 				httpReq.Header.Set("Accept", "application/json")
 
 				query := httpReq.URL.Query()
+				utils.ApplyLimitOffset(query, args.Limit, args.Offset, utils.DefaultLimitOffset)
 				if args.FilterEqID != nil {
 					query.Set("filter.eq.id", strconv.FormatInt(*args.FilterEqID, 10))
 				}
@@ -407,6 +469,8 @@ type GetTestCasesByFilterArgs struct {
 	FilterHasAttributeKey string   `json:"filter-has-attributeKey,omitempty"`
 	FilterInPriority      []string `json:"filter-in-priority,omitempty"`
 	FilterCntName         string   `json:"filter-cnt-name,omitempty"`
+	Limit                 uint     `json:"limit"`
+	Offset                uint     `json:"offset"`
 }
 
 func (tr *TMSResources) toolGetTestCasesByFilter() (*mcp.Tool, ToolHandler[GetTestCasesByFilterArgs, any]) {
@@ -417,7 +481,7 @@ func (tr *TMSResources) toolGetTestCasesByFilter() (*mcp.Tool, ToolHandler[GetTe
 	}
 	return &mcp.Tool{
 			Name:        "get_test_cases_by_filter",
-			Description: "Get test cases for a project from ReportPortal TMS. All filters are optional. Without filters, returns the first page of test cases for the project; pagination is not supported by this tool, so the response may be incomplete for large test case sets. To detect truncation, compare page.totalElements with len(content) (or check page.hasNext); if more items exist than returned, narrow the results using filter-eq-testFolderId, filter-cnt-name, filter-eq-id, filter-has-attributeKey, or filter-in-priority.",
+			Description: "Get test cases for a project from ReportPortal TMS. All filters and pagination parameters are optional.",
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
@@ -455,6 +519,8 @@ func (tr *TMSResources) toolGetTestCasesByFilter() (*mcp.Tool, ToolHandler[GetTe
 						Type:        "string",
 						Description: "Filter test cases by name substring (API filter.cnt.name)",
 					},
+					"limit":  utils.LimitSchema(utils.DefaultLimitOffset),
+					"offset": utils.OffsetSchema(),
 				},
 				Required: nil,
 			},
@@ -492,6 +558,7 @@ func (tr *TMSResources) toolGetTestCasesByFilter() (*mcp.Tool, ToolHandler[GetTe
 				httpReq.Header.Set("Accept", "application/json")
 
 				query := httpReq.URL.Query()
+				utils.ApplyLimitOffset(query, args.Limit, args.Offset, utils.DefaultLimitOffset)
 				if args.FilterEqID != nil {
 					query.Set("filter.eq.id", strconv.FormatInt(*args.FilterEqID, 10))
 				}
@@ -1336,16 +1403,8 @@ func (tr *TMSResources) toolGetManualLaunches() (*mcp.Tool, ToolHandler[GetManua
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
 					utils.ProjectKeyField: pkSchema,
-					"limit": {
-						Type:        "integer",
-						Description: "Maximum number of results to return",
-						Minimum:     openapi.PtrFloat64(1),
-					},
-					"offset": {
-						Type:        "integer",
-						Description: "Number of results to skip (for pagination)",
-						Minimum:     openapi.PtrFloat64(0),
-					},
+					"limit":               utils.LimitSchema(0),
+					"offset":              utils.OffsetSchema(),
 					"filter-cnt-name": {
 						Type:        "string",
 						Description: "Filter manual launches by name substring",
@@ -1419,12 +1478,7 @@ func (tr *TMSResources) toolGetManualLaunches() (*mcp.Tool, ToolHandler[GetManua
 				httpReq.Header.Set("Accept", "application/json")
 
 				query := httpReq.URL.Query()
-				if args.Limit > 0 {
-					query.Set("limit", strconv.FormatUint(uint64(args.Limit), 10))
-				}
-				if args.Offset > 0 {
-					query.Set("offset", strconv.FormatUint(uint64(args.Offset), 10))
-				}
+				utils.ApplyLimitOffset(query, args.Limit, args.Offset, 0)
 				if args.FilterCntName != "" {
 					query.Set("filter.cnt.name", args.FilterCntName)
 				}
@@ -1522,16 +1576,8 @@ func (tr *TMSResources) toolGetManualLaunchExecutions() (*mcp.Tool, ToolHandler[
 						Description: "ID of the manual launch",
 						Minimum:     openapi.PtrFloat64(1),
 					},
-					"limit": {
-						Type:        "integer",
-						Description: "Maximum number of results to return",
-						Minimum:     openapi.PtrFloat64(1),
-					},
-					"offset": {
-						Type:        "integer",
-						Description: "Number of results to skip (for pagination)",
-						Minimum:     openapi.PtrFloat64(0),
-					},
+					"limit":  utils.LimitSchema(0),
+					"offset": utils.OffsetSchema(),
 					"filter-cnt-name": {
 						Type:        "string",
 						Description: "Filter executions by test case name substring",
@@ -1592,12 +1638,7 @@ func (tr *TMSResources) toolGetManualLaunchExecutions() (*mcp.Tool, ToolHandler[
 				httpReq.Header.Set("Accept", "application/json")
 
 				query := httpReq.URL.Query()
-				if args.Limit > 0 {
-					query.Set("limit", strconv.FormatUint(uint64(args.Limit), 10))
-				}
-				if args.Offset > 0 {
-					query.Set("offset", strconv.FormatUint(uint64(args.Offset), 10))
-				}
+				utils.ApplyLimitOffset(query, args.Limit, args.Offset, 0)
 				if args.FilterCntName != "" {
 					query.Set("filter.cnt.name", args.FilterCntName)
 				}

@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,6 +26,10 @@ const requirementIDCharset = "abcdefghijklmnopqrstuvwxyz0123456789"
 
 // requirementIDLength is the number of random characters following the leading underscore.
 const requirementIDLength = 9
+
+// DefaultLimitOffset is the default page size used by ApplyLimitOffset when the
+// caller does not specify a limit but requests default-pagination behaviour.
+const DefaultLimitOffset uint = 50
 
 // ProjectKeySchema returns a JSON schema for the projectKey MCP tool parameter.
 // Default is set only when defaultProjectKey is non-empty (JSON default is omitted otherwise).
@@ -70,6 +76,49 @@ func ApplyPaginationOptions[T PaginatedRequest[T]](
 		PagePage(int32(page)).     //nolint:gosec
 		PageSize(int32(pageSize)). //nolint:gosec
 		PageSort(pageSort)
+}
+
+// LimitSchema returns the JSON schema for the "limit" pagination parameter.
+// When defaultLimit is greater than zero, the description mentions the default value.
+func LimitSchema(defaultLimit uint) *jsonschema.Schema {
+	desc := "Maximum number of results to return"
+	if defaultLimit > 0 {
+		desc = fmt.Sprintf("%s (default %d)", desc, defaultLimit)
+	}
+	return &jsonschema.Schema{
+		Type:        "integer",
+		Description: desc,
+		Minimum:     openapi.PtrFloat64(1),
+	}
+}
+
+// OffsetSchema returns the JSON schema for the "offset" pagination parameter.
+func OffsetSchema() *jsonschema.Schema {
+	return &jsonschema.Schema{
+		Type:        "integer",
+		Description: "Number of results to skip for pagination (default 0)",
+		Minimum:     openapi.PtrFloat64(0),
+	}
+}
+
+// ApplyLimitOffset writes "limit" and "offset" query parameters into q.
+//
+// Limit: when limit is zero and defaultLimit > 0, defaultLimit is used as the
+// effective value. When both are zero, the "limit" parameter is omitted.
+//
+// Offset: when defaultLimit > 0, "offset" is always written (even as "0") so the
+// server receives an explicit starting position. When defaultLimit == 0, "offset"
+// is omitted unless its value is greater than zero.
+func ApplyLimitOffset(q url.Values, limit, offset, defaultLimit uint) {
+	if limit == 0 {
+		limit = defaultLimit
+	}
+	if limit > 0 {
+		q.Set("limit", strconv.FormatUint(uint64(limit), 10))
+	}
+	if offset > 0 || defaultLimit > 0 {
+		q.Set("offset", strconv.FormatUint(uint64(offset), 10))
+	}
 }
 
 // ExtractProject resolves the active project key using the agreed priority order:
