@@ -1016,12 +1016,12 @@ func (tr *TMSResources) toolCreateMilestone() (*mcp.Tool, ToolHandler[CreateMile
 					"type": {
 						Type:        "string",
 						Description: "Type of the milestone",
-						Enum:        []any{"SPRINT", "RELEASE", "OTHER"},
+						Enum:        []any{"RELEASE", "SPRINT", "PLAN", "FEATURE", "OTHER"},
 					},
 					"status": {
 						Type:        "string",
 						Description: "Optional status of the milestone",
-						Enum:        []any{"ACTIVE", "CLOSED"},
+						Enum:        []any{"SCHEDULED", "TESTING", "COMPLETED"},
 					},
 					"start-date": {
 						Type:        "string",

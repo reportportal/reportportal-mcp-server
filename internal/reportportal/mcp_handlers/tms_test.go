@@ -82,9 +82,9 @@ func TestCreateMilestoneTool_TypeEnum(t *testing.T) {
 	typeProp, ok := schema.Properties["type"]
 	require.True(t, ok, "type property should exist")
 	require.ElementsMatch(t,
-		[]any{"SPRINT", "RELEASE", "OTHER"},
+		[]any{"RELEASE", "SPRINT", "PLAN", "FEATURE", "OTHER"},
 		typeProp.Enum,
-		"type enum should contain SPRINT, RELEASE, OTHER",
+		"type enum should contain RELEASE, SPRINT, PLAN, FEATURE, OTHER",
 	)
 }
 
@@ -98,9 +98,9 @@ func TestCreateMilestoneTool_StatusEnum(t *testing.T) {
 	statusProp, ok := schema.Properties["status"]
 	require.True(t, ok, "status property should exist")
 	require.ElementsMatch(t,
-		[]any{"ACTIVE", "CLOSED"},
+		[]any{"SCHEDULED", "TESTING", "COMPLETED"},
 		statusProp.Enum,
-		"status enum should contain ACTIVE, CLOSED",
+		"status enum should contain SCHEDULED, TESTING, COMPLETED",
 	)
 }
 
