@@ -54,6 +54,7 @@ func RegisterTMSTools(
 
 	registerTool(s, tms.toolCreateTestPlan)
 	registerTool(s, tms.toolAddTestCasesToTestPlan)
+	registerTool(s, tms.toolDeleteTestCasesFromTestPlan)
 	registerTool(s, tms.toolGetTestPlanByID)
 
 	registerTool(s, tms.toolCreateTestFolder)
@@ -1715,7 +1716,46 @@ func (tr *TMSResources) toolGetManualLaunchExecutions() (*mcp.Tool, ToolHandler[
 		)
 }
 
+func testPlanAndCaseIDsProperties(
+	testPlanIDDesc, testCaseIDsDesc string,
+) map[string]*jsonschema.Schema {
+	return map[string]*jsonschema.Schema{
+		"test-plan-id": {
+			Type:        "integer",
+			Description: testPlanIDDesc,
+			Minimum:     openapi.PtrFloat64(1),
+		},
+		"test-case-ids": {
+			Type:        "array",
+			Description: testCaseIDsDesc,
+			MinItems:    openapi.PtrInt(1),
+			Items: &jsonschema.Schema{
+				Type:    "integer",
+				Minimum: openapi.PtrFloat64(1),
+			},
+		},
+	}
+}
+
 // AddTestCasesToTestPlanArgs represents the arguments for the add_test_cases_to_test_plan tool.
+func validatePlanAndTestCaseIDs(testPlanID int64, testCaseIDs []int64) error {
+	if testPlanID <= 0 {
+		return fmt.Errorf("test-plan-id must be a positive integer")
+	}
+	if len(testCaseIDs) == 0 {
+		return fmt.Errorf("test-case-ids must not be empty")
+	}
+	for _, id := range testCaseIDs {
+		if id <= 0 {
+			return fmt.Errorf(
+				"each test case ID must be a positive integer, got %d",
+				id,
+			)
+		}
+	}
+	return nil
+}
+
 type AddTestCasesToTestPlanArgs struct {
 	ProjectKey  string  `json:"projectKey"`
 	TestPlanID  int64   `json:"test-plan-id"`
@@ -1727,29 +1767,18 @@ func (tr *TMSResources) toolAddTestCasesToTestPlan() (*mcp.Tool, ToolHandler[Add
 	if err != nil {
 		slog.Error("failed to build project key schema", "error", err)
 	}
+	addProps := testPlanAndCaseIDsProperties(
+		"ID of the test plan to add test cases to",
+		"List of test case IDs (each ≥ 1) to add to the test plan (must not be empty)",
+	)
+	addProps[utils.ProjectKeyField] = pkSchema
 	return &mcp.Tool{
 			Name:        "add_test_cases_to_test_plan",
 			Description: "Add multiple test cases to an existing TMS test plan. This tool mutates TMS data.",
 			InputSchema: &jsonschema.Schema{
-				Type: "object",
-				Properties: map[string]*jsonschema.Schema{
-					utils.ProjectKeyField: pkSchema,
-					"test-plan-id": {
-						Type:        "integer",
-						Description: "ID of the test plan to add test cases to",
-						Minimum:     openapi.PtrFloat64(1),
-					},
-					"test-case-ids": {
-						Type:        "array",
-						Description: "List of test case IDs (each ≥ 1) to add to the test plan (must not be empty)",
-						MinItems:    openapi.PtrInt(1),
-						Items: &jsonschema.Schema{
-							Type:    "integer",
-							Minimum: openapi.PtrFloat64(1),
-						},
-					},
-				},
-				Required: []string{"test-plan-id", "test-case-ids"},
+				Type:       "object",
+				Properties: addProps,
+				Required:   []string{"test-plan-id", "test-case-ids"},
 			},
 		},
 		utils.WithAnalytics(
@@ -1760,19 +1789,11 @@ func (tr *TMSResources) toolAddTestCasesToTestPlan() (*mcp.Tool, ToolHandler[Add
 				if err != nil {
 					return nil, nil, fmt.Errorf("failed to extract project: %w", err)
 				}
-				if args.TestPlanID <= 0 {
-					return nil, nil, fmt.Errorf("test-plan-id must be a positive integer")
-				}
-				if len(args.TestCaseIDs) == 0 {
-					return nil, nil, fmt.Errorf("test-case-ids must not be empty")
-				}
-				for _, id := range args.TestCaseIDs {
-					if id <= 0 {
-						return nil, nil, fmt.Errorf(
-							"each test case ID must be a positive integer, got %d",
-							id,
-						)
-					}
+				if err := validatePlanAndTestCaseIDs(
+					args.TestPlanID,
+					args.TestCaseIDs,
+				); err != nil {
+					return nil, nil, err
 				}
 
 				rq := openapi.NewComEpamReportportalBaseCoreTmsDtoBatchBatchAddTestCasesToPlanRQ(
@@ -1781,6 +1802,66 @@ func (tr *TMSResources) toolAddTestCasesToTestPlan() (*mcp.Tool, ToolHandler[Add
 
 				_, response, err := tr.client.TestPlanAPI.AddTestCasesToPlan(ctx, args.TestPlanID, project).
 					ComEpamReportportalBaseCoreTmsDtoBatchBatchAddTestCasesToPlanRQ(*rq).
+					Execute()
+				if err != nil {
+					return nil, nil, fmt.Errorf(
+						"%s: %w",
+						utils.ExtractResponseError(err, response),
+						err,
+					)
+				}
+				return utils.ReadResponseBody(response)
+			},
+		)
+}
+
+// DeleteTestCasesFromTestPlanArgs represents the arguments for the delete_test_cases_from_test_plan tool.
+type DeleteTestCasesFromTestPlanArgs struct {
+	ProjectKey  string  `json:"projectKey"`
+	TestPlanID  int64   `json:"test-plan-id"`
+	TestCaseIDs []int64 `json:"test-case-ids"`
+}
+
+func (tr *TMSResources) toolDeleteTestCasesFromTestPlan() (*mcp.Tool, ToolHandler[DeleteTestCasesFromTestPlanArgs, any]) {
+	pkSchema, err := utils.ProjectKeySchema(tr.defaultProjectKey)
+	if err != nil {
+		slog.Error("failed to build project key schema", "error", err)
+	}
+	deleteProps := testPlanAndCaseIDsProperties(
+		"ID of the test plan to remove test cases from",
+		"List of test case IDs (each ≥ 1) to remove from the test plan (must not be empty)",
+	)
+	deleteProps[utils.ProjectKeyField] = pkSchema
+	return &mcp.Tool{
+			Name:        "delete_test_cases_from_test_plan",
+			Description: "Remove multiple test cases from an existing TMS test plan. This tool mutates TMS data.",
+			InputSchema: &jsonschema.Schema{
+				Type:       "object",
+				Properties: deleteProps,
+				Required:   []string{"test-plan-id", "test-case-ids"},
+			},
+		},
+		utils.WithAnalytics(
+			tr.analytics,
+			"delete_test_cases_from_test_plan",
+			func(ctx context.Context, req *mcp.CallToolRequest, args DeleteTestCasesFromTestPlanArgs) (*mcp.CallToolResult, any, error) {
+				project, err := utils.ExtractProject(ctx, args.ProjectKey)
+				if err != nil {
+					return nil, nil, fmt.Errorf("failed to extract project: %w", err)
+				}
+				if err := validatePlanAndTestCaseIDs(
+					args.TestPlanID,
+					args.TestCaseIDs,
+				); err != nil {
+					return nil, nil, err
+				}
+
+				rq := openapi.NewComEpamReportportalBaseCoreTmsDtoBatchBatchRemoveTestCasesFromPlanRQ(
+					args.TestCaseIDs,
+				)
+
+				_, response, err := tr.client.TestPlanAPI.RemoveTestCasesFromPlan(ctx, args.TestPlanID, project).
+					ComEpamReportportalBaseCoreTmsDtoBatchBatchRemoveTestCasesFromPlanRQ(*rq).
 					Execute()
 				if err != nil {
 					return nil, nil, fmt.Errorf(
