@@ -303,6 +303,75 @@ func TestAddTestCasesToTestPlanTool_ZeroTestPlanID(t *testing.T) {
 	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
 }
 
+// TestDeleteTestCasesFromTestPlanTool_ArraySchema verifies that the test-case-ids
+// property is an array with an items sub-schema (VS Code / GitHub Copilot compatibility).
+func TestDeleteTestCasesFromTestPlanTool_ArraySchema(t *testing.T) {
+	tool, _ := newTMSResources(t).toolDeleteTestCasesFromTestPlan()
+
+	schema, ok := tool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok, "InputSchema should be a *jsonschema.Schema")
+
+	prop, ok := schema.Properties["test-case-ids"]
+	require.True(t, ok, "test-case-ids property should exist")
+	require.Equal(t, "array", prop.Type, "test-case-ids should be an array type")
+	require.NotNil(t, prop.Items, "test-case-ids must have items property (VS Code compatibility)")
+	require.Equal(t, "integer", prop.Items.Type, "items should be of type integer")
+	require.NotNil(t, prop.Items.Minimum, "items should have a minimum constraint")
+	require.Equal(t, float64(1), *prop.Items.Minimum, "items minimum should be 1")
+}
+
+// TestDeleteTestCasesFromTestPlanTool_InvalidEmptyArray verifies that an empty
+// test-case-ids slice is rejected with a clear error before any API call is made.
+func TestDeleteTestCasesFromTestPlanTool_InvalidEmptyArray(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolDeleteTestCasesFromTestPlan()
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, DeleteTestCasesFromTestPlanArgs{
+		ProjectKey:  "test-project",
+		TestPlanID:  42,
+		TestCaseIDs: []int64{},
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "must not be empty")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestDeleteTestCasesFromTestPlanTool_ZeroTestPlanID verifies that a test-plan-id of 0
+// is rejected before any API call is made.
+func TestDeleteTestCasesFromTestPlanTool_ZeroTestPlanID(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolDeleteTestCasesFromTestPlan()
+
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, DeleteTestCasesFromTestPlanArgs{
+		ProjectKey:  "test-project",
+		TestPlanID:  0,
+		TestCaseIDs: []int64{1},
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "test-plan-id must be a positive integer")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestDeleteTestCasesFromTestPlanTool_ZeroTestCaseID verifies that a test case ID of 0
+// within the list is rejected before any API call is made.
+func TestDeleteTestCasesFromTestPlanTool_ZeroTestCaseID(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolDeleteTestCasesFromTestPlan()
+
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, DeleteTestCasesFromTestPlanArgs{
+		ProjectKey:  "test-project",
+		TestPlanID:  42,
+		TestCaseIDs: []int64{1, 0, 3},
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "must be a positive integer")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
 // TestGetTestFoldersByFilterTool_IntegerFilterBounds verifies that the JSON schema
 // for filter-eq-id and filter-eq-parentId carries minimum:1 and no upper bound,
 // so that int64 IDs above MaxInt32 are accepted.

@@ -417,12 +417,12 @@ Available from MCP server version 2.x (requires ReportPortal 26.1+).
 - Retrieve a specific test plan by its ID
 - Create and organize test folders (including nested subfolders)
 - Create, update, and delete manual test cases in either supported format: `text` scenarios (instructions and expected results) or `steps` scenarios (an ordered list of steps)
-- Create milestones and test plans, then assign test cases to plans
+- Create milestones and test plans, then assign or remove test cases from plans
 - Retrieve test cases linked to a specific test plan with optional limit/offset pagination
 - List manual launches by filter (name, item status, completion state, time range, test plan, attributes) with pagination
 - List test case executions for a manual launch by filter (name, priority, tags) with pagination
 
-> **Note:** TMS write tools (`create_*`, `update_*`, `delete_*`, `add_test_cases_to_test_plan`) mutate data in ReportPortal. Use them with care in production projects.
+> **Note:** TMS write tools (`create_*`, `update_*`, `delete_*`, `add_test_cases_to_test_plan`, `delete_test_cases_from_test_plan`) mutate data in ReportPortal. Use them with care in production projects.
 
 ### Available Tools (commands)
 
@@ -467,7 +467,8 @@ Available from MCP server version 2.x. Requires ReportPortal 26.1+ with TMS enab
 | Delete Test Case | Deletes a test case by its ID from the TMS. **Mutates TMS data. Irreversible.** | `testCaseId` (required, integer ≥ 1) |
 | Create Milestone | Creates a new milestone in the TMS. **Mutates TMS data.** Dates must be RFC3339 (e.g. `2026-01-01T00:00:00Z`); `end-date` must not precede `start-date`. | `name` (required), `type` (required, enum: `RELEASE` \| `SPRINT` \| `PLAN` \| `FEATURE` \| `OTHER`), `start-date` (required, RFC3339), `end-date` (required, RFC3339), `status` (optional, enum: `SCHEDULED` \| `TESTING` \| `COMPLETED`) |
 | Create Test Plan | Creates a new test plan linked to an existing milestone. **Mutates TMS data.** | `name` (required), `milestone-id` (required, integer ≥ 1), `description` (optional) |
-| Add Test Cases to Test Plan | Adds one or more test cases to an existing TMS test plan. **Mutates TMS data.** | `test-plan-id` (required, integer ≥ 1), `test-case-ids` (required, non-empty array of integers) |
+| Add Test Cases to Test Plan | Adds one or more test cases to an existing TMS test plan. **Mutates TMS data.** | `test-plan-id` (required, integer ≥ 1), `test-case-ids` (required, non-empty array of integers ≥ 1) |
+| Delete Test Cases from Test Plan | Removes one or more test cases from an existing TMS test plan. **Mutates TMS data.** | `test-plan-id` (required, integer ≥ 1), `test-case-ids` (required, non-empty array of integers ≥ 1) |
 | Get Manual Launches | Lists manual launches for a project from the TMS, filtered by name, execution status, completion state, time range, test plan, or attributes. Supports limit/offset pagination. | `filter-cnt-name` (optional), `filter-in-itemStatus` (optional, array: `PASSED` \| `FAILED` \| `SKIPPED` \| `IN_PROGRESS`), `filter-eq-completion` (optional, enum: `has_not_executed` \| `done`; omit for all), `filter-gt-startTime` (optional, RFC3339 or Unix epoch), `filter-lt-endTime` (optional, RFC3339 or Unix epoch), `filter-eq-testPlanId` (optional, integer ≥ 1), `filter-has-compositeAttribute` (optional, format: `key1:value1,key2:value2`), `limit` (optional, integer ≥ 1), `offset` (optional, integer ≥ 0) |
 | Get Manual Launch Executions | Lists test case executions for a specific manual launch from the TMS. All filters and pagination parameters are optional. | `launchId` (required, integer ≥ 1), `filter-cnt-name` (optional), `filter-in-priority` (optional, array: `BLOCKER` \| `CRITICAL` \| `HIGH` \| `LOW` \| `MEDIUM` \| `UNSPECIFIED`), `filter-in-attributeKey` (optional, format: `tag1,tag2,tag3`), `limit` (optional, integer ≥ 1), `offset` (optional, integer ≥ 0) |
 
