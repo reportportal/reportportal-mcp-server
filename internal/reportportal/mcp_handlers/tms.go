@@ -343,7 +343,6 @@ type GetTestFoldersByFilterArgs struct {
 	ProjectKey       string `json:"projectKey"`
 	FilterEqID       *int64 `json:"filter-eq-id,omitempty"`
 	FilterEqParentID *int64 `json:"filter-eq-parentId,omitempty"`
-	FilterEqName     string `json:"filter-eq-name,omitempty"`
 	FilterCntName    string `json:"filter-cnt-name,omitempty"`
 	Limit            uint   `json:"limit"`
 	Offset           uint   `json:"offset"`
@@ -371,10 +370,6 @@ func (tr *TMSResources) toolGetTestFoldersByFilter() (*mcp.Tool, ToolHandler[Get
 						Type:        "integer",
 						Description: "Filter folders by parent folder id",
 						Minimum:     openapi.PtrFloat64(1),
-					},
-					"filter-eq-name": {
-						Type:        "string",
-						Description: "Filter folders by name (exact match; API filter.eq.name)",
 					},
 					"filter-cnt-name": {
 						Type:        "string",
@@ -425,9 +420,6 @@ func (tr *TMSResources) toolGetTestFoldersByFilter() (*mcp.Tool, ToolHandler[Get
 				}
 				if args.FilterEqParentID != nil {
 					query.Set("filter.eq.parentId", strconv.FormatInt(*args.FilterEqParentID, 10))
-				}
-				if args.FilterEqName != "" {
-					query.Set("filter.eq.name", args.FilterEqName)
 				}
 				if args.FilterCntName != "" {
 					query.Set("filter.cnt.name", args.FilterCntName)
