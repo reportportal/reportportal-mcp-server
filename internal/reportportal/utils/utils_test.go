@@ -1,9 +1,15 @@
 package utils
 
 import (
+	"bytes"
+	"errors"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func ms(layout, value string) int64 {
@@ -289,5 +295,73 @@ func TestProcessAttributeKeys_Performance(t *testing.T) {
 	// Should contain many keys
 	if len(strings.Split(result, ",")) < 1000 {
 		t.Errorf("Result should contain many processed keys")
+	}
+}
+
+func TestReadAPIResponse_SuccessPassthrough(t *testing.T) {
+	body := `{"id":1}`
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(bytes.NewBufferString(body)),
+	}
+
+	result, _, err := ReadAPIResponse(resp, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result == nil || result.IsError {
+		t.Fatalf("expected success result, got %#v", result)
+	}
+	text, ok := result.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatalf("expected TextContent, got %T", result.Content[0])
+	}
+	if text.Text != body {
+		t.Fatalf("body = %q, want %q", text.Text, body)
+	}
+}
+
+func TestReadAPIResponse_DecodeFailureOn2xxReturnsBody(t *testing.T) {
+	body := `{"id":1800,"manualScenario":{"manualScenarioType":"TEXT","id":1798,"requirements":[]}}`
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(bytes.NewBufferString(body)),
+	}
+	decodeErr := errors.New(
+		"data matches more than one schema in oneOf(ComEpamReportportalBaseCoreTmsDtoTmsTestCaseRSManualScenario)",
+	)
+
+	result, _, err := ReadAPIResponse(resp, decodeErr)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result == nil || result.IsError {
+		t.Fatalf("expected success result for 2xx decode failure, got %#v", result)
+	}
+	text, ok := result.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatalf("expected TextContent, got %T", result.Content[0])
+	}
+	if text.Text != body {
+		t.Fatalf("body = %q, want %q", text.Text, body)
+	}
+}
+
+func TestReadAPIResponse_HTTPErrorPropagates(t *testing.T) {
+	resp := &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Body:       io.NopCloser(bytes.NewBufferString(`{"message":"bad request"}`)),
+	}
+	apiErr := errors.New("400 Bad Request")
+
+	result, _, err := ReadAPIResponse(resp, apiErr)
+	if err == nil {
+		t.Fatal("expected error for non-2xx response")
+	}
+	if result != nil {
+		t.Fatalf("expected nil result, got %#v", result)
+	}
+	if !strings.Contains(err.Error(), "bad request") {
+		t.Fatalf("error = %q, want body detail", err.Error())
 	}
 }
