@@ -499,7 +499,7 @@ func (tr *TMSResources) toolGetTestCasesByFilter() (*mcp.Tool, ToolHandler[GetTe
 					},
 					"filter-has-attributeKey": {
 						Type:        "string",
-						Description: "Filter test cases that have the specified attribute key (tag)",
+						Description: "Filter test cases that have the specified attribute key (tag). Supports filtering by multiple tag keys by providing them as a comma-separated list (e.g. \"smoke,regression,login\").",
 					},
 					"filter-in-priority": {
 						Type:        "array",
