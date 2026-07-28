@@ -971,6 +971,47 @@ func TestCreateTestCaseTool_PreconditionsAndRequirementsReachHTTP(t *testing.T) 
 	require.NotEqual(t, firstID, secondID, "generated requirement ids should be unique")
 }
 
+// TestCreateTestCaseTool_MinimalTextScenarioResponseSucceeds verifies that a
+// successful create response with a minimal TEXT manualScenario (no
+// instructions/expectedResult) is returned to the caller. The goRP oneOf
+// decoder matches both TEXT and STEPS schemas for that payload; ReadAPIResponse
+// must recover the raw body instead of surfacing a false decode failure.
+func TestCreateTestCaseTool_MinimalTextScenarioResponseSucceeds(t *testing.T) {
+	ctx := context.Background()
+	const responseBody = `{"id":1800,"name":"My test new","priority":"BLOCKER","displayId":"TC109","createdAt":1783441058217,"updatedAt":1783441058217,"testFolder":{"id":8},"manualScenario":{"manualScenarioType":"TEXT","id":1798,"requirements":[]}}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodPost, r.Method)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(responseBody))
+	}))
+	t.Cleanup(srv.Close)
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolCreateTestCase()
+
+	priority := "BLOCKER"
+	result, _, callErr := handler(ctx, &mcp.CallToolRequest{}, CreateTestCaseArgs{
+		ProjectKey:   "test-project",
+		Name:         "My test new",
+		Priority:     &priority,
+		TestFolderID: 8,
+	})
+
+	require.NoError(t, callErr)
+	require.NotNil(t, result)
+	require.False(t, result.IsError)
+	require.Len(t, result.Content, 1)
+	text, ok := result.Content[0].(*mcp.TextContent)
+	require.True(t, ok)
+	require.JSONEq(t, responseBody, text.Text)
+}
+
 // TestUpdateTestCaseTool_PreconditionsOnlySendsScenario verifies that preconditions
 // can be set independently of instructions/expected-result on update_test_case.
 func TestUpdateTestCaseTool_PreconditionsOnlySendsScenario(t *testing.T) {

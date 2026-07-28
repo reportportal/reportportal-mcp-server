@@ -301,6 +301,23 @@ func ReadResponseBody(response *http.Response) (*mcp.CallToolResult, any, error)
 	}, nil, nil
 }
 
+// ReadAPIResponse turns an OpenAPI client Execute() result into an MCP tool result.
+//
+// MCP tools discard the typed decoded model and only need the raw JSON body. When the
+// HTTP call succeeded (2xx) but the generated client failed to decode a polymorphic
+// oneOf (for example ComEpamReportportalBaseCoreTmsDtoTmsTestCaseRSManualScenario for
+// a minimal TEXT manual scenario), this helper still returns the raw response body
+// instead of surfacing a false client-side failure.
+func ReadAPIResponse(response *http.Response, err error) (*mcp.CallToolResult, any, error) {
+	if err == nil {
+		return ReadResponseBody(response)
+	}
+	if response != nil && response.StatusCode > 0 && response.StatusCode < 300 {
+		return ReadResponseBody(response)
+	}
+	return nil, nil, fmt.Errorf("%s: %w", ExtractResponseError(err, response), err)
+}
+
 // ParseReportPortalURI parses a ReportPortal URI of the form "reportportal://{part0}/{expectedSegment}/{part2}"
 // and extracts the first and third path segments, validating the structure.
 //

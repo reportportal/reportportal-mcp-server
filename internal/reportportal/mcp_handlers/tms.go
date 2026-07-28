@@ -976,14 +976,7 @@ func (tr *TMSResources) toolCreateTestCase() (*mcp.Tool, ToolHandler[CreateTestC
 				_, response, err := tr.client.TestCaseAPI.CreateTestCase(ctx, project).
 					ComEpamReportportalBaseCoreTmsDtoTmsTestCaseRQ(*rq).
 					Execute()
-				if err != nil {
-					return nil, nil, fmt.Errorf(
-						"%s: %w",
-						utils.ExtractResponseError(err, response),
-						err,
-					)
-				}
-				return utils.ReadResponseBody(response)
+				return utils.ReadAPIResponse(response, err)
 			},
 		)
 }
@@ -1325,14 +1318,7 @@ func (tr *TMSResources) toolUpdateTestCase() (*mcp.Tool, ToolHandler[UpdateTestC
 				_, response, err := tr.client.TestCaseAPI.PatchTestCase(ctx, project, args.TestCaseID).
 					ComEpamReportportalBaseCoreTmsDtoTmsTestCaseRQ(*rq).
 					Execute()
-				if err != nil {
-					return nil, nil, fmt.Errorf(
-						"%s: %w",
-						utils.ExtractResponseError(err, response),
-						err,
-					)
-				}
-				return utils.ReadResponseBody(response)
+				return utils.ReadAPIResponse(response, err)
 			},
 		)
 }
