@@ -423,8 +423,9 @@ Available from MCP server version 2.x (requires ReportPortal 26.1+).
 - List manual launches by filter (name, item status, completion state, time range, test plan, attributes) with pagination
 - List test case executions for a manual launch by filter (name, priority, tags) with pagination
 - Batch-add test cases to an existing manual launch
+- Update the status and comment of a test case execution in a manual launch
 
-> **Note:** TMS write tools (`create_*`, `update_*`, `delete_*`, `add_test_cases_to_test_plan`, `delete_test_cases_from_test_plan`, `add_test_cases_to_manual_launch`) mutate data in ReportPortal. Use them with care in production projects.
+> **Note:** TMS write tools (`create_*`, `update_*`, `delete_*`, `add_test_cases_to_test_plan`, `delete_test_cases_from_test_plan`, `add_test_cases_to_manual_launch`, `update_manual_launch_execution`) mutate data in ReportPortal. Use them with care in production projects.
 
 ### Available Tools (commands)
 
@@ -475,6 +476,7 @@ Available from MCP server version 2.x. Requires ReportPortal 26.1+ with TMS enab
 | Get Manual Launches | Lists manual launches for a project from the TMS, filtered by name, execution status, completion state, time range, test plan, or attributes. Supports limit/offset pagination. | `filter-cnt-name` (optional), `filter-in-itemStatus` (optional, array: `PASSED` \| `FAILED` \| `SKIPPED` \| `IN_PROGRESS`), `filter-eq-completion` (optional, enum: `has_not_executed` \| `done`; omit for all), `filter-gt-startTime` (optional, RFC3339 or Unix epoch), `filter-lt-endTime` (optional, RFC3339 or Unix epoch), `filter-eq-testPlanId` (optional, integer ≥ 1), `filter-has-compositeAttribute` (optional, format: `key1:value1,key2:value2`), `limit` (optional, integer ≥ 1), `offset` (optional, integer ≥ 0) |
 | Get Manual Launch Executions | Lists test case executions for a specific manual launch from the TMS. All filters and pagination parameters are optional. | `launchId` (required, integer ≥ 1), `filter-cnt-name` (optional), `filter-in-priority` (optional, array: `BLOCKER` \| `CRITICAL` \| `HIGH` \| `LOW` \| `MEDIUM` \| `UNSPECIFIED`), `filter-in-attributeKey` (optional, format: `tag1,tag2,tag3`), `limit` (optional, integer ≥ 1), `offset` (optional, integer ≥ 0) |
 | Add Test Cases to Manual Launch | Adds one or more test cases to an existing TMS manual launch. **Mutates TMS data.** | `launchId` (required, integer ≥ 1), `test-case-ids` (required, non-empty array of integers ≥ 1) |
+| Update Manual Launch Execution | Updates the status (and optionally adds a comment with attachments) of a test case execution in a TMS manual launch. Attachments must be uploaded first via the TMS attachment upload endpoint. **Mutates TMS data.** | `launchId` (required, integer ≥ 1), `testCaseExecutionId` (required, integer ≥ 1), `status` (required, enum: `IN_PROGRESS` \| `PASSED` \| `FAILED` \| `SKIPPED`), `executionComment` (optional, object: `comment` (optional, string), `attachments` (optional, array of `{ id, fileName, fileType, fileSize }` — each attachment must be uploaded in advance)) |
 
 ### Available Prompts
 
@@ -853,7 +855,7 @@ Ask your AI assistant:
 "What ReportPortal tools are available?"
 ```
 
-Expected response: A list of 33 tools including launches, test items, analysis tools, TMS tools, etc.
+Expected response: A list of 37 tools including launches, test items, analysis tools, TMS tools, etc.
 
 **Step 2: Test Basic Query**
 

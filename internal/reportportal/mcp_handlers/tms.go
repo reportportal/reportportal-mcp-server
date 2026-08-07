@@ -73,6 +73,7 @@ func RegisterTMSTools(
 	registerTool(s, tms.toolGetManualLaunches)
 	registerTool(s, tms.toolGetManualLaunchExecutions)
 	registerTool(s, tms.toolAddTestCasesToManualLaunch)
+	registerTool(s, tms.toolUpdateManualLaunchExecution)
 }
 
 // GetMilestonesByFilterArgs represents the arguments for the get_milestones_by_filter tool.
@@ -2122,6 +2123,206 @@ func (tr *TMSResources) toolAddTestCasesToManualLaunch() (*mcp.Tool, ToolHandler
 					}
 					return nil, nil, fmt.Errorf(
 						"add test cases to manual launch request failed (HTTP %d): %s",
+						resp.StatusCode,
+						string(respBody),
+					)
+				}
+
+				return utils.ReadResponseBody(resp)
+			},
+		)
+}
+
+// UpdateManualLaunchExecutionArgs represents the arguments for the update_manual_launch_execution tool.
+type UpdateManualLaunchExecutionArgs struct {
+	ProjectKey          string               `json:"projectKey"`
+	LaunchID            int64                `json:"launchId"`
+	TestCaseExecutionID int64                `json:"testCaseExecutionId"`
+	Status              string               `json:"status"`
+	ExecutionComment    *executionCommentArg `json:"executionComment,omitempty"`
+}
+
+type executionCommentArg struct {
+	Comment     string                   `json:"comment,omitempty"`
+	Attachments []executionAttachmentArg `json:"attachments,omitempty"`
+}
+
+type executionAttachmentArg struct {
+	ID       int64  `json:"id"`
+	FileName string `json:"fileName"`
+	FileType string `json:"fileType"`
+	FileSize int64  `json:"fileSize"`
+}
+
+type updateManualLaunchExecutionRQ struct {
+	Status           string               `json:"status"`
+	ExecutionComment *executionCommentArg `json:"executionComment,omitempty"`
+}
+
+var validExecutionStatuses = map[string]bool{
+	"IN_PROGRESS": true,
+	"PASSED":      true,
+	"FAILED":      true,
+	"SKIPPED":     true,
+}
+
+func (tr *TMSResources) toolUpdateManualLaunchExecution() (*mcp.Tool, ToolHandler[UpdateManualLaunchExecutionArgs, any]) {
+	pkSchema, err := utils.ProjectKeySchema(tr.defaultProjectKey)
+	if err != nil {
+		slog.Error("failed to build project key schema", "error", err)
+	}
+	return &mcp.Tool{
+			Name:        "update_manual_launch_execution",
+			Description: "Update the status (and optionally add a comment with attachments) of a test case execution in a TMS manual launch. Attachments must be uploaded first via the TMS attachment upload endpoint and referenced by id/fileName/fileType/fileSize. This tool mutates TMS data.",
+			InputSchema: &jsonschema.Schema{
+				Type: "object",
+				Properties: map[string]*jsonschema.Schema{
+					utils.ProjectKeyField: pkSchema,
+					"launchId": {
+						Type:        "integer",
+						Description: "ID of the manual launch",
+						Minimum:     openapi.PtrFloat64(1),
+					},
+					"testCaseExecutionId": {
+						Type:        "integer",
+						Description: "ID of the test case execution to update",
+						Minimum:     openapi.PtrFloat64(1),
+					},
+					"status": {
+						Type:        "string",
+						Description: "New execution status",
+						Enum:        []any{"IN_PROGRESS", "PASSED", "FAILED", "SKIPPED"},
+					},
+					"executionComment": {
+						Type:        "object",
+						Description: "Optional comment and/or attachments to add to the execution",
+						Properties: map[string]*jsonschema.Schema{
+							"comment": {
+								Type:        "string",
+								Description: "Text comment for the execution",
+							},
+							"attachments": {
+								Type:        "array",
+								Description: "List of previously uploaded attachments to reference. Each attachment must have been uploaded via the TMS attachment upload endpoint first.",
+								Items: &jsonschema.Schema{
+									Type: "object",
+									Properties: map[string]*jsonschema.Schema{
+										"id": {
+											Type:        "integer",
+											Description: "Attachment ID returned by the upload endpoint",
+											Minimum:     openapi.PtrFloat64(1),
+										},
+										"fileName": {
+											Type:        "string",
+											Description: "Original file name (e.g. Logo_Black.png)",
+										},
+										"fileType": {
+											Type:        "string",
+											Description: "MIME type of the file (e.g. image/png)",
+										},
+										"fileSize": {
+											Type:        "integer",
+											Description: "File size in bytes",
+											Minimum:     openapi.PtrFloat64(0),
+										},
+									},
+									Required: []string{"id", "fileName", "fileType", "fileSize"},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"launchId", "testCaseExecutionId", "status"},
+			},
+		},
+		utils.WithAnalytics(
+			tr.analytics,
+			"update_manual_launch_execution",
+			func(ctx context.Context, req *mcp.CallToolRequest, args UpdateManualLaunchExecutionArgs) (*mcp.CallToolResult, any, error) {
+				project, err := utils.ExtractProject(ctx, args.ProjectKey)
+				if err != nil {
+					return nil, nil, fmt.Errorf("failed to extract project: %w", err)
+				}
+
+				if args.LaunchID < 1 {
+					return nil, nil, fmt.Errorf("launchId must be a positive integer")
+				}
+				if args.TestCaseExecutionID < 1 {
+					return nil, nil, fmt.Errorf("testCaseExecutionId must be a positive integer")
+				}
+				if !validExecutionStatuses[args.Status] {
+					return nil, nil, fmt.Errorf(
+						"invalid status %q: must be one of IN_PROGRESS, PASSED, FAILED, SKIPPED",
+						args.Status,
+					)
+				}
+
+				rq := updateManualLaunchExecutionRQ{
+					Status:           args.Status,
+					ExecutionComment: args.ExecutionComment,
+				}
+
+				bodyBytes, err := json.Marshal(rq)
+				if err != nil {
+					return nil, nil, fmt.Errorf("failed to marshal request body: %w", err)
+				}
+
+				cfg := tr.client.GetConfig()
+				executionURL := fmt.Sprintf(
+					"%s://%s/api/v1/project/%s/launch/manual/%d/test-case/execution/%d",
+					cfg.Scheme, cfg.Host,
+					url.PathEscape(project),
+					args.LaunchID,
+					args.TestCaseExecutionID,
+				)
+
+				httpReq, err := http.NewRequestWithContext(
+					ctx,
+					http.MethodPatch,
+					executionURL,
+					bytes.NewReader(bodyBytes),
+				)
+				if err != nil {
+					return nil, nil, fmt.Errorf(
+						"failed to build update manual launch execution request: %w",
+						err,
+					)
+				}
+
+				for k, v := range cfg.DefaultHeader {
+					httpReq.Header.Set(k, v)
+				}
+				httpReq.Header.Set("Content-Type", "application/json")
+				httpReq.Header.Set("Accept", "application/json")
+
+				if cfg.Middleware != nil {
+					cfg.Middleware(httpReq)
+				}
+
+				httpClient := cfg.HTTPClient
+				if httpClient == nil {
+					httpClient = &http.Client{Timeout: importHTTPClientTimeout}
+				}
+
+				resp, err := httpClient.Do(httpReq)
+				if err != nil {
+					return nil, nil, fmt.Errorf(
+						"update manual launch execution request failed: %w",
+						err,
+					)
+				}
+
+				if resp.StatusCode >= 300 {
+					defer resp.Body.Close() //nolint:errcheck
+					respBody, readErr := io.ReadAll(resp.Body)
+					if readErr != nil {
+						return nil, nil, fmt.Errorf(
+							"update manual launch execution request failed (HTTP %d)",
+							resp.StatusCode,
+						)
+					}
+					return nil, nil, fmt.Errorf(
+						"update manual launch execution request failed (HTTP %d): %s",
 						resp.StatusCode,
 						string(respBody),
 					)
