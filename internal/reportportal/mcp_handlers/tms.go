@@ -1,7 +1,9 @@
 package mcphandlers
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -69,6 +71,7 @@ func RegisterTMSTools(
 
 	registerTool(s, tms.toolGetManualLaunches)
 	registerTool(s, tms.toolGetManualLaunchExecutions)
+	registerTool(s, tms.toolAddTestCasesToManualLaunch)
 }
 
 // GetMilestonesByFilterArgs represents the arguments for the get_milestones_by_filter tool.
@@ -1789,6 +1792,141 @@ func (tr *TMSResources) toolAddTestCasesToTestPlan() (*mcp.Tool, ToolHandler[Add
 					)
 				}
 				return utils.ReadResponseBody(response)
+			},
+		)
+}
+
+// AddTestCasesToManualLaunchArgs represents the arguments for the add_test_cases_to_manual_launch tool.
+type AddTestCasesToManualLaunchArgs struct {
+	ProjectKey  string  `json:"projectKey"`
+	LaunchID    int64   `json:"launchId"`
+	TestCaseIDs []int64 `json:"test-case-ids"`
+}
+
+type addTestCasesToLaunchRQ struct {
+	TestCaseIDs []int64 `json:"testCaseIds"`
+}
+
+func (tr *TMSResources) toolAddTestCasesToManualLaunch() (*mcp.Tool, ToolHandler[AddTestCasesToManualLaunchArgs, any]) {
+	pkSchema, err := utils.ProjectKeySchema(tr.defaultProjectKey)
+	if err != nil {
+		slog.Error("failed to build project key schema", "error", err)
+	}
+	return &mcp.Tool{
+			Name:        "add_test_cases_to_manual_launch",
+			Description: "Add multiple test cases to an existing TMS manual launch. This tool mutates TMS data.",
+			InputSchema: &jsonschema.Schema{
+				Type: "object",
+				Properties: map[string]*jsonschema.Schema{
+					utils.ProjectKeyField: pkSchema,
+					"launchId": {
+						Type:        "integer",
+						Description: "ID of the manual launch to add test cases to",
+						Minimum:     openapi.PtrFloat64(1),
+					},
+					"test-case-ids": {
+						Type:        "array",
+						Description: "List of test case IDs (each ≥ 1) to add to the manual launch (must not be empty)",
+						MinItems:    openapi.PtrInt(1),
+						Items: &jsonschema.Schema{
+							Type:    "integer",
+							Minimum: openapi.PtrFloat64(1),
+						},
+					},
+				},
+				Required: []string{"launchId", "test-case-ids"},
+			},
+		},
+		utils.WithAnalytics(
+			tr.analytics,
+			"add_test_cases_to_manual_launch",
+			func(ctx context.Context, req *mcp.CallToolRequest, args AddTestCasesToManualLaunchArgs) (*mcp.CallToolResult, any, error) {
+				project, err := utils.ExtractProject(ctx, args.ProjectKey)
+				if err != nil {
+					return nil, nil, fmt.Errorf("failed to extract project: %w", err)
+				}
+
+				if args.LaunchID <= 0 {
+					return nil, nil, fmt.Errorf("launchId must be a positive integer")
+				}
+				if len(args.TestCaseIDs) == 0 {
+					return nil, nil, fmt.Errorf("test-case-ids must not be empty")
+				}
+				for _, id := range args.TestCaseIDs {
+					if id <= 0 {
+						return nil, nil, fmt.Errorf(
+							"each test case ID must be a positive integer, got %d",
+							id,
+						)
+					}
+				}
+
+				bodyBytes, err := json.Marshal(
+					addTestCasesToLaunchRQ{TestCaseIDs: args.TestCaseIDs},
+				)
+				if err != nil {
+					return nil, nil, fmt.Errorf("failed to marshal request body: %w", err)
+				}
+
+				cfg := tr.client.GetConfig()
+				batchURL := fmt.Sprintf(
+					"%s://%s/api/v1/project/%s/launch/manual/%d/test-case/batch",
+					cfg.Scheme, cfg.Host, url.PathEscape(project), args.LaunchID,
+				)
+
+				httpReq, err := http.NewRequestWithContext(
+					ctx,
+					http.MethodPost,
+					batchURL,
+					bytes.NewReader(bodyBytes),
+				)
+				if err != nil {
+					return nil, nil, fmt.Errorf(
+						"failed to build add test cases to manual launch request: %w",
+						err,
+					)
+				}
+
+				for k, v := range cfg.DefaultHeader {
+					httpReq.Header.Set(k, v)
+				}
+				httpReq.Header.Set("Content-Type", "application/json")
+				httpReq.Header.Set("Accept", "application/json")
+
+				if cfg.Middleware != nil {
+					cfg.Middleware(httpReq)
+				}
+
+				httpClient := cfg.HTTPClient
+				if httpClient == nil {
+					httpClient = &http.Client{Timeout: importHTTPClientTimeout}
+				}
+
+				resp, err := httpClient.Do(httpReq)
+				if err != nil {
+					return nil, nil, fmt.Errorf(
+						"add test cases to manual launch request failed: %w",
+						err,
+					)
+				}
+
+				if resp.StatusCode >= 300 {
+					defer resp.Body.Close() //nolint:errcheck
+					respBody, readErr := io.ReadAll(resp.Body)
+					if readErr != nil {
+						return nil, nil, fmt.Errorf(
+							"add test cases to manual launch request failed (HTTP %d)",
+							resp.StatusCode,
+						)
+					}
+					return nil, nil, fmt.Errorf(
+						"add test cases to manual launch request failed (HTTP %d): %s",
+						resp.StatusCode,
+						string(respBody),
+					)
+				}
+
+				return utils.ReadResponseBody(resp)
 			},
 		)
 }
