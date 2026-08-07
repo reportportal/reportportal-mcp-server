@@ -273,8 +273,14 @@ Ground rules when touching this package or adding a new tool:
    isn't in the generated client yet — see limitation #5 in
    [ARCHITECTURE.md](ARCHITECTURE.md#6-known-limitations--gotchas)), and
    return via `utils.ReadAPIResponse`/`utils.ReadResponseBody`.
-6. Register it: `registerTool(s, r.toolYourThing)` in the `Register*Tools`
-   function for that domain.
+6. Register it: call `registerTool(s, r.toolYourThing)` inside the
+   `Register*Tools` function for that domain (e.g. `RegisterTMSTools`,
+   `RegisterLaunchTools`). Do **not** add it directly in
+   `NewServer`/`initializeTools` — those entry points only invoke the
+   `Register*Tools` functions; bypassing them skips analytics wrapping and the
+   shared resource instance. Only add a new `Register*Tools` call to
+   `NewServer`/`initializeTools` when introducing a **brand-new domain file**
+   (step 1 above).
 7. Update the README tool table (`## Available Tools (commands)`) — the
    number "33 tools" quoted in the Verifying-Your-Setup section will need
    bumping too if you're adding rather than modifying a tool.

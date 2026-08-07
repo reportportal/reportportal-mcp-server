@@ -2566,3 +2566,277 @@ func TestAddTestCasesToManualLaunchTool_HTTPErrorPropagated(t *testing.T) {
 	require.Error(t, callErr)
 	require.Contains(t, callErr.Error(), "404")
 }
+
+// TestCreateManualLaunchTool_Schema verifies that all expected properties are
+// present and that the four required fields are declared.
+func TestCreateManualLaunchTool_Schema(t *testing.T) {
+	tool, _ := newTMSResources(t).toolCreateManualLaunch()
+
+	schema, ok := tool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok, "InputSchema should be a *jsonschema.Schema")
+
+	for _, prop := range []string{
+		"projectKey", "name", "startTime", "test-plan-id", "test-case-ids",
+		"description", "attributes",
+	} {
+		_, exists := schema.Properties[prop]
+		require.True(t, exists, "property %q should exist in schema", prop)
+	}
+	require.ElementsMatch(t,
+		[]string{"name", "startTime", "test-plan-id", "test-case-ids"},
+		schema.Required,
+	)
+}
+
+// TestCreateManualLaunchTool_TestCaseIDsArraySchema guards against the VS Code /
+// GitHub Copilot regression where array parameters without an "items" sub-schema
+// are silently mishandled.
+func TestCreateManualLaunchTool_TestCaseIDsArraySchema(t *testing.T) {
+	tool, _ := newTMSResources(t).toolCreateManualLaunch()
+
+	schema, ok := tool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok)
+
+	prop, ok := schema.Properties["test-case-ids"]
+	require.True(t, ok, "test-case-ids property should exist")
+	require.Equal(t, "array", prop.Type)
+	require.NotNil(t, prop.MinItems, "test-case-ids must have minItems constraint")
+	require.Equal(t, 1, *prop.MinItems)
+	require.NotNil(t, prop.Items, "test-case-ids must have items sub-schema")
+	require.Equal(t, "integer", prop.Items.Type)
+	require.NotNil(t, prop.Items.Minimum)
+	require.Equal(t, float64(1), *prop.Items.Minimum)
+}
+
+// TestCreateManualLaunchTool_EmptyNameRejected verifies that a blank name is
+// rejected before any HTTP call is made.
+func TestCreateManualLaunchTool_EmptyNameRejected(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolCreateManualLaunch()
+
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, CreateManualLaunchArgs{
+		ProjectKey:  "test-project",
+		Name:        "   ",
+		StartTime:   "2026-07-29T11:59:04Z",
+		TestPlanID:  1,
+		TestCaseIDs: []int64{1},
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "name must not be empty")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestCreateManualLaunchTool_InvalidStartTimeRejected verifies that an
+// unparseable startTime is rejected before any HTTP call is made.
+func TestCreateManualLaunchTool_InvalidStartTimeRejected(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolCreateManualLaunch()
+
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, CreateManualLaunchArgs{
+		ProjectKey:  "test-project",
+		Name:        "my launch",
+		StartTime:   "not-a-date",
+		TestPlanID:  1,
+		TestCaseIDs: []int64{1},
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid startTime format")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestCreateManualLaunchTool_ZeroTestPlanIDRejected verifies that a test-plan-id
+// of 0 is rejected before any HTTP call is made.
+func TestCreateManualLaunchTool_ZeroTestPlanIDRejected(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolCreateManualLaunch()
+
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, CreateManualLaunchArgs{
+		ProjectKey:  "test-project",
+		Name:        "my launch",
+		StartTime:   "2026-07-29T11:59:04Z",
+		TestPlanID:  0,
+		TestCaseIDs: []int64{1},
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "test-plan-id must be a positive integer")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestCreateManualLaunchTool_EmptyTestCaseIDsRejected verifies that an empty
+// test-case-ids slice is rejected before any HTTP call is made.
+func TestCreateManualLaunchTool_EmptyTestCaseIDsRejected(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolCreateManualLaunch()
+
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, CreateManualLaunchArgs{
+		ProjectKey:  "test-project",
+		Name:        "my launch",
+		StartTime:   "2026-07-29T11:59:04Z",
+		TestPlanID:  1,
+		TestCaseIDs: []int64{},
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "test-case-ids must not be empty")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestCreateManualLaunchTool_NonPositiveTestCaseIDRejected verifies that a
+// non-positive test case ID is rejected before any HTTP call is made.
+func TestCreateManualLaunchTool_NonPositiveTestCaseIDRejected(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolCreateManualLaunch()
+
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, CreateManualLaunchArgs{
+		ProjectKey:  "test-project",
+		Name:        "my launch",
+		StartTime:   "2026-07-29T11:59:04Z",
+		TestPlanID:  1,
+		TestCaseIDs: []int64{5, 0},
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "each test case ID must be a positive integer")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestCreateManualLaunchTool_RequestReachesHTTP verifies that a valid call sends
+// a POST to the correct path with all fields correctly encoded in the JSON body.
+func TestCreateManualLaunchTool_RequestReachesHTTP(t *testing.T) {
+	ctx := context.Background()
+
+	var capturedPath, capturedMethod string
+	var capturedBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedPath = r.URL.Path
+		capturedMethod = r.Method
+		capturedBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":7}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolCreateManualLaunch()
+
+	desc := "smoke run"
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, CreateManualLaunchArgs{
+		ProjectKey:  "my-project",
+		Name:        "Smoke Launch",
+		StartTime:   "2026-07-29T11:59:04.221Z",
+		TestPlanID:  3,
+		TestCaseIDs: []int64{10, 20},
+		Description: &desc,
+		Attributes:  []manualLaunchAttributeArg{{Key: "env", Value: "staging"}},
+	})
+
+	require.NoError(t, callErr)
+	require.Equal(t, "/api/v1/project/my-project/launch/manual", capturedPath)
+	require.Equal(t, http.MethodPost, capturedMethod)
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(capturedBody, &body))
+	require.Equal(t, "Smoke Launch", body["name"])
+	require.Equal(t, "smoke run", body["description"])
+
+	testPlan, ok := body["testPlan"].(map[string]any)
+	require.True(t, ok, "testPlan should be an object")
+	require.Equal(t, float64(3), testPlan["id"])
+
+	ids, ok := body["testCaseIds"].([]any)
+	require.True(t, ok, "testCaseIds should be an array")
+	require.Len(t, ids, 2)
+
+	attrs, ok := body["attributes"].([]any)
+	require.True(t, ok, "attributes should be an array")
+	require.Len(t, attrs, 1)
+	attr := attrs[0].(map[string]any)
+	require.Equal(t, "env", attr["key"])
+	require.Equal(t, "staging", attr["value"])
+}
+
+// TestCreateManualLaunchTool_StartTimeNormalized verifies that the startTime is
+// always sent in millisecond-precision UTC ISO-8601 format regardless of input format.
+func TestCreateManualLaunchTool_StartTimeNormalized(t *testing.T) {
+	ctx := context.Background()
+
+	var capturedBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedBody, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolCreateManualLaunch()
+
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, CreateManualLaunchArgs{
+		ProjectKey:  "my-project",
+		Name:        "launch",
+		StartTime:   "2026-07-29T11:59:04Z",
+		TestPlanID:  1,
+		TestCaseIDs: []int64{1},
+	})
+
+	require.NoError(t, callErr)
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(capturedBody, &body))
+	st, ok := body["startTime"].(string)
+	require.True(t, ok, "startTime should be a string in the request body")
+	require.Equal(t, "2026-07-29T11:59:04.000Z", st)
+}
+
+// TestCreateManualLaunchTool_HTTPErrorPropagated verifies that a non-2xx response
+// is surfaced as an error containing the status code.
+func TestCreateManualLaunchTool_HTTPErrorPropagated(t *testing.T) {
+	ctx := context.Background()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"message":"test plan not found"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolCreateManualLaunch()
+
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, CreateManualLaunchArgs{
+		ProjectKey:  "my-project",
+		Name:        "launch",
+		StartTime:   "2026-07-29T11:59:04Z",
+		TestPlanID:  1,
+		TestCaseIDs: []int64{5},
+	})
+
+	require.Error(t, callErr)
+	require.Contains(t, callErr.Error(), "400")
+}

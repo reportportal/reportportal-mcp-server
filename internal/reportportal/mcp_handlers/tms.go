@@ -69,6 +69,7 @@ func RegisterTMSTools(
 	registerTool(s, tms.toolUpdateTestCase)
 	registerTool(s, tms.toolDeleteTestCase)
 
+	registerTool(s, tms.toolCreateManualLaunch)
 	registerTool(s, tms.toolGetManualLaunches)
 	registerTool(s, tms.toolGetManualLaunchExecutions)
 	registerTool(s, tms.toolAddTestCasesToManualLaunch)
@@ -1792,6 +1793,206 @@ func (tr *TMSResources) toolAddTestCasesToTestPlan() (*mcp.Tool, ToolHandler[Add
 					)
 				}
 				return utils.ReadResponseBody(response)
+			},
+		)
+}
+
+// CreateManualLaunchArgs represents the arguments for the create_manual_launch tool.
+type CreateManualLaunchArgs struct {
+	ProjectKey  string                     `json:"projectKey"`
+	Name        string                     `json:"name"`
+	StartTime   string                     `json:"startTime"`
+	TestPlanID  int64                      `json:"test-plan-id"`
+	TestCaseIDs []int64                    `json:"test-case-ids"`
+	Description *string                    `json:"description,omitempty"`
+	Attributes  []manualLaunchAttributeArg `json:"attributes,omitempty"`
+}
+
+type manualLaunchAttributeArg struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+type createManualLaunchRQ struct {
+	Name        string  `json:"name"`
+	StartTime   string  `json:"startTime"`
+	Description *string `json:"description,omitempty"`
+	TestPlan    struct {
+		ID int64 `json:"id"`
+	} `json:"testPlan"`
+	TestCaseIDs []int64                    `json:"testCaseIds"`
+	Attributes  []manualLaunchAttributeArg `json:"attributes,omitempty"`
+}
+
+func (tr *TMSResources) toolCreateManualLaunch() (*mcp.Tool, ToolHandler[CreateManualLaunchArgs, any]) {
+	pkSchema, err := utils.ProjectKeySchema(tr.defaultProjectKey)
+	if err != nil {
+		slog.Error("failed to build project key schema", "error", err)
+	}
+	return &mcp.Tool{
+			Name:        "create_manual_launch",
+			Description: "Create a new manual launch in the ReportPortal TMS and populate it with test cases from a test plan. This tool mutates TMS data.",
+			InputSchema: &jsonschema.Schema{
+				Type: "object",
+				Properties: map[string]*jsonschema.Schema{
+					utils.ProjectKeyField: pkSchema,
+					"name": {
+						Type:        "string",
+						Description: "Name of the manual launch",
+					},
+					"startTime": {
+						Type:        "string",
+						Description: "Start time of the launch in ISO-8601 format (e.g. 2026-07-29T11:59:04.221Z)",
+					},
+					"test-plan-id": {
+						Type:        "integer",
+						Description: "ID of the test plan whose test cases are being executed (must be ≥ 1)",
+						Minimum:     openapi.PtrFloat64(1),
+					},
+					"test-case-ids": {
+						Type:        "array",
+						Description: "Non-empty list of test case IDs (each ≥ 1) to include in the launch",
+						MinItems:    openapi.PtrInt(1),
+						Items: &jsonschema.Schema{
+							Type:    "integer",
+							Minimum: openapi.PtrFloat64(1),
+						},
+					},
+					"description": {
+						Type:        "string",
+						Description: "Optional description of the manual launch",
+					},
+					"attributes": {
+						Type:        "array",
+						Description: "Optional list of attributes to attach to the launch. Each attribute requires a value; key is optional.",
+						Items: &jsonschema.Schema{
+							Type: "object",
+							Properties: map[string]*jsonschema.Schema{
+								"key": {
+									Type:        "string",
+									Description: "Attribute key (may be empty for tag-style attributes)",
+								},
+								"value": {
+									Type:        "string",
+									Description: "Attribute value (required)",
+									MinLength:   openapi.PtrInt(1),
+								},
+							},
+							Required: []string{"value"},
+						},
+					},
+				},
+				Required: []string{"name", "startTime", "test-plan-id", "test-case-ids"},
+			},
+		},
+		utils.WithAnalytics(
+			tr.analytics,
+			"create_manual_launch",
+			func(ctx context.Context, req *mcp.CallToolRequest, args CreateManualLaunchArgs) (*mcp.CallToolResult, any, error) {
+				project, err := utils.ExtractProject(ctx, args.ProjectKey)
+				if err != nil {
+					return nil, nil, fmt.Errorf("failed to extract project: %w", err)
+				}
+				if strings.TrimSpace(args.Name) == "" {
+					return nil, nil, fmt.Errorf("name must not be empty or whitespace")
+				}
+
+				parsedTime, parseErr := time.Parse(time.RFC3339Nano, args.StartTime)
+				if parseErr != nil {
+					parsedTime, parseErr = time.Parse(time.RFC3339, args.StartTime)
+					if parseErr != nil {
+						return nil, nil, fmt.Errorf(
+							"invalid startTime format, expected ISO-8601 (e.g. 2026-07-29T11:59:04.221Z): %w",
+							parseErr,
+						)
+					}
+				}
+
+				if args.TestPlanID <= 0 {
+					return nil, nil, fmt.Errorf("test-plan-id must be a positive integer")
+				}
+				if len(args.TestCaseIDs) == 0 {
+					return nil, nil, fmt.Errorf("test-case-ids must not be empty")
+				}
+				for _, id := range args.TestCaseIDs {
+					if id <= 0 {
+						return nil, nil, fmt.Errorf(
+							"each test case ID must be a positive integer, got %d",
+							id,
+						)
+					}
+				}
+
+				rq := createManualLaunchRQ{
+					Name:        args.Name,
+					StartTime:   parsedTime.UTC().Format("2006-01-02T15:04:05.000Z"),
+					Description: args.Description,
+					TestCaseIDs: args.TestCaseIDs,
+					Attributes:  args.Attributes,
+				}
+				rq.TestPlan.ID = args.TestPlanID
+
+				bodyBytes, err := json.Marshal(rq)
+				if err != nil {
+					return nil, nil, fmt.Errorf("failed to marshal request body: %w", err)
+				}
+
+				cfg := tr.client.GetConfig()
+				launchURL := fmt.Sprintf(
+					"%s://%s/api/v1/project/%s/launch/manual",
+					cfg.Scheme, cfg.Host, url.PathEscape(project),
+				)
+
+				httpReq, err := http.NewRequestWithContext(
+					ctx,
+					http.MethodPost,
+					launchURL,
+					bytes.NewReader(bodyBytes),
+				)
+				if err != nil {
+					return nil, nil, fmt.Errorf(
+						"failed to build create manual launch request: %w",
+						err,
+					)
+				}
+
+				for k, v := range cfg.DefaultHeader {
+					httpReq.Header.Set(k, v)
+				}
+				httpReq.Header.Set("Content-Type", "application/json")
+				httpReq.Header.Set("Accept", "application/json")
+
+				if cfg.Middleware != nil {
+					cfg.Middleware(httpReq)
+				}
+
+				httpClient := cfg.HTTPClient
+				if httpClient == nil {
+					httpClient = &http.Client{Timeout: importHTTPClientTimeout}
+				}
+
+				resp, err := httpClient.Do(httpReq)
+				if err != nil {
+					return nil, nil, fmt.Errorf("create manual launch request failed: %w", err)
+				}
+
+				if resp.StatusCode >= 300 {
+					defer resp.Body.Close() //nolint:errcheck
+					respBody, readErr := io.ReadAll(resp.Body)
+					if readErr != nil {
+						return nil, nil, fmt.Errorf(
+							"create manual launch request failed (HTTP %d)",
+							resp.StatusCode,
+						)
+					}
+					return nil, nil, fmt.Errorf(
+						"create manual launch request failed (HTTP %d): %s",
+						resp.StatusCode,
+						string(respBody),
+					)
+				}
+
+				return utils.ReadResponseBody(resp)
 			},
 		)
 }
