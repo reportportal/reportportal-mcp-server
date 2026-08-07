@@ -2417,3 +2417,152 @@ func TestGetTestFoldersByFilterTool_PaginationReachesHTTP(t *testing.T) {
 	require.Equal(t, "20", capturedQuery.Get("limit"))
 	require.Equal(t, "40", capturedQuery.Get("offset"))
 }
+
+// ---------------------------------------------------------------------------
+// add_test_cases_to_manual_launch tests
+// ---------------------------------------------------------------------------
+
+// TestAddTestCasesToManualLaunchTool_ArraySchema mirrors TestAddTestCasesToTestPlanTool_ArraySchema
+// and guards against the VS Code / GitHub Copilot regression where array parameters without an
+// "items" sub-schema are silently mishandled.
+func TestAddTestCasesToManualLaunchTool_ArraySchema(t *testing.T) {
+	tool, _ := newTMSResources(t).toolAddTestCasesToManualLaunch()
+
+	schema, ok := tool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok, "InputSchema should be a *jsonschema.Schema")
+
+	prop, ok := schema.Properties["test-case-ids"]
+	require.True(t, ok, "test-case-ids property should exist")
+	require.Equal(t, "array", prop.Type, "test-case-ids should be an array type")
+	require.NotNil(
+		t,
+		prop.MinItems,
+		"test-case-ids must have minItems constraint to reject empty arrays",
+	)
+	require.Equal(t, 1, *prop.MinItems, "test-case-ids minItems should be 1")
+	require.NotNil(t, prop.Items, "test-case-ids must have items property (VS Code compatibility)")
+	require.Equal(t, "integer", prop.Items.Type, "items should be of type integer")
+	require.NotNil(t, prop.Items.Minimum, "items should have a minimum constraint")
+	require.Equal(t, float64(1), *prop.Items.Minimum, "items minimum should be 1")
+}
+
+// TestAddTestCasesToManualLaunchTool_RequiredFields verifies that launchId and
+// test-case-ids are listed as required in the schema.
+func TestAddTestCasesToManualLaunchTool_RequiredFields(t *testing.T) {
+	tool, _ := newTMSResources(t).toolAddTestCasesToManualLaunch()
+
+	schema, ok := tool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok, "InputSchema should be a *jsonschema.Schema")
+	require.ElementsMatch(t, []string{"launchId", "test-case-ids"}, schema.Required)
+}
+
+// TestAddTestCasesToManualLaunchTool_ZeroLaunchIDRejected verifies that a launchId
+// of 0 is rejected before any HTTP call is made.
+func TestAddTestCasesToManualLaunchTool_ZeroLaunchIDRejected(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolAddTestCasesToManualLaunch()
+
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, AddTestCasesToManualLaunchArgs{
+		ProjectKey:  "test-project",
+		LaunchID:    0,
+		TestCaseIDs: []int64{1},
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "launchId must be a positive integer")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestAddTestCasesToManualLaunchTool_EmptyTestCaseIDsRejected verifies that an empty
+// test-case-ids slice is rejected before any HTTP call is made.
+func TestAddTestCasesToManualLaunchTool_EmptyTestCaseIDsRejected(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolAddTestCasesToManualLaunch()
+
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, AddTestCasesToManualLaunchArgs{
+		ProjectKey:  "test-project",
+		LaunchID:    42,
+		TestCaseIDs: []int64{},
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "test-case-ids must not be empty")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestAddTestCasesToManualLaunchTool_RequestReachesHTTP verifies that a valid call
+// sends a POST to the correct path with the testCaseIds encoded in the JSON body.
+func TestAddTestCasesToManualLaunchTool_RequestReachesHTTP(t *testing.T) {
+	ctx := context.Background()
+
+	var capturedPath string
+	var capturedMethod string
+	var capturedBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedPath = r.URL.Path
+		capturedMethod = r.Method
+		capturedBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolAddTestCasesToManualLaunch()
+
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, AddTestCasesToManualLaunchArgs{
+		ProjectKey:  "my-project",
+		LaunchID:    99,
+		TestCaseIDs: []int64{10, 20, 30},
+	})
+
+	require.NoError(t, callErr)
+	require.Contains(t, capturedPath, "/launch/manual/99/test-case/batch")
+	require.Equal(t, http.MethodPost, capturedMethod)
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(capturedBody, &body))
+	ids, ok := body["testCaseIds"].([]any)
+	require.True(t, ok, "testCaseIds should be an array in the request body")
+	require.Len(t, ids, 3, "all three test case IDs should be included")
+}
+
+// TestAddTestCasesToManualLaunchTool_HTTPErrorPropagated verifies that a non-2xx
+// response from the API is surfaced as an error containing the status code.
+func TestAddTestCasesToManualLaunchTool_HTTPErrorPropagated(t *testing.T) {
+	ctx := context.Background()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"message":"launch not found"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolAddTestCasesToManualLaunch()
+
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, AddTestCasesToManualLaunchArgs{
+		ProjectKey:  "my-project",
+		LaunchID:    1,
+		TestCaseIDs: []int64{5},
+	})
+
+	require.Error(t, callErr)
+	require.Contains(t, callErr.Error(), "404")
+}
