@@ -56,6 +56,22 @@ New MCP tools that operate on **launches**/**test items** go in
 test plans, manual launches) goes in `tms.go`. Cross-domain helpers belong in
 `internal/reportportal/utils`, not duplicated per file.
 
+**`launches.go`, `items.go`, and `tms.go` must contain only `mcp.Tool`
+definitions/handlers (the `tool*` constructors) and their `Register*Tools`
+registration function — nothing else.** Any helper that isn't itself a tool
+constructor (request/response shaping, cross-field validation, schema-builder
+functions, upload/multipart plumbing, etc.) belongs in
+`internal/reportportal/utils/mcp_utils.go` as an **exported** function
+(`utils.XxxYyy`), even if today it's only called from one domain file. This
+keeps the handler files scannable as "here's the list of tools" and makes the
+helper independently unit-testable and reusable if another domain needs it
+later. See `utils.ResolveTestCaseAttributes`, `utils.UploadTMSAttachment`,
+`utils.ResolveExecutionCommentAttachments`, `utils.ValidatePlanAndTestCaseIDs`,
+and `utils.TestPlanAndCaseIDsProperties` for examples — all were moved out of
+`tms.go` for exactly this reason. If you add a new non-tool helper to
+`launches.go`/`items.go`/`tms.go`, move it to `mcp_utils.go` as part of the
+same change rather than leaving it in place "for now."
+
 ## 3. Code style
 
 * **Formatting/linting is enforced by `golangci-lint` v2 (`.golangci.yml`)**
