@@ -8,6 +8,8 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/reportportal/goRP/v5/pkg/gorp"
 	"github.com/stretchr/testify/require"
+
+	"github.com/reportportal/reportportal-mcp-server/internal/reportportal/utils"
 )
 
 func TestGetDefectTypesFromJson(t *testing.T) {
@@ -93,7 +95,7 @@ func TestGetDefectTypesFromJson(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := getDefectTypesFromJson(tt.rawBody)
+			result, err := utils.GetDefectTypesFromJSON(tt.rawBody)
 
 			if tt.expectError {
 				if err == nil {
@@ -135,7 +137,7 @@ func TestGetDefectTypesFromJson_VerifyContent(t *testing.T) {
 		}
 	}`)
 
-	result, err := getDefectTypesFromJson(rawBody)
+	result, err := utils.GetDefectTypesFromJSON(rawBody)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

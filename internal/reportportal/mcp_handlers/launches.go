@@ -8,12 +8,10 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"mime"
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
 	"net/url"
-	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -37,42 +35,6 @@ const (
 	importMaxFileSizeBytes = 50 * 1024 * 1024 // 50 MiB
 )
 
-// ToolHandler is a function type for MCP tool handlers with typed input and output.
-type ToolHandler[In, Out any] func(ctx context.Context, req *mcp.CallToolRequest, args In) (*mcp.CallToolResult, Out, error)
-
-// registerTool is a helper to register a tool that returns both tool definition and handler
-func registerTool[In, Out any](s *mcp.Server, getTool func() (*mcp.Tool, ToolHandler[In, Out])) {
-	tool, handler := getTool()
-	mcp.AddTool(s, tool, mcp.ToolHandlerFor[In, Out](handler))
-}
-
-// registerResourceTemplate is a helper to register a resource template with its handler
-func registerResourceTemplate(
-	s *mcp.Server,
-	getResourceTemplate func() (*mcp.ResourceTemplate, mcp.ResourceHandler),
-) {
-	template, handler := getResourceTemplate()
-	s.AddResourceTemplate(template, handler)
-}
-
-// mustMarshalJSON marshals a value to JSON or panics on error.
-//
-// This function intentionally panics on marshal failure because it is only used with
-// known-safe, compile-time literals and simple slices (e.g., during tool registration/init)
-// where json.Marshal cannot fail. Examples include string literals, boolean values, and
-// simple string slices used as schema defaults.
-//
-// WARNING: Do NOT use this function with user-supplied data or runtime values that could
-// cause json.Marshal to fail, as this will result in unintended panics. For such cases,
-// handle json.Marshal errors explicitly instead.
-func mustMarshalJSON(v any) json.RawMessage {
-	b, err := json.Marshal(v)
-	if err != nil {
-		panic(fmt.Sprintf("failed to marshal JSON: %v", err))
-	}
-	return b
-}
-
 // RegisterLaunchTools registers all launch-related tools and resources with the MCP server.
 // httpClient is an optional pre-configured HTTP client used for the import-launch multipart
 // upload.  When nil a default client with a 30 s timeout is created.
@@ -85,18 +47,18 @@ func RegisterLaunchTools(
 ) {
 	launches := NewLaunchResources(rpClient, analyticsClient, defaultProjectKey, httpClient)
 
-	registerTool(s, launches.toolGetLaunches)
-	registerTool(s, launches.toolGetLastLaunchByName)
-	registerTool(s, launches.toolGetLaunchById)
-	registerTool(s, launches.toolUpdateLaunch)
-	registerTool(s, launches.toolForceFinishLaunch)
-	registerTool(s, launches.toolDeleteLaunch)
-	registerTool(s, launches.toolRunAutoAnalysis)
-	registerTool(s, launches.toolUniqueErrorAnalysis)
-	registerTool(s, launches.toolRunQualityGate)
-	registerTool(s, launches.toolImportLaunchFromFile)
+	utils.RegisterTool(s, launches.toolGetLaunches)
+	utils.RegisterTool(s, launches.toolGetLastLaunchByName)
+	utils.RegisterTool(s, launches.toolGetLaunchById)
+	utils.RegisterTool(s, launches.toolUpdateLaunch)
+	utils.RegisterTool(s, launches.toolForceFinishLaunch)
+	utils.RegisterTool(s, launches.toolDeleteLaunch)
+	utils.RegisterTool(s, launches.toolRunAutoAnalysis)
+	utils.RegisterTool(s, launches.toolUniqueErrorAnalysis)
+	utils.RegisterTool(s, launches.toolRunQualityGate)
+	utils.RegisterTool(s, launches.toolImportLaunchFromFile)
 
-	registerResourceTemplate(s, launches.resourceLaunch)
+	utils.RegisterResourceTemplate(s, launches.resourceLaunch)
 }
 
 // importPluginInfo holds metadata for a single IMPORT-type plugin.
@@ -104,97 +66,6 @@ type importPluginInfo struct {
 	Name             string   // canonical plugin name as returned by the API
 	MimeTypes        []string // details.acceptFileMimeTypes (empty → use upload defaults)
 	MaxFileSizeBytes int64    // from details.maxFileSize, or importMaxFileSizeBytes
-}
-
-func parseAcceptFileMimeTypes(v any) []string {
-	switch x := v.(type) {
-	case []interface{}:
-		out := make([]string, 0, len(x))
-		for _, e := range x {
-			if s, ok := e.(string); ok && s != "" {
-				out = append(out, s)
-			}
-		}
-		return out
-	case []string:
-		out := make([]string, 0, len(x))
-		for _, s := range x {
-			if s != "" {
-				out = append(out, s)
-			}
-		}
-		return out
-	default:
-		return nil
-	}
-}
-
-func normalizeMediaType(s string) string {
-	s = strings.TrimSpace(s)
-	if i := strings.Index(s, ";"); i >= 0 {
-		s = s[:i]
-	}
-	return strings.ToLower(s)
-}
-
-// pickImportContentType chooses the multipart part Content-Type using optional
-// explicit caller input, else by matching fileName's extension to plugin MimeTypes.
-func pickImportContentType(mimeTypes []string, fileName, explicit string) (string, error) {
-	explicit = strings.TrimSpace(explicit)
-	if explicit != "" {
-		if len(mimeTypes) > 0 {
-			want := normalizeMediaType(explicit)
-			for _, m := range mimeTypes {
-				if normalizeMediaType(m) == want {
-					return m, nil
-				}
-			}
-			return "", fmt.Errorf(
-				"content_type %q is not in this plugin's acceptFileMimeTypes [%s]",
-				explicit,
-				strings.Join(mimeTypes, ", "),
-			)
-		}
-		return explicit, nil
-	}
-	if len(mimeTypes) == 0 {
-		return "application/octet-stream", nil
-	}
-	if len(mimeTypes) == 1 {
-		return mimeTypes[0], nil
-	}
-	ext := strings.ToLower(path.Ext(fileName))
-	if ext == "" {
-		return "", fmt.Errorf(
-			"file_name must include a file extension or set content_type to one of: %s",
-			strings.Join(mimeTypes, ", "),
-		)
-	}
-	for _, m := range mimeTypes {
-		base := strings.TrimSpace(m)
-		if i := strings.Index(base, ";"); i >= 0 {
-			base = base[:i]
-		}
-		exts, _ := mime.ExtensionsByType(base)
-		for _, e := range exts {
-			if strings.ToLower(e) == ext {
-				return m, nil
-			}
-		}
-	}
-	if t := mime.TypeByExtension(ext); t != "" {
-		tNorm := normalizeMediaType(t)
-		for _, m := range mimeTypes {
-			if normalizeMediaType(m) == tNorm {
-				return m, nil
-			}
-		}
-	}
-	return "", fmt.Errorf(
-		"could not map file extension %q to an accepted MIME type; set content_type to one of: %s",
-		ext,
-		strings.Join(mimeTypes, ", "),
-	)
 }
 
 // importPluginCache holds a thread-safe snapshot of available IMPORT-type plugins.
@@ -278,7 +149,7 @@ func (lr *LaunchResources) fetchAndCacheImportPlugins(ctx context.Context) error
 			}
 			details := p.GetDetails()
 			if mimes, ok := details["acceptFileMimeTypes"]; ok {
-				info.MimeTypes = parseAcceptFileMimeTypes(mimes)
+				info.MimeTypes = utils.ParseAcceptFileMimeTypes(mimes)
 			}
 			if maxSize, ok := details["maxFileSize"]; ok {
 				if f, ok := maxSize.(float64); ok && f > 0 {
@@ -313,7 +184,7 @@ type GetLaunchesArgs struct {
 }
 
 // toolGetLaunches creates a tool to retrieve a paginated list of launches from ReportPortal.
-func (lr *LaunchResources) toolGetLaunches() (*mcp.Tool, ToolHandler[GetLaunchesArgs, any]) {
+func (lr *LaunchResources) toolGetLaunches() (*mcp.Tool, utils.ToolHandler[GetLaunchesArgs, any]) {
 	// Build JSON Schema for input parameters
 	properties := utils.SetPaginationProperties(utils.DefaultSortingForLaunches)
 	pkSchema, err := utils.ProjectKeySchema(lr.defaultProjectKey)
@@ -443,7 +314,7 @@ type LaunchIDArgs struct {
 	LaunchID   uint32 `json:"launch_id"`
 }
 
-func (lr *LaunchResources) toolRunQualityGate() (*mcp.Tool, ToolHandler[LaunchIDArgs, any]) {
+func (lr *LaunchResources) toolRunQualityGate() (*mcp.Tool, utils.ToolHandler[LaunchIDArgs, any]) {
 	pkSchema, err := utils.ProjectKeySchema(lr.defaultProjectKey)
 	if err != nil {
 		slog.Error("failed to build project key schema", "error", err)
@@ -505,7 +376,7 @@ type GetLastLaunchByNameArgs struct {
 }
 
 // toolGetLastLaunchByName creates a tool to retrieve the last launch by its name.
-func (lr *LaunchResources) toolGetLastLaunchByName() (*mcp.Tool, ToolHandler[GetLastLaunchByNameArgs, any]) {
+func (lr *LaunchResources) toolGetLastLaunchByName() (*mcp.Tool, utils.ToolHandler[GetLastLaunchByNameArgs, any]) {
 	properties := utils.SetPaginationProperties(utils.DefaultSortingForLaunches)
 	pkSchema, err := utils.ProjectKeySchema(lr.defaultProjectKey)
 	if err != nil {
@@ -574,7 +445,7 @@ func (lr *LaunchResources) toolGetLastLaunchByName() (*mcp.Tool, ToolHandler[Get
 }
 
 // toolGetLaunchById creates a tool to retrieve a specific launch by its ID directly.
-func (lr *LaunchResources) toolGetLaunchById() (*mcp.Tool, ToolHandler[LaunchIDArgs, any]) {
+func (lr *LaunchResources) toolGetLaunchById() (*mcp.Tool, utils.ToolHandler[LaunchIDArgs, any]) {
 	pkSchema, err := utils.ProjectKeySchema(lr.defaultProjectKey)
 	if err != nil {
 		slog.Error("failed to build project key schema", "error", err)
@@ -629,7 +500,7 @@ func (lr *LaunchResources) toolGetLaunchById() (*mcp.Tool, ToolHandler[LaunchIDA
 		)
 }
 
-func (lr *LaunchResources) toolDeleteLaunch() (*mcp.Tool, ToolHandler[LaunchIDArgs, any]) {
+func (lr *LaunchResources) toolDeleteLaunch() (*mcp.Tool, utils.ToolHandler[LaunchIDArgs, any]) {
 	pkSchema, err := utils.ProjectKeySchema(lr.defaultProjectKey)
 	if err != nil {
 		slog.Error("failed to build project key schema", "error", err)
@@ -688,7 +559,7 @@ type RunAutoAnalysisArgs struct {
 	AnalyzerItemModes []string `json:"analyzer_item_modes"`
 }
 
-func (lr *LaunchResources) toolRunAutoAnalysis() (*mcp.Tool, ToolHandler[RunAutoAnalysisArgs, any]) {
+func (lr *LaunchResources) toolRunAutoAnalysis() (*mcp.Tool, utils.ToolHandler[RunAutoAnalysisArgs, any]) {
 	pkSchema, err := utils.ProjectKeySchema(lr.defaultProjectKey)
 	if err != nil {
 		slog.Error("failed to build project key schema", "error", err)
@@ -714,13 +585,13 @@ func (lr *LaunchResources) toolRunAutoAnalysis() (*mcp.Tool, ToolHandler[RunAuto
 							"previous_launch",
 							"current_and_the_same_name",
 						},
-						Default: mustMarshalJSON("current_launch"),
+						Default: utils.MustMarshalJSON("current_launch"),
 					},
 					"analyzer_type": {
 						Type:        "string",
 						Description: "Analyzer type, only one of the values is allowed",
 						Enum:        []any{"autoAnalyzer", "patternAnalyzer"},
-						Default:     mustMarshalJSON("autoAnalyzer"),
+						Default:     utils.MustMarshalJSON("autoAnalyzer"),
 					},
 					"analyzer_item_modes": {
 						Type:        "array",
@@ -729,7 +600,7 @@ func (lr *LaunchResources) toolRunAutoAnalysis() (*mcp.Tool, ToolHandler[RunAuto
 							Type: "string",
 							Enum: []any{"to_investigate", "auto_analyzed", "manually_analyzed"},
 						},
-						Default: mustMarshalJSON([]string{"to_investigate"}),
+						Default: utils.MustMarshalJSON([]string{"to_investigate"}),
 					},
 				},
 				Required: []string{
@@ -789,7 +660,7 @@ type UniqueErrorAnalysisArgs struct {
 	RemoveNumbers bool   `json:"remove_numbers"`
 }
 
-func (lr *LaunchResources) toolUniqueErrorAnalysis() (*mcp.Tool, ToolHandler[UniqueErrorAnalysisArgs, any]) {
+func (lr *LaunchResources) toolUniqueErrorAnalysis() (*mcp.Tool, utils.ToolHandler[UniqueErrorAnalysisArgs, any]) {
 	pkSchema, err := utils.ProjectKeySchema(lr.defaultProjectKey)
 	if err != nil {
 		slog.Error("failed to build project key schema", "error", err)
@@ -808,7 +679,7 @@ func (lr *LaunchResources) toolUniqueErrorAnalysis() (*mcp.Tool, ToolHandler[Uni
 					"remove_numbers": {
 						Type:        "boolean",
 						Description: "Remove numbers from analyzed logs",
-						Default:     mustMarshalJSON(false),
+						Default:     utils.MustMarshalJSON(false),
 					},
 				},
 				Required: []string{"launch_id"},
@@ -863,7 +734,7 @@ type UpdateLaunchArgs struct {
 	Attributes  []UpdateLaunchAttribute `json:"attributes,omitempty"`
 }
 
-func (lr *LaunchResources) toolUpdateLaunch() (*mcp.Tool, ToolHandler[UpdateLaunchArgs, any]) {
+func (lr *LaunchResources) toolUpdateLaunch() (*mcp.Tool, utils.ToolHandler[UpdateLaunchArgs, any]) {
 	pkSchema, err := utils.ProjectKeySchema(lr.defaultProjectKey)
 	if err != nil {
 		slog.Error("failed to build project key schema", "error", err)
@@ -975,7 +846,7 @@ func (lr *LaunchResources) toolUpdateLaunch() (*mcp.Tool, ToolHandler[UpdateLaun
 		)
 }
 
-func (lr *LaunchResources) toolForceFinishLaunch() (*mcp.Tool, ToolHandler[LaunchIDArgs, any]) {
+func (lr *LaunchResources) toolForceFinishLaunch() (*mcp.Tool, utils.ToolHandler[LaunchIDArgs, any]) {
 	pkSchema, err := utils.ProjectKeySchema(lr.defaultProjectKey)
 	if err != nil {
 		slog.Error("failed to build project key schema", "error", err)
@@ -1043,7 +914,7 @@ type ImportLaunchFromFileArgs struct {
 }
 
 // toolImportLaunchFromFile creates a tool to import a launch into ReportPortal from a file passed inline.
-func (lr *LaunchResources) toolImportLaunchFromFile() (*mcp.Tool, ToolHandler[ImportLaunchFromFileArgs, any]) {
+func (lr *LaunchResources) toolImportLaunchFromFile() (*mcp.Tool, utils.ToolHandler[ImportLaunchFromFileArgs, any]) {
 	pkSchema, err := utils.ProjectKeySchema(lr.defaultProjectKey)
 	if err != nil {
 		slog.Error("failed to build project key schema", "error", err)
@@ -1069,7 +940,7 @@ func (lr *LaunchResources) toolImportLaunchFromFile() (*mcp.Tool, ToolHandler[Im
 			Type:        "string",
 			Description: "Encoding of file_content. Omit or set to \"none\" for plain text files (e.g. XML). Set to \"base64\" for binary files (e.g. ZIP archives).",
 			Enum:        []any{"none", "base64"},
-			Default:     mustMarshalJSON("none"),
+			Default:     utils.MustMarshalJSON("none"),
 		},
 		"content_type": {
 			Type: "string",
@@ -1175,7 +1046,7 @@ func (lr *LaunchResources) toolImportLaunchFromFile() (*mcp.Tool, ToolHandler[Im
 				var body bytes.Buffer
 				mw := multipart.NewWriter(&body)
 
-				mimeType, mimeErr := pickImportContentType(
+				mimeType, mimeErr := utils.PickImportContentType(
 					pluginInfo.MimeTypes,
 					args.FileName,
 					args.ContentType,
@@ -1264,6 +1135,7 @@ func (lr *LaunchResources) toolImportLaunchFromFile() (*mcp.Tool, ToolHandler[Im
 				if err != nil {
 					return nil, nil, fmt.Errorf("failed to read import response: %w", err)
 				}
+				resp.Body = io.NopCloser(bytes.NewBuffer(respBody))
 				if localResponseMw != nil {
 					if mwErr := localResponseMw(resp, respBody); mwErr != nil {
 						return nil, nil, fmt.Errorf("import response middleware error: %w", mwErr)

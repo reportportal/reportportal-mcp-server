@@ -2,6 +2,7 @@ package mcphandlers
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"math"
@@ -9,6 +10,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -1118,7 +1120,7 @@ func TestUpdateTestCaseTool_EmptyRequirementsClears(t *testing.T) {
 // both create_test_case and update_test_case tools.
 func TestTestCaseTools_RequirementsSchema(t *testing.T) {
 	tr := newTMSResources(t)
-	for name, toolFn := range map[string]func() (*mcp.Tool, ToolHandler[CreateTestCaseArgs, any]){
+	for name, toolFn := range map[string]func() (*mcp.Tool, utils.ToolHandler[CreateTestCaseArgs, any]){
 		"create_test_case": tr.toolCreateTestCase,
 	} {
 		tool, _ := toolFn()
@@ -2839,4 +2841,251 @@ func TestCreateManualLaunchTool_HTTPErrorPropagated(t *testing.T) {
 
 	require.Error(t, callErr)
 	require.Contains(t, callErr.Error(), "400")
+}
+
+// TestUpdateManualLaunchExecutionTool_AttachmentsSchema verifies that the
+// attachments array's item schema exposes both the "reference existing
+// attachment" (id/fileName/fileType/fileSize) and "upload new attachment"
+// (fileName/content) fields, with only fileName mandatory at the schema level.
+func TestUpdateManualLaunchExecutionTool_AttachmentsSchema(t *testing.T) {
+	tool, _ := newTMSResources(t).toolUpdateManualLaunchExecution()
+
+	schema, ok := tool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok, "InputSchema should be a *jsonschema.Schema")
+
+	commentProp, ok := schema.Properties["executionComment"]
+	require.True(t, ok, "executionComment property should exist")
+
+	attachmentsProp, ok := commentProp.Properties["attachments"]
+	require.True(t, ok, "attachments property should exist")
+	require.Equal(t, "array", attachmentsProp.Type)
+	require.NotNil(t, attachmentsProp.Items)
+
+	items := attachmentsProp.Items
+	require.Contains(t, items.Properties, "id")
+	require.Contains(t, items.Properties, "fileName")
+	require.Contains(t, items.Properties, "fileType")
+	require.Contains(t, items.Properties, "fileSize")
+	require.Contains(t, items.Properties, "content")
+	require.Equal(t, []string{"fileName"}, items.Required)
+}
+
+// TestUpdateManualLaunchExecutionTool_ContentUploadsThenLinksAttachment verifies
+// that an attachment supplied via base64 "content" is uploaded via POST
+// /project/{projectKey}/tms/attachment/upload first, and that the id returned
+// by the upload is what gets linked to the execution in the PATCH body.
+func TestUpdateManualLaunchExecutionTool_ContentUploadsThenLinksAttachment(t *testing.T) {
+	ctx := context.Background()
+
+	var uploadCalled bool
+	var uploadedFileName string
+	var uploadedFileBytes []byte
+	var patchBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/tms/attachment/upload"):
+			uploadCalled = true
+			r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
+			require.NoError(t, r.ParseMultipartForm(10<<20))
+			file, header, err := r.FormFile("file")
+			require.NoError(t, err)
+			defer file.Close() //nolint:errcheck
+			uploadedFileName = header.Filename
+			uploadedFileBytes, err = io.ReadAll(file)
+			require.NoError(t, err)
+
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(
+				[]byte(
+					`{"id":777,"fileName":"screenshot.png","fileType":"image/png","fileSize":4}`,
+				),
+			)
+		case r.Method == http.MethodPatch:
+			patchBody, _ = io.ReadAll(r.Body)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{}`))
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolUpdateManualLaunchExecution()
+
+	content := base64.StdEncoding.EncodeToString([]byte("data"))
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, UpdateManualLaunchExecutionArgs{
+		ProjectKey:          "my-project",
+		LaunchID:            1,
+		TestCaseExecutionID: 2,
+		Status:              "PASSED",
+		ExecutionComment: &executionCommentArg{
+			Comment: "done",
+			Attachments: []utils.ExecutionAttachmentArg{
+				{FileName: "screenshot.png", FileType: "image/png", Content: content},
+			},
+		},
+	})
+
+	require.NoError(t, callErr)
+	require.True(t, uploadCalled, "attachment upload endpoint should have been called")
+	require.Equal(t, "screenshot.png", uploadedFileName)
+	require.Equal(t, []byte("data"), uploadedFileBytes)
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(patchBody, &body))
+	comment, ok := body["executionComment"].(map[string]any)
+	require.True(t, ok, "executionComment should be present in PATCH body")
+	attachments, ok := comment["attachments"].([]any)
+	require.True(t, ok, "attachments should be present in PATCH body")
+	require.Len(t, attachments, 1)
+	att := attachments[0].(map[string]any)
+	require.InEpsilon(t, float64(777), att["id"], 0)
+	require.NotContains(
+		t,
+		att,
+		"content",
+		"raw content must not be sent to the update-execution endpoint",
+	)
+}
+
+// TestUpdateManualLaunchExecutionTool_IDAndContentBothRejected verifies that
+// providing both id and content for the same attachment is rejected before any
+// HTTP call is made.
+func TestUpdateManualLaunchExecutionTool_IDAndContentBothRejected(t *testing.T) {
+	res, counter := newTMSResourcesWithCounter(t)
+	_, handler := res.toolUpdateManualLaunchExecution()
+
+	_, _, err := handler(
+		context.Background(),
+		&mcp.CallToolRequest{},
+		UpdateManualLaunchExecutionArgs{
+			ProjectKey:          "my-project",
+			LaunchID:            1,
+			TestCaseExecutionID: 2,
+			Status:              "PASSED",
+			ExecutionComment: &executionCommentArg{
+				Attachments: []utils.ExecutionAttachmentArg{
+					{ID: 1, FileName: "a.png", Content: "abc"},
+				},
+			},
+		},
+	)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "either id")
+	require.Zero(t, counter.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestUpdateManualLaunchExecutionTool_NeitherIDNorContentRejected verifies that
+// an attachment without id or content is rejected.
+func TestUpdateManualLaunchExecutionTool_NeitherIDNorContentRejected(t *testing.T) {
+	res, counter := newTMSResourcesWithCounter(t)
+	_, handler := res.toolUpdateManualLaunchExecution()
+
+	_, _, err := handler(
+		context.Background(),
+		&mcp.CallToolRequest{},
+		UpdateManualLaunchExecutionArgs{
+			ProjectKey:          "my-project",
+			LaunchID:            1,
+			TestCaseExecutionID: 2,
+			Status:              "PASSED",
+			ExecutionComment: &executionCommentArg{
+				Attachments: []utils.ExecutionAttachmentArg{
+					{FileName: "a.png"},
+				},
+			},
+		},
+	)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "must be provided")
+	require.Zero(t, counter.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestUpdateManualLaunchExecutionTool_ExistingAttachmentMissingMetadataRejected
+// verifies that referencing an existing attachment by id without fileType/fileSize
+// is rejected.
+func TestUpdateManualLaunchExecutionTool_ExistingAttachmentMissingMetadataRejected(t *testing.T) {
+	res, counter := newTMSResourcesWithCounter(t)
+	_, handler := res.toolUpdateManualLaunchExecution()
+
+	_, _, err := handler(
+		context.Background(),
+		&mcp.CallToolRequest{},
+		UpdateManualLaunchExecutionArgs{
+			ProjectKey:          "my-project",
+			LaunchID:            1,
+			TestCaseExecutionID: 2,
+			Status:              "PASSED",
+			ExecutionComment: &executionCommentArg{
+				Attachments: []utils.ExecutionAttachmentArg{
+					{ID: 5, FileName: "a.png"},
+				},
+			},
+		},
+	)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "fileType and fileSize are required")
+	require.Zero(t, counter.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestUpdateManualLaunchExecutionTool_AttachmentUploadHTTPErrorPropagated verifies
+// that a failure from the attachment upload endpoint is surfaced to the caller
+// and that the update-execution PATCH is never attempted.
+func TestUpdateManualLaunchExecutionTool_AttachmentUploadHTTPErrorPropagated(t *testing.T) {
+	ctx := context.Background()
+
+	var patchCalled bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/tms/attachment/upload") {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"message":"file too large"}`))
+			return
+		}
+		patchCalled = true
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolUpdateManualLaunchExecution()
+
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, UpdateManualLaunchExecutionArgs{
+		ProjectKey:          "my-project",
+		LaunchID:            1,
+		TestCaseExecutionID: 2,
+		Status:              "PASSED",
+		ExecutionComment: &executionCommentArg{
+			Attachments: []utils.ExecutionAttachmentArg{
+				{FileName: "a.png", Content: base64.StdEncoding.EncodeToString([]byte("x"))},
+			},
+		},
+	})
+
+	require.Error(t, callErr)
+	require.Contains(t, callErr.Error(), "400")
+	require.False(
+		t,
+		patchCalled,
+		"update-execution should not be called when attachment upload fails",
+	)
 }

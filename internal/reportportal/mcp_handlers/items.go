@@ -28,16 +28,16 @@ func RegisterTestItemTools(
 ) {
 	testItems := NewTestItemResources(rpClient, analyticsClient, defaultProjectKey)
 
-	registerTool(s, testItems.toolGetTestItemById)
-	registerTool(s, testItems.toolGetTestItemsByFilter)
-	registerTool(s, testItems.toolGetTestItemLogsByFilter)
-	registerTool(s, testItems.toolGetTestItemAttachment)
-	registerTool(s, testItems.toolGetTestSuitesByFilter)
-	registerTool(s, testItems.toolGetProjectDefectTypes)
-	registerTool(s, testItems.toolUpdateDefectTypeForTestItems)
-	registerTool(s, testItems.toolGetTestItemsHistory)
+	utils.RegisterTool(s, testItems.toolGetTestItemById)
+	utils.RegisterTool(s, testItems.toolGetTestItemsByFilter)
+	utils.RegisterTool(s, testItems.toolGetTestItemLogsByFilter)
+	utils.RegisterTool(s, testItems.toolGetTestItemAttachment)
+	utils.RegisterTool(s, testItems.toolGetTestSuitesByFilter)
+	utils.RegisterTool(s, testItems.toolGetProjectDefectTypes)
+	utils.RegisterTool(s, testItems.toolUpdateDefectTypeForTestItems)
+	utils.RegisterTool(s, testItems.toolGetTestItemsHistory)
 
-	registerResourceTemplate(s, testItems.resourceTestItem)
+	utils.RegisterResourceTemplate(s, testItems.resourceTestItem)
 }
 
 // TestItemResources is a struct that encapsulates the ReportPortal client.
@@ -57,75 +57,6 @@ func NewTestItemResources(
 		defaultProjectKey: projectKey,
 		analytics:         analytics,
 	}
-}
-
-// resolveSavedFilterIDByName returns the numeric filter ID for the filterId query parameter
-// using GET /v1/{projectKey}/filter with filter.eq.name.
-func (lr *TestItemResources) resolveSavedFilterIDByName(
-	ctx context.Context,
-	project, filterName string,
-) (string, error) {
-	page, resp, err := lr.client.UserFilterAPI.GetAllFilters(ctx, project).
-		FilterEqName(filterName).
-		Execute()
-	if err != nil {
-		return "", fmt.Errorf("%s: %w", utils.ExtractResponseError(err, resp), err)
-	}
-	content := page.GetContent()
-	if len(content) == 0 {
-		return "", fmt.Errorf("no saved filter found with name %q", filterName)
-	}
-	return strconv.FormatInt(content[0].GetId(), 10), nil
-}
-
-// isAllDecimalDigits reports whether s is non-empty and contains only ASCII digits (saved filter IDs are numeric).
-func isAllDecimalDigits(s string) bool {
-	if s == "" {
-		return false
-	}
-	for i := 0; i < len(s); i++ {
-		if s[i] < '0' || s[i] > '9' {
-			return false
-		}
-	}
-	return true
-}
-
-// resolveFilterIDForProvider returns the value for the filterId query parameter when using providerType=filter.
-// All-decimal strings are treated as saved filter IDs and passed through; any other non-empty string is resolved
-// as a saved filter name via resolveSavedFilterIDByName.
-func (lr *TestItemResources) resolveFilterIDForProvider(
-	ctx context.Context,
-	project, filterIDOrName string,
-) (filterID string, err error) {
-	trimmed := strings.TrimSpace(filterIDOrName)
-	if trimmed == "" {
-		return "", fmt.Errorf("filter-id is empty")
-	}
-	if isAllDecimalDigits(trimmed) {
-		slog.Debug(
-			"filter-id is numeric; using as saved filter ID",
-			"filterId",
-			trimmed,
-			"project",
-			project,
-		)
-		return trimmed, nil
-	}
-	id, err := lr.resolveSavedFilterIDByName(ctx, project, trimmed)
-	if err != nil {
-		return "", err
-	}
-	slog.Debug(
-		"resolved filter-id from saved filter name",
-		"filterName",
-		trimmed,
-		"filterId",
-		id,
-		"project",
-		project,
-	)
-	return id, nil
 }
 
 // GetTestItemsByFilterArgs holds filter and pagination params for get_test_items_by_filter.
@@ -159,7 +90,7 @@ type GetTestItemsByFilterArgs struct {
 }
 
 // toolGetTestItemsByFilter creates a tool to list test items for a specific launch.
-func (lr *TestItemResources) toolGetTestItemsByFilter() (*mcp.Tool, ToolHandler[GetTestItemsByFilterArgs, any]) {
+func (lr *TestItemResources) toolGetTestItemsByFilter() (*mcp.Tool, utils.ToolHandler[GetTestItemsByFilterArgs, any]) {
 	properties := make(map[string]*jsonschema.Schema)
 
 	// Required parameters
@@ -216,7 +147,7 @@ func (lr *TestItemResources) toolGetTestItemsByFilter() (*mcp.Tool, ToolHandler[
 		Type:        "string",
 		Description: "Items have retries or not, can be a list of values: TRUE, FALSE, -- (default, filter is not applied)",
 		Enum:        []any{"TRUE", "FALSE", "--"},
-		Default:     mustMarshalJSON("--"),
+		Default:     utils.MustMarshalJSON("--"),
 	}
 	properties["filter-eq-parentId"] = &jsonschema.Schema{
 		Type:        "string",
@@ -253,7 +184,7 @@ func (lr *TestItemResources) toolGetTestItemsByFilter() (*mcp.Tool, ToolHandler[
 	properties["include-before-after-hooks"] = &jsonschema.Schema{
 		Type:        "boolean",
 		Description: "Include all Before/After hook item types (BEFORE_SUITE, BEFORE_GROUPS, BEFORE_CLASS, BEFORE_TEST, TEST, BEFORE_METHOD, AFTER_METHOD, AFTER_TEST, AFTER_CLASS, AFTER_GROUPS, AFTER_SUITE, STEP) together with STEP items. Default: false (only STEP items)",
-		Default:     mustMarshalJSON(false),
+		Default:     utils.MustMarshalJSON(false),
 	}
 	properties["filter-any-compositeAttribute"] = &jsonschema.Schema{
 		Type:        "string",
@@ -262,7 +193,7 @@ func (lr *TestItemResources) toolGetTestItemsByFilter() (*mcp.Tool, ToolHandler[
 	properties["launches-limit"] = &jsonschema.Schema{
 		Type:        "integer",
 		Description: "Maps to launchesLimit when providerType is filter. Ignored for providerType launch. Default: 600 if omitted.",
-		Default:     mustMarshalJSON(utils.DefaultLaunchesLimitForFilterProvider),
+		Default:     utils.MustMarshalJSON(utils.DefaultLaunchesLimitForFilterProvider),
 	}
 	properties["filter-eq-defect-type"] = &jsonschema.Schema{
 		Type: "string",
@@ -316,7 +247,12 @@ func (lr *TestItemResources) toolGetTestItemsByFilter() (*mcp.Tool, ToolHandler[
 			var resolvedFilterID string
 			if strings.TrimSpace(args.FilterName) != "" {
 				providerType = utils.FilterProviderType
-				resolvedFilterID, err = lr.resolveFilterIDForProvider(ctx, project, args.FilterName)
+				resolvedFilterID, err = utils.ResolveFilterIDForProvider(
+					ctx,
+					lr.client,
+					project,
+					args.FilterName,
+				)
 				if err != nil {
 					return nil, nil, err
 				}
@@ -439,7 +375,7 @@ type GetTestItemByIdArgs struct {
 }
 
 // toolGetTestItemById creates a tool to retrieve a test item by its ID.
-func (lr *TestItemResources) toolGetTestItemById() (*mcp.Tool, ToolHandler[GetTestItemByIdArgs, any]) {
+func (lr *TestItemResources) toolGetTestItemById() (*mcp.Tool, utils.ToolHandler[GetTestItemByIdArgs, any]) {
 	properties := make(map[string]*jsonschema.Schema)
 	pkSchema, err := utils.ProjectKeySchema(lr.defaultProjectKey)
 	if err != nil {
@@ -495,7 +431,7 @@ func (lr *TestItemResources) resourceTestItem() (*mcp.ResourceTemplate, mcp.Reso
 		}, func(ctx context.Context, request *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
 			// Parse the URI to extract parameters
 			uri := request.Params.URI
-			project, testItemId, err := parseTestItemURI(uri)
+			project, testItemId, err := utils.ParseReportPortalURI(uri, "testitem")
 			if err != nil {
 				return nil, err
 			}
@@ -526,19 +462,13 @@ func (lr *TestItemResources) resourceTestItem() (*mcp.ResourceTemplate, mcp.Reso
 		}
 }
 
-// parseTestItemURI parses a URI like "reportportal://{projectKey}/testitem/{testItemId}"
-// and extracts the project and testItemId parameters.
-func parseTestItemURI(uri string) (project, testItemId string, err error) {
-	return utils.ParseReportPortalURI(uri, "testitem")
-}
-
 // GetTestItemAttachmentArgs holds params for get_test_item_attachment_by_id.
 type GetTestItemAttachmentArgs struct {
 	ProjectKey          string `json:"projectKey"`
 	AttachmentContentID string `json:"attachment-content-id"`
 }
 
-func (lr *TestItemResources) toolGetTestItemAttachment() (*mcp.Tool, ToolHandler[GetTestItemAttachmentArgs, any]) {
+func (lr *TestItemResources) toolGetTestItemAttachment() (*mcp.Tool, utils.ToolHandler[GetTestItemAttachmentArgs, any]) {
 	properties := make(map[string]*jsonschema.Schema)
 	pkSchema, err := utils.ProjectKeySchema(lr.defaultProjectKey)
 	if err != nil {
@@ -640,7 +570,7 @@ type GetTestItemLogsByFilterArgs struct {
 }
 
 // toolGetTestItemLogsByFilter creates a tool to get test items logs for a specific launch.
-func (lr *TestItemResources) toolGetTestItemLogsByFilter() (*mcp.Tool, ToolHandler[GetTestItemLogsByFilterArgs, any]) {
+func (lr *TestItemResources) toolGetTestItemLogsByFilter() (*mcp.Tool, utils.ToolHandler[GetTestItemLogsByFilterArgs, any]) {
 	properties := make(map[string]*jsonschema.Schema)
 	pkSchema, err := utils.ProjectKeySchema(lr.defaultProjectKey)
 	if err != nil {
@@ -654,22 +584,22 @@ func (lr *TestItemResources) toolGetTestItemLogsByFilter() (*mcp.Tool, ToolHandl
 	properties["page"] = &jsonschema.Schema{
 		Type:        "integer",
 		Description: "Page number",
-		Default:     mustMarshalJSON(utils.FirstPage),
+		Default:     utils.MustMarshalJSON(utils.FirstPage),
 	}
 	properties["page-size"] = &jsonschema.Schema{
 		Type:        "integer",
 		Description: "Page size",
-		Default:     mustMarshalJSON(utils.DefaultPageSize),
+		Default:     utils.MustMarshalJSON(utils.DefaultPageSize),
 	}
 	properties["page-sort"] = &jsonschema.Schema{
 		Type:        "string",
 		Description: "Sorting fields and direction",
-		Default:     mustMarshalJSON(utils.DefaultSortingForLogs),
+		Default:     utils.MustMarshalJSON(utils.DefaultSortingForLogs),
 	}
 	properties["filter-gte-level"] = &jsonschema.Schema{
 		Type:        "string",
 		Description: "Get logs only with specific log level",
-		Default:     mustMarshalJSON(utils.DefaultItemLogLevel),
+		Default:     utils.MustMarshalJSON(utils.DefaultItemLogLevel),
 	}
 	properties["filter-cnt-message"] = &jsonschema.Schema{
 		Type:        "string",
@@ -679,7 +609,7 @@ func (lr *TestItemResources) toolGetTestItemLogsByFilter() (*mcp.Tool, ToolHandl
 		Type:        "string",
 		Description: "Logs with attachment or without, can be a list of values: TRUE, FALSE, -- (default, filter is not applied)",
 		Enum:        []any{"TRUE", "FALSE", "--"},
-		Default:     mustMarshalJSON("--"),
+		Default:     utils.MustMarshalJSON("--"),
 	}
 	properties["filter-in-status"] = &jsonschema.Schema{
 		Type:        "string",
@@ -778,7 +708,7 @@ type GetTestSuitesByFilterArgs struct {
 }
 
 // toolGetTestSuitesByFilter creates a tool to get test suites for a specific launch.
-func (lr *TestItemResources) toolGetTestSuitesByFilter() (*mcp.Tool, ToolHandler[GetTestSuitesByFilterArgs, any]) {
+func (lr *TestItemResources) toolGetTestSuitesByFilter() (*mcp.Tool, utils.ToolHandler[GetTestSuitesByFilterArgs, any]) {
 	properties := make(map[string]*jsonschema.Schema)
 	pkSchema, err := utils.ProjectKeySchema(lr.defaultProjectKey)
 	if err != nil {
@@ -922,42 +852,13 @@ func (lr *TestItemResources) toolGetTestSuitesByFilter() (*mcp.Tool, ToolHandler
 		})
 }
 
-// getDefectTypesFromJson extracts defect types from the project JSON response.
-// It parses the raw JSON and returns the configuration/subTypes field as a JSON string.
-func getDefectTypesFromJson(rawBody []byte) (string, error) {
-	// Parse the JSON response
-	var projectData map[string]interface{}
-	if err := json.Unmarshal(rawBody, &projectData); err != nil {
-		return "", fmt.Errorf("failed to parse response JSON: %v", err)
-	}
-
-	// Extract configuration/subtypes
-	configuration, ok := projectData["configuration"].(map[string]interface{})
-	if !ok {
-		return "", fmt.Errorf("configuration field not found or invalid in response")
-	}
-
-	subtypes, ok := configuration["subTypes"]
-	if !ok {
-		return "", fmt.Errorf("configuration/subTypes field not found in response")
-	}
-
-	// Serialize only the subtypes
-	subtypesJSON, err := json.Marshal(subtypes)
-	if err != nil {
-		return "", fmt.Errorf("failed to serialize defect types: %v", err)
-	}
-
-	return string(subtypesJSON), nil
-}
-
 // ProjectKeyArgs holds just the projectKey parameter.
 type ProjectKeyArgs struct {
 	ProjectKey string `json:"projectKey"`
 }
 
 // toolGetProjectDefectTypes creates a tool to retrieve all defect types for a specific project.
-func (lr *TestItemResources) toolGetProjectDefectTypes() (*mcp.Tool, ToolHandler[ProjectKeyArgs, any]) {
+func (lr *TestItemResources) toolGetProjectDefectTypes() (*mcp.Tool, utils.ToolHandler[ProjectKeyArgs, any]) {
 	properties := make(map[string]*jsonschema.Schema)
 	pkSchema, err := utils.ProjectKeySchema(lr.defaultProjectKey)
 	if err != nil {
@@ -997,7 +898,7 @@ func (lr *TestItemResources) toolGetProjectDefectTypes() (*mcp.Tool, ToolHandler
 			}
 
 			// Extract defect types from JSON
-			defectTypesJSON, err := getDefectTypesFromJson(rawBody)
+			defectTypesJSON, err := utils.GetDefectTypesFromJSON(rawBody)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -1020,7 +921,7 @@ type UpdateDefectTypeArgs struct {
 }
 
 // toolUpdateDefectTypeForTestItems creates a tool to update the defect type for a list of specific test items.
-func (lr *TestItemResources) toolUpdateDefectTypeForTestItems() (*mcp.Tool, ToolHandler[UpdateDefectTypeArgs, any]) {
+func (lr *TestItemResources) toolUpdateDefectTypeForTestItems() (*mcp.Tool, utils.ToolHandler[UpdateDefectTypeArgs, any]) {
 	properties := make(map[string]*jsonschema.Schema)
 	pkSchema, err := utils.ProjectKeySchema(lr.defaultProjectKey)
 	if err != nil {
@@ -1145,7 +1046,7 @@ type GetTestItemsHistoryArgs struct {
 }
 
 // toolGetTestItemsHistory creates a tool to retrieve history of test items.
-func (lr *TestItemResources) toolGetTestItemsHistory() (*mcp.Tool, ToolHandler[GetTestItemsHistoryArgs, any]) {
+func (lr *TestItemResources) toolGetTestItemsHistory() (*mcp.Tool, utils.ToolHandler[GetTestItemsHistoryArgs, any]) {
 	properties := make(map[string]*jsonschema.Schema)
 	pkSchema, err := utils.ProjectKeySchema(lr.defaultProjectKey)
 	if err != nil {
@@ -1170,7 +1071,7 @@ func (lr *TestItemResources) toolGetTestItemsHistory() (*mcp.Tool, ToolHandler[G
 	properties["historyDepth"] = &jsonschema.Schema{
 		Type:        "integer",
 		Description: "Depth of history to retrieve. Allowed values: 1–30.",
-		Default:     mustMarshalJSON(10),
+		Default:     utils.MustMarshalJSON(10),
 		Minimum:     openapi.PtrFloat64(1),
 		Maximum:     openapi.PtrFloat64(30),
 	}
@@ -1178,7 +1079,7 @@ func (lr *TestItemResources) toolGetTestItemsHistory() (*mcp.Tool, ToolHandler[G
 		Type:        "string",
 		Description: "History base: 'table' collects history from all launches (default), 'line' collects history from launches with the same name.",
 		Enum:        []any{"table", "line"},
-		Default:     mustMarshalJSON("table"),
+		Default:     utils.MustMarshalJSON("table"),
 	}
 	properties["filter-cnt-name"] = &jsonschema.Schema{
 		Type:        "string",
@@ -1223,7 +1124,7 @@ func (lr *TestItemResources) toolGetTestItemsHistory() (*mcp.Tool, ToolHandler[G
 		Type:        "string",
 		Description: "Filter items that have retries (TRUE), don't have retries (FALSE), or skip this filter (--)",
 		Enum:        []any{"TRUE", "FALSE", "--"},
-		Default:     mustMarshalJSON("--"),
+		Default:     utils.MustMarshalJSON("--"),
 	}
 	properties["filter-cnt-issueComment"] = &jsonschema.Schema{
 		Type:        "string",

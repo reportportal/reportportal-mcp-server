@@ -81,7 +81,7 @@ Cross-cutting concerns hang off the same wiring:
 | `cmd/verify-testdata` | Standalone CLI that replays `internal/integration/testdata/*.json` fixtures against a **live** running server (see [Development guide](DEVELOPMENT.md#testing)). |
 | `internal/config` | CLI flag/env-var definitions (`cli.go`), TLS config construction (`tls.go`), build-time version vars (`Version`/`Commit`/`Date`, injected via `-ldflags`). |
 | `internal/reportportal` | HTTP-mode server: Chi router, middleware stack, health/info/metrics endpoints, graceful shutdown (`http_server.go`). |
-| `internal/reportportal/mcp_handlers` | stdio-mode server bootstrap (`server.go`) **and** all MCP tool implementations, split by domain: `launches.go`, `items.go`, `tms.go`. Also prompt loading glue. |
+| `internal/reportportal/mcp_handlers` | stdio-mode server bootstrap (`server.go`) **and** all MCP tool implementations, split by domain: `launches.go`, `items.go`, `tms.go`. These three files hold *only* `mcp.Tool` definitions/handlers and their `Register*Tools` function — non-tool helpers live in `internal/reportportal/utils/mcp_utils.go` instead (see [Development guide §2](DEVELOPMENT.md#2-repository-layout-where-to-put-things)). Also prompt loading glue. |
 | `internal/reportportal/mcp_handlers/prompts` | YAML prompt definitions (embedded via `//go:embed`). |
 | `internal/reportportal/analytics` | Google Analytics 4 usage tracking (opt-out), instance-ID discovery, batching. |
 | `internal/reportportal/middleware` | HTTP middleware: token/project extraction (HTTP mode) and injection (outgoing RP client). |

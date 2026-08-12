@@ -51,29 +51,29 @@ func RegisterTMSTools(
 ) {
 	tms := NewTMSResources(rpClient, analyticsClient, defaultProjectKey)
 
-	registerTool(s, tms.toolCreateMilestone)
-	registerTool(s, tms.toolGetMilestonesByFilter)
+	utils.RegisterTool(s, tms.toolCreateMilestone)
+	utils.RegisterTool(s, tms.toolGetMilestonesByFilter)
 
-	registerTool(s, tms.toolCreateTestPlan)
-	registerTool(s, tms.toolAddTestCasesToTestPlan)
-	registerTool(s, tms.toolDeleteTestCasesFromTestPlan)
-	registerTool(s, tms.toolGetTestPlanByID)
+	utils.RegisterTool(s, tms.toolCreateTestPlan)
+	utils.RegisterTool(s, tms.toolAddTestCasesToTestPlan)
+	utils.RegisterTool(s, tms.toolDeleteTestCasesFromTestPlan)
+	utils.RegisterTool(s, tms.toolGetTestPlanByID)
 
-	registerTool(s, tms.toolCreateTestFolder)
-	registerTool(s, tms.toolDeleteTestFolder)
-	registerTool(s, tms.toolGetTestFoldersByFilter)
+	utils.RegisterTool(s, tms.toolCreateTestFolder)
+	utils.RegisterTool(s, tms.toolDeleteTestFolder)
+	utils.RegisterTool(s, tms.toolGetTestFoldersByFilter)
 
-	registerTool(s, tms.toolCreateTestCase)
-	registerTool(s, tms.toolGetTestCasesByFilter)
-	registerTool(s, tms.toolGetTestCasesForTestPlan)
-	registerTool(s, tms.toolUpdateTestCase)
-	registerTool(s, tms.toolDeleteTestCase)
+	utils.RegisterTool(s, tms.toolCreateTestCase)
+	utils.RegisterTool(s, tms.toolGetTestCasesByFilter)
+	utils.RegisterTool(s, tms.toolGetTestCasesForTestPlan)
+	utils.RegisterTool(s, tms.toolUpdateTestCase)
+	utils.RegisterTool(s, tms.toolDeleteTestCase)
 
-	registerTool(s, tms.toolCreateManualLaunch)
-	registerTool(s, tms.toolGetManualLaunches)
-	registerTool(s, tms.toolGetManualLaunchExecutions)
-	registerTool(s, tms.toolAddTestCasesToManualLaunch)
-	registerTool(s, tms.toolUpdateManualLaunchExecution)
+	utils.RegisterTool(s, tms.toolCreateManualLaunch)
+	utils.RegisterTool(s, tms.toolGetManualLaunches)
+	utils.RegisterTool(s, tms.toolGetManualLaunchExecutions)
+	utils.RegisterTool(s, tms.toolAddTestCasesToManualLaunch)
+	utils.RegisterTool(s, tms.toolUpdateManualLaunchExecution)
 }
 
 // GetMilestonesByFilterArgs represents the arguments for the get_milestones_by_filter tool.
@@ -85,7 +85,7 @@ type GetMilestonesByFilterArgs struct {
 	Offset        uint   `json:"offset"`
 }
 
-func (tr *TMSResources) toolGetMilestonesByFilter() (*mcp.Tool, ToolHandler[GetMilestonesByFilterArgs, any]) {
+func (tr *TMSResources) toolGetMilestonesByFilter() (*mcp.Tool, utils.ToolHandler[GetMilestonesByFilterArgs, any]) {
 	pkSchema, err := utils.ProjectKeySchema(tr.defaultProjectKey)
 	if err != nil {
 		slog.Error("failed to build project key schema", "error", err)
@@ -192,7 +192,7 @@ type GetTestPlanByIDArgs struct {
 	ID         int64  `json:"id"`
 }
 
-func (tr *TMSResources) toolGetTestPlanByID() (*mcp.Tool, ToolHandler[GetTestPlanByIDArgs, any]) {
+func (tr *TMSResources) toolGetTestPlanByID() (*mcp.Tool, utils.ToolHandler[GetTestPlanByIDArgs, any]) {
 	pkSchema, err := utils.ProjectKeySchema(tr.defaultProjectKey)
 	if err != nil {
 		slog.Error("failed to build project key schema", "error", err)
@@ -245,7 +245,7 @@ type GetTestCasesForTestPlanArgs struct {
 	Offset     uint   `json:"offset"`
 }
 
-func (tr *TMSResources) toolGetTestCasesForTestPlan() (*mcp.Tool, ToolHandler[GetTestCasesForTestPlanArgs, any]) {
+func (tr *TMSResources) toolGetTestCasesForTestPlan() (*mcp.Tool, utils.ToolHandler[GetTestCasesForTestPlanArgs, any]) {
 	pkSchema, err := utils.ProjectKeySchema(tr.defaultProjectKey)
 	if err != nil {
 		slog.Error("failed to build project key schema", "error", err)
@@ -354,7 +354,7 @@ type GetTestFoldersByFilterArgs struct {
 	Offset           uint   `json:"offset"`
 }
 
-func (tr *TMSResources) toolGetTestFoldersByFilter() (*mcp.Tool, ToolHandler[GetTestFoldersByFilterArgs, any]) {
+func (tr *TMSResources) toolGetTestFoldersByFilter() (*mcp.Tool, utils.ToolHandler[GetTestFoldersByFilterArgs, any]) {
 	pkSchema, err := utils.ProjectKeySchema(tr.defaultProjectKey)
 	if err != nil {
 		slog.Error("failed to build project key schema", "error", err)
@@ -479,7 +479,7 @@ type GetTestCasesByFilterArgs struct {
 	Offset                uint     `json:"offset"`
 }
 
-func (tr *TMSResources) toolGetTestCasesByFilter() (*mcp.Tool, ToolHandler[GetTestCasesByFilterArgs, any]) {
+func (tr *TMSResources) toolGetTestCasesByFilter() (*mcp.Tool, utils.ToolHandler[GetTestCasesByFilterArgs, any]) {
 	pkSchema, err := utils.ProjectKeySchema(tr.defaultProjectKey)
 	if err != nil {
 		slog.Error("failed to build project key schema", "error", err)
@@ -628,7 +628,7 @@ type CreateFolderArgs struct {
 	ParentTestFolderID *int64  `json:"parent-test-folder-id,omitempty"`
 }
 
-func (tr *TMSResources) toolCreateTestFolder() (*mcp.Tool, ToolHandler[CreateFolderArgs, any]) {
+func (tr *TMSResources) toolCreateTestFolder() (*mcp.Tool, utils.ToolHandler[CreateFolderArgs, any]) {
 	pkSchema, err := utils.ProjectKeySchema(tr.defaultProjectKey)
 	if err != nil {
 		slog.Error("failed to build project key schema", "error", err)
@@ -699,7 +699,7 @@ type DeleteFolderArgs struct {
 	FolderID   int64  `json:"folderId"`
 }
 
-func (tr *TMSResources) toolDeleteTestFolder() (*mcp.Tool, ToolHandler[DeleteFolderArgs, any]) {
+func (tr *TMSResources) toolDeleteTestFolder() (*mcp.Tool, utils.ToolHandler[DeleteFolderArgs, any]) {
 	pkSchema, err := utils.ProjectKeySchema(tr.defaultProjectKey)
 	if err != nil {
 		slog.Error("failed to build project key schema", "error", err)
@@ -756,108 +756,6 @@ func (tr *TMSResources) toolDeleteTestFolder() (*mcp.Tool, ToolHandler[DeleteFol
 		)
 }
 
-// resolveTestCaseAttributes ensures that every requested attribute (tag, identified
-// by key only) exists for the project and returns the request models that link them
-// to a test case. For each attribute it first looks the attribute up via
-// GET /v1/project/{projectKey}/tms/attribute (filtered by key); if no match exists
-// it creates the attribute via POST to the same endpoint. The resulting list
-// references each attribute by its id and key so it can be attached during test
-// case creation or update.
-func (tr *TMSResources) resolveTestCaseAttributes(
-	ctx context.Context,
-	project string,
-	attributes []utils.AttributeArg,
-) ([]openapi.ComEpamReportportalBaseCoreTmsDtoTmsTestCaseAttributeRQ, error) {
-	// Pre-validate all keys before making any HTTP calls.
-	seen := make(map[string]struct{}, len(attributes))
-	for i, attr := range attributes {
-		key := strings.TrimSpace(attr.Key)
-		if key == "" {
-			return nil, fmt.Errorf("attributes[%d] key must not be empty or whitespace", i)
-		}
-		if _, dup := seen[key]; dup {
-			return nil, fmt.Errorf("attributes[%d] duplicate key %q", i, key)
-		}
-		seen[key] = struct{}{}
-	}
-
-	result := make(
-		[]openapi.ComEpamReportportalBaseCoreTmsDtoTmsTestCaseAttributeRQ,
-		0,
-		len(attributes),
-	)
-	for _, attr := range attributes {
-		key := strings.TrimSpace(attr.Key)
-
-		// 1. Look up an existing attribute matching the key.
-		page, response, err := tr.client.TMSAttributeControllerAPI.GetAllAttributes(ctx, project).
-			FilterEqKey(key).
-			Execute()
-		if err != nil {
-			return nil, fmt.Errorf(
-				"failed to look up attribute %q: %s: %w",
-				key, utils.ExtractResponseError(err, response), err,
-			)
-		}
-
-		var attributeID int64
-		found := false
-		for _, existing := range page.GetContent() {
-			if existing.GetKey() == key {
-				attributeID = existing.GetId()
-				found = true
-				break
-			}
-		}
-
-		// 2. Create the attribute when it does not exist yet.
-		if !found {
-			createRQ := openapi.NewComEpamReportportalBaseCoreTmsDtoTmsAttributeRQ()
-			createRQ.SetKey(key)
-			created, createResp, createErr := tr.client.TMSAttributeControllerAPI.
-				CreateAttribute(ctx, project).
-				ComEpamReportportalBaseCoreTmsDtoTmsAttributeRQ(*createRQ).
-				Execute()
-			if createErr != nil {
-				// A 409 Conflict means a concurrent caller raced through the
-				// same GET→POST window and created this attribute first. Retry
-				// the lookup to obtain the id it just created instead of
-				// surfacing a spurious duplicate error.
-				if createResp != nil && createResp.StatusCode == http.StatusConflict {
-					retryPage, _, retryErr := tr.client.TMSAttributeControllerAPI.
-						GetAllAttributes(ctx, project).
-						FilterEqKey(key).
-						Execute()
-					if retryErr == nil {
-						for _, existing := range retryPage.GetContent() {
-							if existing.GetKey() == key {
-								attributeID = existing.GetId()
-								found = true
-								break
-							}
-						}
-					}
-				}
-				if !found {
-					return nil, fmt.Errorf(
-						"failed to create attribute %q: %s: %w",
-						key, utils.ExtractResponseError(createErr, createResp), createErr,
-					)
-				}
-			} else {
-				attributeID = created.GetId()
-			}
-		}
-
-		// 3. Link the (existing or newly created) attribute to the test case.
-		tcAttr := openapi.NewComEpamReportportalBaseCoreTmsDtoTmsTestCaseAttributeRQ()
-		tcAttr.SetId(attributeID)
-		tcAttr.SetKey(key)
-		result = append(result, *tcAttr)
-	}
-	return result, nil
-}
-
 // CreateTestCaseArgs represents the arguments for the create_test_case tool.
 type CreateTestCaseArgs struct {
 	ProjectKey     string               `json:"projectKey"`
@@ -874,7 +772,7 @@ type CreateTestCaseArgs struct {
 	Attributes     []utils.AttributeArg `json:"attributes,omitempty"`
 }
 
-func (tr *TMSResources) toolCreateTestCase() (*mcp.Tool, ToolHandler[CreateTestCaseArgs, any]) {
+func (tr *TMSResources) toolCreateTestCase() (*mcp.Tool, utils.ToolHandler[CreateTestCaseArgs, any]) {
 	pkSchema, err := utils.ProjectKeySchema(tr.defaultProjectKey)
 	if err != nil {
 		slog.Error("failed to build project key schema", "error", err)
@@ -971,7 +869,12 @@ func (tr *TMSResources) toolCreateTestCase() (*mcp.Tool, ToolHandler[CreateTestC
 				}
 				rq.SetTestFolderId(args.TestFolderID)
 				if len(args.Attributes) > 0 {
-					attrs, attrErr := tr.resolveTestCaseAttributes(ctx, project, args.Attributes)
+					attrs, attrErr := utils.ResolveTestCaseAttributes(
+						ctx,
+						tr.client,
+						project,
+						args.Attributes,
+					)
 					if attrErr != nil {
 						return nil, nil, attrErr
 					}
@@ -996,7 +899,7 @@ type CreateMilestoneArgs struct {
 	EndDate    string  `json:"end-date"`
 }
 
-func (tr *TMSResources) toolCreateMilestone() (*mcp.Tool, ToolHandler[CreateMilestoneArgs, any]) {
+func (tr *TMSResources) toolCreateMilestone() (*mcp.Tool, utils.ToolHandler[CreateMilestoneArgs, any]) {
 	pkSchema, err := utils.ProjectKeySchema(tr.defaultProjectKey)
 	if err != nil {
 		slog.Error("failed to build project key schema", "error", err)
@@ -1118,7 +1021,7 @@ type CreateTestPlanArgs struct {
 	Description *string `json:"description,omitempty"`
 }
 
-func (tr *TMSResources) toolCreateTestPlan() (*mcp.Tool, ToolHandler[CreateTestPlanArgs, any]) {
+func (tr *TMSResources) toolCreateTestPlan() (*mcp.Tool, utils.ToolHandler[CreateTestPlanArgs, any]) {
 	pkSchema, err := utils.ProjectKeySchema(tr.defaultProjectKey)
 	if err != nil {
 		slog.Error("failed to build project key schema", "error", err)
@@ -1201,7 +1104,7 @@ type UpdateTestCaseArgs struct {
 	Attributes     *[]utils.AttributeArg `json:"attributes,omitempty"`
 }
 
-func (tr *TMSResources) toolUpdateTestCase() (*mcp.Tool, ToolHandler[UpdateTestCaseArgs, any]) {
+func (tr *TMSResources) toolUpdateTestCase() (*mcp.Tool, utils.ToolHandler[UpdateTestCaseArgs, any]) {
 	pkSchema, err := utils.ProjectKeySchema(tr.defaultProjectKey)
 	if err != nil {
 		slog.Error("failed to build project key schema", "error", err)
@@ -1313,7 +1216,12 @@ func (tr *TMSResources) toolUpdateTestCase() (*mcp.Tool, ToolHandler[UpdateTestC
 				}
 
 				if args.Attributes != nil {
-					attrs, attrErr := tr.resolveTestCaseAttributes(ctx, project, *args.Attributes)
+					attrs, attrErr := utils.ResolveTestCaseAttributes(
+						ctx,
+						tr.client,
+						project,
+						*args.Attributes,
+					)
 					if attrErr != nil {
 						return nil, nil, attrErr
 					}
@@ -1334,7 +1242,7 @@ type DeleteTestCaseArgs struct {
 	TestCaseID int64  `json:"testCaseId"`
 }
 
-func (tr *TMSResources) toolDeleteTestCase() (*mcp.Tool, ToolHandler[DeleteTestCaseArgs, any]) {
+func (tr *TMSResources) toolDeleteTestCase() (*mcp.Tool, utils.ToolHandler[DeleteTestCaseArgs, any]) {
 	pkSchema, err := utils.ProjectKeySchema(tr.defaultProjectKey)
 	if err != nil {
 		slog.Error("failed to build project key schema", "error", err)
@@ -1405,7 +1313,7 @@ type GetManualLaunchesArgs struct {
 	FilterHasCompositeAttribute string   `json:"filter-has-compositeAttribute,omitempty"`
 }
 
-func (tr *TMSResources) toolGetManualLaunches() (*mcp.Tool, ToolHandler[GetManualLaunchesArgs, any]) {
+func (tr *TMSResources) toolGetManualLaunches() (*mcp.Tool, utils.ToolHandler[GetManualLaunchesArgs, any]) {
 	pkSchema, err := utils.ProjectKeySchema(tr.defaultProjectKey)
 	if err != nil {
 		slog.Error("failed to build project key schema", "error", err)
@@ -1573,7 +1481,7 @@ type GetManualLaunchExecutionsArgs struct {
 	FilterInAttributeKey string   `json:"filter-in-attributeKey,omitempty"`
 }
 
-func (tr *TMSResources) toolGetManualLaunchExecutions() (*mcp.Tool, ToolHandler[GetManualLaunchExecutionsArgs, any]) {
+func (tr *TMSResources) toolGetManualLaunchExecutions() (*mcp.Tool, utils.ToolHandler[GetManualLaunchExecutionsArgs, any]) {
 	pkSchema, err := utils.ProjectKeySchema(tr.defaultProjectKey)
 	if err != nil {
 		slog.Error("failed to build project key schema", "error", err)
@@ -1699,58 +1607,19 @@ func (tr *TMSResources) toolGetManualLaunchExecutions() (*mcp.Tool, ToolHandler[
 		)
 }
 
-func testPlanAndCaseIDsProperties(
-	testPlanIDDesc, testCaseIDsDesc string,
-) map[string]*jsonschema.Schema {
-	return map[string]*jsonschema.Schema{
-		"test-plan-id": {
-			Type:        "integer",
-			Description: testPlanIDDesc,
-			Minimum:     openapi.PtrFloat64(1),
-		},
-		"test-case-ids": {
-			Type:        "array",
-			Description: testCaseIDsDesc,
-			MinItems:    openapi.PtrInt(1),
-			Items: &jsonschema.Schema{
-				Type:    "integer",
-				Minimum: openapi.PtrFloat64(1),
-			},
-		},
-	}
-}
-
 // AddTestCasesToTestPlanArgs represents the arguments for the add_test_cases_to_test_plan tool.
-func validatePlanAndTestCaseIDs(testPlanID int64, testCaseIDs []int64) error {
-	if testPlanID <= 0 {
-		return fmt.Errorf("test-plan-id must be a positive integer")
-	}
-	if len(testCaseIDs) == 0 {
-		return fmt.Errorf("test-case-ids must not be empty")
-	}
-	for _, id := range testCaseIDs {
-		if id <= 0 {
-			return fmt.Errorf(
-				"each test case ID must be a positive integer, got %d",
-				id,
-			)
-		}
-	}
-	return nil
-}
-
 type AddTestCasesToTestPlanArgs struct {
 	ProjectKey  string  `json:"projectKey"`
 	TestPlanID  int64   `json:"test-plan-id"`
 	TestCaseIDs []int64 `json:"test-case-ids"`
 }
 
-func (tr *TMSResources) toolAddTestCasesToTestPlan() (*mcp.Tool, ToolHandler[AddTestCasesToTestPlanArgs, any]) {
+func (tr *TMSResources) toolAddTestCasesToTestPlan() (*mcp.Tool, utils.ToolHandler[AddTestCasesToTestPlanArgs, any]) {
 	pkSchema, err := utils.ProjectKeySchema(tr.defaultProjectKey)
 	if err != nil {
 		slog.Error("failed to build project key schema", "error", err)
 	}
-	addProps := testPlanAndCaseIDsProperties(
+	addProps := utils.TestPlanAndCaseIDsProperties(
 		"ID of the test plan to add test cases to",
 		"List of test case IDs (each ≥ 1) to add to the test plan (must not be empty)",
 	)
@@ -1772,7 +1641,7 @@ func (tr *TMSResources) toolAddTestCasesToTestPlan() (*mcp.Tool, ToolHandler[Add
 				if err != nil {
 					return nil, nil, fmt.Errorf("failed to extract project: %w", err)
 				}
-				if err := validatePlanAndTestCaseIDs(
+				if err := utils.ValidatePlanAndTestCaseIDs(
 					args.TestPlanID,
 					args.TestCaseIDs,
 				); err != nil {
@@ -1825,7 +1694,7 @@ type createManualLaunchRQ struct {
 	Attributes  []manualLaunchAttributeArg `json:"attributes,omitempty"`
 }
 
-func (tr *TMSResources) toolCreateManualLaunch() (*mcp.Tool, ToolHandler[CreateManualLaunchArgs, any]) {
+func (tr *TMSResources) toolCreateManualLaunch() (*mcp.Tool, utils.ToolHandler[CreateManualLaunchArgs, any]) {
 	pkSchema, err := utils.ProjectKeySchema(tr.defaultProjectKey)
 	if err != nil {
 		slog.Error("failed to build project key schema", "error", err)
@@ -2009,7 +1878,7 @@ type addTestCasesToLaunchRQ struct {
 	TestCaseIDs []int64 `json:"testCaseIds"`
 }
 
-func (tr *TMSResources) toolAddTestCasesToManualLaunch() (*mcp.Tool, ToolHandler[AddTestCasesToManualLaunchArgs, any]) {
+func (tr *TMSResources) toolAddTestCasesToManualLaunch() (*mcp.Tool, utils.ToolHandler[AddTestCasesToManualLaunchArgs, any]) {
 	pkSchema, err := utils.ProjectKeySchema(tr.defaultProjectKey)
 	if err != nil {
 		slog.Error("failed to build project key schema", "error", err)
@@ -2143,20 +2012,18 @@ type UpdateManualLaunchExecutionArgs struct {
 }
 
 type executionCommentArg struct {
-	Comment     string                   `json:"comment,omitempty"`
-	Attachments []executionAttachmentArg `json:"attachments,omitempty"`
+	Comment     string                         `json:"comment,omitempty"`
+	Attachments []utils.ExecutionAttachmentArg `json:"attachments,omitempty"`
 }
 
-type executionAttachmentArg struct {
-	ID       int64  `json:"id"`
-	FileName string `json:"fileName"`
-	FileType string `json:"fileType"`
-	FileSize int64  `json:"fileSize"`
+type executionCommentRQ struct {
+	Comment     string                               `json:"comment,omitempty"`
+	Attachments []utils.ExecutionCommentAttachmentRQ `json:"attachments,omitempty"`
 }
 
 type updateManualLaunchExecutionRQ struct {
-	Status           string               `json:"status"`
-	ExecutionComment *executionCommentArg `json:"executionComment,omitempty"`
+	Status           string              `json:"status"`
+	ExecutionComment *executionCommentRQ `json:"executionComment,omitempty"`
 }
 
 var validExecutionStatuses = map[string]bool{
@@ -2166,14 +2033,16 @@ var validExecutionStatuses = map[string]bool{
 	"SKIPPED":     true,
 }
 
-func (tr *TMSResources) toolUpdateManualLaunchExecution() (*mcp.Tool, ToolHandler[UpdateManualLaunchExecutionArgs, any]) {
+func (tr *TMSResources) toolUpdateManualLaunchExecution() (*mcp.Tool, utils.ToolHandler[UpdateManualLaunchExecutionArgs, any]) {
 	pkSchema, err := utils.ProjectKeySchema(tr.defaultProjectKey)
 	if err != nil {
 		slog.Error("failed to build project key schema", "error", err)
 	}
 	return &mcp.Tool{
-			Name:        "update_manual_launch_execution",
-			Description: "Update the status (and optionally add a comment with attachments) of a test case execution in a TMS manual launch. Attachments must be uploaded first via the TMS attachment upload endpoint and referenced by id/fileName/fileType/fileSize. This tool mutates TMS data.",
+			Name: "update_manual_launch_execution",
+			Description: "Update the status (and optionally add a comment with attachments) of a test case execution in a TMS manual launch. " +
+				"Attachments can reference an already-uploaded file (id/fileName/fileType/fileSize) or provide base64 " +
+				"content (fileName/content) to be auto-uploaded and linked. This tool mutates TMS data.",
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
@@ -2194,39 +2063,57 @@ func (tr *TMSResources) toolUpdateManualLaunchExecution() (*mcp.Tool, ToolHandle
 						Enum:        []any{"IN_PROGRESS", "PASSED", "FAILED", "SKIPPED"},
 					},
 					"executionComment": {
-						Type:        "object",
-						Description: "Optional comment and/or attachments to add to the execution",
+						Type:                 "object",
+						Description:          "Optional comment and/or attachments to add to the execution",
+						AdditionalProperties: &jsonschema.Schema{Not: &jsonschema.Schema{}},
 						Properties: map[string]*jsonschema.Schema{
 							"comment": {
 								Type:        "string",
 								Description: "Text comment for the execution",
 							},
 							"attachments": {
-								Type:        "array",
-								Description: "List of previously uploaded attachments to reference. Each attachment must have been uploaded via the TMS attachment upload endpoint first.",
+								Type: "array",
+								Description: "Attachments to link to the execution. Each item must provide either " +
+									"'id' (an attachment already uploaded via the TMS attachment upload endpoint) or " +
+									"'content' (base64-encoded file bytes to upload automatically), but not both.",
 								Items: &jsonschema.Schema{
 									Type: "object",
+									AdditionalProperties: &jsonschema.Schema{
+										Not: &jsonschema.Schema{},
+									},
 									Properties: map[string]*jsonschema.Schema{
 										"id": {
-											Type:        "integer",
-											Description: "Attachment ID returned by the upload endpoint",
-											Minimum:     openapi.PtrFloat64(1),
+											Type: "integer",
+											Description: "ID of an attachment already uploaded via the TMS attachment " +
+												"upload endpoint. Omit when providing 'content'.",
+											Minimum: openapi.PtrFloat64(1),
 										},
 										"fileName": {
 											Type:        "string",
-											Description: "Original file name (e.g. Logo_Black.png)",
+											Description: "Original file name with extension (e.g. Logo_Black.png). Always required.",
+											MinLength:   openapi.PtrInt(1),
 										},
 										"fileType": {
-											Type:        "string",
-											Description: "MIME type of the file (e.g. image/png)",
+											Type: "string",
+											Description: "MIME type of the file (e.g. image/png). Required when 'id' is set; " +
+												"optional when 'content' is set (inferred from fileName/content if omitted).",
+											MinLength: openapi.PtrInt(1),
 										},
 										"fileSize": {
-											Type:        "integer",
-											Description: "File size in bytes",
-											Minimum:     openapi.PtrFloat64(0),
+											Type: "integer",
+											Description: "File size in bytes. Required when 'id' is set; ignored " +
+												"(computed automatically) when 'content' is set.",
+											Minimum: openapi.PtrFloat64(1),
+										},
+										"content": {
+											Type: "string",
+											Description: "Base64-encoded file content to upload automatically via " +
+												"POST /project/{projectKey}/tms/attachment/upload before linking it to " +
+												"the execution. Omit when providing 'id'.",
+											MinLength: openapi.PtrInt(1),
 										},
 									},
-									Required: []string{"id", "fileName", "fileType", "fileSize"},
+									Required: []string{"fileName"},
 								},
 							},
 						},
@@ -2258,8 +2145,45 @@ func (tr *TMSResources) toolUpdateManualLaunchExecution() (*mcp.Tool, ToolHandle
 				}
 
 				rq := updateManualLaunchExecutionRQ{
-					Status:           args.Status,
-					ExecutionComment: args.ExecutionComment,
+					Status: args.Status,
+				}
+				if args.ExecutionComment != nil {
+					attachments, attachErr := utils.ResolveExecutionCommentAttachments(
+						ctx,
+						tr.client,
+						project,
+						args.ExecutionComment.Attachments,
+					)
+					if attachErr != nil {
+						return nil, nil, attachErr
+					}
+					rq.ExecutionComment = &executionCommentRQ{
+						Comment:     args.ExecutionComment.Comment,
+						Attachments: attachments,
+					}
+				}
+
+				// Collect IDs of attachments that were freshly uploaded (content field
+				// was set). These must be reported in any downstream PATCH failure so
+				// the caller can reference them by id on retry instead of re-uploading.
+				var uploadedIDsNote string
+				if rq.ExecutionComment != nil && args.ExecutionComment != nil {
+					var ids []string
+					for i, orig := range args.ExecutionComment.Attachments {
+						if orig.Content != "" && i < len(rq.ExecutionComment.Attachments) {
+							ids = append(
+								ids,
+								strconv.FormatInt(rq.ExecutionComment.Attachments[i].ID, 10),
+							)
+						}
+					}
+					if len(ids) > 0 {
+						uploadedIDsNote = "; uploaded attachment IDs (use via 'id' field to avoid re-uploading): " +
+							strings.Join(
+								ids,
+								", ",
+							)
+					}
 				}
 
 				bodyBytes, err := json.Marshal(rq)
@@ -2307,7 +2231,8 @@ func (tr *TMSResources) toolUpdateManualLaunchExecution() (*mcp.Tool, ToolHandle
 				resp, err := httpClient.Do(httpReq)
 				if err != nil {
 					return nil, nil, fmt.Errorf(
-						"update manual launch execution request failed: %w",
+						"update manual launch execution request failed%s: %w",
+						uploadedIDsNote,
 						err,
 					)
 				}
@@ -2317,13 +2242,15 @@ func (tr *TMSResources) toolUpdateManualLaunchExecution() (*mcp.Tool, ToolHandle
 					respBody, readErr := io.ReadAll(resp.Body)
 					if readErr != nil {
 						return nil, nil, fmt.Errorf(
-							"update manual launch execution request failed (HTTP %d)",
+							"update manual launch execution request failed (HTTP %d)%s",
 							resp.StatusCode,
+							uploadedIDsNote,
 						)
 					}
 					return nil, nil, fmt.Errorf(
-						"update manual launch execution request failed (HTTP %d): %s",
+						"update manual launch execution request failed (HTTP %d)%s: %s",
 						resp.StatusCode,
+						uploadedIDsNote,
 						string(respBody),
 					)
 				}
@@ -2340,12 +2267,12 @@ type DeleteTestCasesFromTestPlanArgs struct {
 	TestCaseIDs []int64 `json:"test-case-ids"`
 }
 
-func (tr *TMSResources) toolDeleteTestCasesFromTestPlan() (*mcp.Tool, ToolHandler[DeleteTestCasesFromTestPlanArgs, any]) {
+func (tr *TMSResources) toolDeleteTestCasesFromTestPlan() (*mcp.Tool, utils.ToolHandler[DeleteTestCasesFromTestPlanArgs, any]) {
 	pkSchema, err := utils.ProjectKeySchema(tr.defaultProjectKey)
 	if err != nil {
 		slog.Error("failed to build project key schema", "error", err)
 	}
-	deleteProps := testPlanAndCaseIDsProperties(
+	deleteProps := utils.TestPlanAndCaseIDsProperties(
 		"ID of the test plan to remove test cases from",
 		"List of test case IDs (each ≥ 1) to remove from the test plan (must not be empty)",
 	)
@@ -2367,7 +2294,7 @@ func (tr *TMSResources) toolDeleteTestCasesFromTestPlan() (*mcp.Tool, ToolHandle
 				if err != nil {
 					return nil, nil, fmt.Errorf("failed to extract project: %w", err)
 				}
-				if err := validatePlanAndTestCaseIDs(
+				if err := utils.ValidatePlanAndTestCaseIDs(
 					args.TestPlanID,
 					args.TestCaseIDs,
 				); err != nil {
