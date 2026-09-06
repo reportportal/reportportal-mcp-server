@@ -32,7 +32,10 @@ import (
 // MaxIdleConns=100, MaxIdleConnsPerHost=10, IdleConnTimeout=90s, HTTP/2 forced.
 // The timeout parameter is the per-request deadline and comes from --connection-timeout.
 // tlsCfg may be nil, in which case the Go default TLS behaviour is used.
-func createHTTPClient(timeout time.Duration, tlsCfg *tls.Config) *http.Client {
+// hostURL restricts followed redirects to that same HTTPS host, since the
+// per-request Authorization header (injected by QueryParamsMiddleware) must
+// never be forwarded to another host or downgraded to plain HTTP.
+func createHTTPClient(timeout time.Duration, tlsCfg *tls.Config, hostURL *url.URL) *http.Client {
 	transport := utils.NewBaseTransport()
 	transport.MaxIdleConns = 100
 	transport.MaxIdleConnsPerHost = 10
@@ -42,8 +45,9 @@ func createHTTPClient(timeout time.Duration, tlsCfg *tls.Config) *http.Client {
 	transport.TLSClientConfig = tlsCfg
 
 	return &http.Client{
-		Transport: transport,
-		Timeout:   timeout,
+		Transport:     transport,
+		Timeout:       timeout,
+		CheckRedirect: utils.SameHostHTTPSRedirectPolicy(hostURL),
 	}
 }
 
@@ -111,7 +115,7 @@ func NewHTTPServer(
 	)
 
 	// Create HTTP client
-	httpClient := createHTTPClient(config.ConnectionTimeout, config.TLSConfig)
+	httpClient := createHTTPClient(config.ConnectionTimeout, config.TLSConfig, config.HostURL)
 
 	// Initialize batch-based analytics
 	// Note: In HTTP mode, FallbackRPToken is always empty (tokens come from HTTP headers).
@@ -156,7 +160,12 @@ func NewHTTPServer(
 // initializeTools sets up all MCP tools
 func (hs *HTTPServer) initializeTools() error {
 	// Create ReportPortal client with empty token in HTTP mode
-	// The actual token will be injected per-request via QueryParamsMiddleware from HTTP headers
+	// The actual token will be injected per-request via QueryParamsMiddleware from HTTP headers,
+	// so HTTPS is required unconditionally here, regardless of FallbackRPToken.
+	if hs.config.HostURL == nil || !strings.EqualFold(hs.config.HostURL.Scheme, "https") {
+		return fmt.Errorf("authenticated ReportPortal requests require an HTTPS base URL")
+	}
+
 	rpClient := gorp.NewClient(
 		hs.config.HostURL,
 		gorp.WithApiKeyAuth(context.Background(), hs.config.FallbackRPToken),

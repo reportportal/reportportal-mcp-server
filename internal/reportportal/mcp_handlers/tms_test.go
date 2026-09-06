@@ -1286,6 +1286,83 @@ func TestCreateTestCaseTool_StepsRejectedForDescriptionType(t *testing.T) {
 	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
 }
 
+// TestCreateTestCaseTool_PartialAttachmentUploadFailureRetainsIDs verifies that
+// when one inline attachment uploads successfully but a later one fails, the
+// returned error still surfaces the successfully uploaded attachment's id so
+// the caller can reuse it (via the "id" field) instead of re-uploading, and
+// that create_test_case never reaches the HTTP call for creating the test case.
+func TestCreateTestCaseTool_PartialAttachmentUploadFailureRetainsIDs(t *testing.T) {
+	ctx := context.Background()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Contains(
+			t,
+			r.URL.Path,
+			"/tms/attachment/upload",
+			"only attachment uploads should be attempted",
+		)
+		r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
+		require.NoError(t, r.ParseMultipartForm(10<<20))
+		_, header, err := r.FormFile("file")
+		require.NoError(t, err)
+		switch header.Filename {
+		case "good.png":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(
+				[]byte(`{"id":501,"fileName":"good.png","fileType":"image/png","fileSize":4}`),
+			)
+		case "bad.png":
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`upload failed`))
+		default:
+			t.Fatalf("unexpected file upload: %s", header.Filename)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolCreateTestCase()
+
+	tcType := "steps"
+	goodContent := base64.StdEncoding.EncodeToString([]byte("good"))
+	badContent := base64.StdEncoding.EncodeToString([]byte("bad!"))
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, CreateTestCaseArgs{
+		ProjectKey:   "test-project",
+		Name:         "TC",
+		TestFolderID: 1,
+		TestCaseType: &tcType,
+		Steps: &[]utils.StepArg{
+			{
+				Instructions: "step one",
+				Attachments: []utils.ExecutionAttachmentArg{
+					{FileName: "good.png", FileType: "image/png", Content: goodContent},
+				},
+			},
+			{
+				Instructions: "step two",
+				Attachments: []utils.ExecutionAttachmentArg{
+					{FileName: "bad.png", FileType: "image/png", Content: badContent},
+				},
+			},
+		},
+	})
+
+	require.Error(t, callErr)
+	require.Contains(t, callErr.Error(), "steps[1].attachments")
+	require.Contains(
+		t,
+		callErr.Error(),
+		"uploaded attachment IDs (use via 'id' field to avoid re-uploading): 501",
+	)
+}
+
 // TestUpdateTestCaseTool_StepsReachHTTP verifies the steps type works on update.
 func TestUpdateTestCaseTool_StepsReachHTTP(t *testing.T) {
 	ctx := context.Background()
@@ -3088,4 +3165,399 @@ func TestUpdateManualLaunchExecutionTool_AttachmentUploadHTTPErrorPropagated(t *
 		patchCalled,
 		"update-execution should not be called when attachment upload fails",
 	)
+}
+
+// TestCreateTestCaseTool_TextAttachmentsReachHTTP verifies that scenario-level
+// attachments referencing an already-uploaded attachment (by id) are sent as the
+// "text" manual scenario's attachments array.
+func TestCreateTestCaseTool_TextAttachmentsReachHTTP(t *testing.T) {
+	ctx := context.Background()
+	reqCh := make(chan string, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rawBody, _ := io.ReadAll(r.Body)
+		reqCh <- string(rawBody)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":1,"name":"TC"}`))
+	}))
+	t.Cleanup(srv.Close)
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolCreateTestCase()
+
+	result, _, callErr := handler(ctx, &mcp.CallToolRequest{}, CreateTestCaseArgs{
+		ProjectKey:   "test-project",
+		Name:         "TC",
+		TestFolderID: 1,
+		Attachments: &[]utils.ExecutionAttachmentArg{
+			{ID: 42, FileName: "a.png", FileType: "image/png", FileSize: 10},
+		},
+	})
+
+	require.NoError(t, callErr)
+	require.NotNil(t, result)
+	require.False(t, result.IsError)
+
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal([]byte(<-reqCh), &payload))
+	manual, ok := payload["manualScenario"].(map[string]any)
+	require.True(t, ok, "manualScenario should be present in POST payload")
+	attachments, ok := manual["attachments"].([]any)
+	require.True(t, ok, "attachments should be present in manual scenario")
+	require.Len(t, attachments, 1)
+	att, ok := attachments[0].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "42", att["id"])
+}
+
+// TestCreateTestCaseTool_AttachmentsRejectedForStepsType verifies that the
+// scenario-level "attachments" field is rejected when test-case-type is "steps";
+// attachments must be provided per-step instead.
+func TestCreateTestCaseTool_AttachmentsRejectedForStepsType(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolCreateTestCase()
+
+	tcType := "steps"
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, CreateTestCaseArgs{
+		ProjectKey:   "test-project",
+		Name:         "TC",
+		TestFolderID: 1,
+		TestCaseType: &tcType,
+		Steps:        &[]utils.StepArg{{Instructions: "do thing"}},
+		Attachments: &[]utils.ExecutionAttachmentArg{
+			{ID: 1, FileName: "a.png", FileType: "image/png", FileSize: 1},
+		},
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), `attachments is only valid when test-case-type is "text"`)
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestCreateTestCaseTool_StepAttachmentsReachHTTP verifies that per-step
+// attachments are sent inside each step's own attachments array.
+func TestCreateTestCaseTool_StepAttachmentsReachHTTP(t *testing.T) {
+	ctx := context.Background()
+	reqCh := make(chan string, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rawBody, _ := io.ReadAll(r.Body)
+		reqCh <- string(rawBody)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":1,"name":"TC"}`))
+	}))
+	t.Cleanup(srv.Close)
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolCreateTestCase()
+
+	tcType := "steps"
+	result, _, callErr := handler(ctx, &mcp.CallToolRequest{}, CreateTestCaseArgs{
+		ProjectKey:   "test-project",
+		Name:         "TC",
+		TestFolderID: 1,
+		TestCaseType: &tcType,
+		Steps: &[]utils.StepArg{
+			{
+				Instructions: "open the page",
+				Attachments: []utils.ExecutionAttachmentArg{
+					{ID: 7, FileName: "screenshot.png", FileType: "image/png", FileSize: 5},
+				},
+			},
+		},
+	})
+
+	require.NoError(t, callErr)
+	require.NotNil(t, result)
+	require.False(t, result.IsError)
+
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal([]byte(<-reqCh), &payload))
+	manual, ok := payload["manualScenario"].(map[string]any)
+	require.True(t, ok, "manualScenario should be present in POST payload")
+	steps, ok := manual["steps"].([]any)
+	require.True(t, ok, "steps should be present in manual scenario")
+	require.Len(t, steps, 1)
+	step, ok := steps[0].(map[string]any)
+	require.True(t, ok)
+	attachments, ok := step["attachments"].([]any)
+	require.True(t, ok, "step attachments should be present")
+	require.Len(t, attachments, 1)
+	att, ok := attachments[0].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "7", att["id"])
+}
+
+// TestCreateTestCaseTool_PreconditionsAttachmentsReachHTTP verifies that
+// preconditions-attachments are only valid for "steps" and end up nested under
+// manualScenario.preconditions.attachments.
+func TestCreateTestCaseTool_PreconditionsAttachmentsReachHTTP(t *testing.T) {
+	ctx := context.Background()
+	reqCh := make(chan string, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rawBody, _ := io.ReadAll(r.Body)
+		reqCh <- string(rawBody)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":1,"name":"TC"}`))
+	}))
+	t.Cleanup(srv.Close)
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolCreateTestCase()
+
+	tcType := "steps"
+	preconditions := "log in first"
+	result, _, callErr := handler(ctx, &mcp.CallToolRequest{}, CreateTestCaseArgs{
+		ProjectKey:    "test-project",
+		Name:          "TC",
+		TestFolderID:  1,
+		TestCaseType:  &tcType,
+		Preconditions: &preconditions,
+		PreconditionsAttachments: &[]utils.ExecutionAttachmentArg{
+			{ID: 9, FileName: "setup.png", FileType: "image/png", FileSize: 3},
+		},
+		Steps: &[]utils.StepArg{{Instructions: "do thing"}},
+	})
+
+	require.NoError(t, callErr)
+	require.NotNil(t, result)
+	require.False(t, result.IsError)
+
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal([]byte(<-reqCh), &payload))
+	manual, ok := payload["manualScenario"].(map[string]any)
+	require.True(t, ok, "manualScenario should be present in POST payload")
+	pre, ok := manual["preconditions"].(map[string]any)
+	require.True(t, ok, "preconditions should be present in manual scenario")
+	attachments, ok := pre["attachments"].([]any)
+	require.True(t, ok, "preconditions attachments should be present")
+	require.Len(t, attachments, 1)
+}
+
+// TestCreateTestCaseTool_PreconditionsAttachmentsRejectedForTextType verifies
+// that preconditions-attachments is rejected for the "text" type, matching the
+// UI behavior where only "steps" scenarios support precondition attachments.
+func TestCreateTestCaseTool_PreconditionsAttachmentsRejectedForTextType(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolCreateTestCase()
+
+	preconditions := "log in first"
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, CreateTestCaseArgs{
+		ProjectKey:    "test-project",
+		Name:          "TC",
+		TestFolderID:  1,
+		Preconditions: &preconditions,
+		PreconditionsAttachments: &[]utils.ExecutionAttachmentArg{
+			{ID: 1, FileName: "a.png", FileType: "image/png", FileSize: 1},
+		},
+	})
+
+	require.Error(t, err)
+	require.Contains(
+		t,
+		err.Error(),
+		`preconditions-attachments is only valid when test-case-type is "steps"`,
+	)
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestCreateTestCaseTool_PreconditionsAttachmentsRequirePreconditions verifies
+// that preconditions-attachments without preconditions is rejected.
+func TestCreateTestCaseTool_PreconditionsAttachmentsRequirePreconditions(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolCreateTestCase()
+
+	tcType := "steps"
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, CreateTestCaseArgs{
+		ProjectKey:   "test-project",
+		Name:         "TC",
+		TestFolderID: 1,
+		TestCaseType: &tcType,
+		Steps:        &[]utils.StepArg{{Instructions: "do thing"}},
+		PreconditionsAttachments: &[]utils.ExecutionAttachmentArg{
+			{ID: 1, FileName: "a.png", FileType: "image/png", FileSize: 1},
+		},
+	})
+
+	require.Error(t, err)
+	require.Contains(
+		t,
+		err.Error(),
+		"preconditions-attachments requires preconditions to be provided",
+	)
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestCreateTestCaseTool_AttachmentContentUploadsThenLinks verifies that an
+// attachment supplied via base64 "content" is uploaded via
+// POST /project/{projectKey}/tms/attachment/upload first, and the id returned by
+// the upload is what gets linked to the test case's manual scenario.
+func TestCreateTestCaseTool_AttachmentContentUploadsThenLinks(t *testing.T) {
+	ctx := context.Background()
+	var uploadCalled bool
+	var createBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/tms/attachment/upload"):
+			uploadCalled = true
+			r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
+			require.NoError(t, r.ParseMultipartForm(10<<20))
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(
+				[]byte(`{"id":555,"fileName":"a.png","fileType":"image/png","fileSize":4}`),
+			)
+		case r.Method == http.MethodPost:
+			createBody, _ = io.ReadAll(r.Body)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"id":1,"name":"TC"}`))
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolCreateTestCase()
+
+	content := base64.StdEncoding.EncodeToString([]byte("data"))
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, CreateTestCaseArgs{
+		ProjectKey:   "test-project",
+		Name:         "TC",
+		TestFolderID: 1,
+		Attachments: &[]utils.ExecutionAttachmentArg{
+			{FileName: "a.png", Content: content},
+		},
+	})
+
+	require.NoError(t, callErr)
+	require.True(t, uploadCalled, "attachment upload endpoint should have been called")
+
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(createBody, &payload))
+	manual, ok := payload["manualScenario"].(map[string]any)
+	require.True(t, ok, "manualScenario should be present in POST payload")
+	attachments, ok := manual["attachments"].([]any)
+	require.True(t, ok, "attachments should be present in manual scenario")
+	require.Len(t, attachments, 1)
+	att, ok := attachments[0].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "555", att["id"])
+}
+
+// TestUpdateTestCaseTool_EmptyPreconditionsAttachmentsClears verifies that an
+// explicit empty "preconditions-attachments" array is sent as "attachments": []
+// on the preconditions object (clearing any existing attachments), rather than
+// being silently dropped like an omitted field.
+func TestUpdateTestCaseTool_EmptyPreconditionsAttachmentsClears(t *testing.T) {
+	ctx := context.Background()
+	reqCh := make(chan string, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rawBody, _ := io.ReadAll(r.Body)
+		reqCh <- string(rawBody)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":1,"name":"TC"}`))
+	}))
+	t.Cleanup(srv.Close)
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolUpdateTestCase()
+
+	tcType := "steps"
+	preconditions := "log in first"
+	result, _, callErr := handler(ctx, &mcp.CallToolRequest{}, UpdateTestCaseArgs{
+		ProjectKey:               "test-project",
+		TestCaseID:               1,
+		TestCaseType:             &tcType,
+		Preconditions:            &preconditions,
+		PreconditionsAttachments: &[]utils.ExecutionAttachmentArg{},
+		Steps:                    &[]utils.StepArg{{Instructions: "do thing"}},
+	})
+
+	require.NoError(t, callErr)
+	require.NotNil(t, result)
+	require.False(t, result.IsError)
+
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal([]byte(<-reqCh), &payload))
+	manual, ok := payload["manualScenario"].(map[string]any)
+	require.True(t, ok, "manualScenario should be present in PATCH payload")
+	pre, ok := manual["preconditions"].(map[string]any)
+	require.True(t, ok, "preconditions should be present in manual scenario")
+	attachments, ok := pre["attachments"].([]any)
+	require.True(t, ok, "an explicit empty preconditions-attachments must still be sent to clear")
+	require.Empty(t, attachments)
+}
+
+// TestCreateTestCaseTool_AggregateAttachmentContentLimitEnforced verifies that
+// the combined decoded size of inline attachments across multiple steps is
+// checked against the shared 50 MiB budget, closing the bypass where each
+// step/precondition would otherwise reset its own per-call limit.
+func TestCreateTestCaseTool_AggregateAttachmentContentLimitEnforced(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolCreateTestCase()
+
+	// Two ~40 MiB attachments individually pass the per-attachment 50 MiB cap,
+	// but together exceed it.
+	chunk := make([]byte, 40*1024*1024)
+	content := base64.StdEncoding.EncodeToString(chunk)
+
+	tcType := "steps"
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, CreateTestCaseArgs{
+		ProjectKey:   "test-project",
+		Name:         "TC",
+		TestFolderID: 1,
+		TestCaseType: &tcType,
+		Steps: &[]utils.StepArg{
+			{
+				Instructions: "step one",
+				Attachments: []utils.ExecutionAttachmentArg{
+					{FileName: "a.bin", Content: content},
+				},
+			},
+			{
+				Instructions: "step two",
+				Attachments: []utils.ExecutionAttachmentArg{
+					{FileName: "b.bin", Content: content},
+				},
+			},
+		},
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "combined decoded size of inline attachments")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
 }

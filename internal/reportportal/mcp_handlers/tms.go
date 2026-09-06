@@ -758,18 +758,20 @@ func (tr *TMSResources) toolDeleteTestFolder() (*mcp.Tool, utils.ToolHandler[Del
 
 // CreateTestCaseArgs represents the arguments for the create_test_case tool.
 type CreateTestCaseArgs struct {
-	ProjectKey     string               `json:"projectKey"`
-	Name           string               `json:"name"`
-	Description    *string              `json:"description,omitempty"`
-	Priority       *string              `json:"priority,omitempty"`
-	TestFolderID   int64                `json:"test-folder-id"`
-	TestCaseType   *string              `json:"test-case-type,omitempty"`
-	Instructions   *string              `json:"instructions,omitempty"`
-	ExpectedResult *string              `json:"expected-result,omitempty"`
-	Steps          *[]utils.StepArg     `json:"steps,omitempty"`
-	Preconditions  *string              `json:"preconditions,omitempty"`
-	Requirements   *[]string            `json:"requirements,omitempty"`
-	Attributes     []utils.AttributeArg `json:"attributes,omitempty"`
+	ProjectKey               string                          `json:"projectKey"`
+	Name                     string                          `json:"name"`
+	Description              *string                         `json:"description,omitempty"`
+	Priority                 *string                         `json:"priority,omitempty"`
+	TestFolderID             int64                           `json:"test-folder-id"`
+	TestCaseType             *string                         `json:"test-case-type,omitempty"`
+	Instructions             *string                         `json:"instructions,omitempty"`
+	ExpectedResult           *string                         `json:"expected-result,omitempty"`
+	Steps                    *[]utils.StepArg                `json:"steps,omitempty"`
+	Preconditions            *string                         `json:"preconditions,omitempty"`
+	PreconditionsAttachments *[]utils.ExecutionAttachmentArg `json:"preconditions-attachments,omitempty"`
+	Requirements             *[]string                       `json:"requirements,omitempty"`
+	Attachments              *[]utils.ExecutionAttachmentArg `json:"attachments,omitempty"`
+	Attributes               []utils.AttributeArg            `json:"attributes,omitempty"`
 }
 
 func (tr *TMSResources) toolCreateTestCase() (*mcp.Tool, utils.ToolHandler[CreateTestCaseArgs, any]) {
@@ -823,8 +825,14 @@ func (tr *TMSResources) toolCreateTestCase() (*mcp.Tool, utils.ToolHandler[Creat
 						Type:        "string",
 						Description: "Optional preconditions for the test case",
 					},
+					"preconditions-attachments": utils.AttachmentsSchema(
+						`Optional attachments for the scenario preconditions. Only valid when test-case-type is "steps" and preconditions is provided.`,
+					),
 					"requirements": utils.RequirementsSchema(false),
-					"attributes":   utils.AttributesSchema(false),
+					"attachments": utils.AttachmentsSchema(
+						`Optional attachments for the whole scenario. Only valid when test-case-type is "text" (the default); for "steps", attach files to individual steps instead via each step's "attachments" field.`,
+					),
+					"attributes": utils.AttributesSchema(false),
 				},
 				Required: []string{"name", "test-folder-id"},
 			},
@@ -846,16 +854,23 @@ func (tr *TMSResources) toolCreateTestCase() (*mcp.Tool, utils.ToolHandler[Creat
 
 				// The API requires a manual scenario object, so it is always
 				// included; an unspecified test-case-type defaults to TEXT.
-				scenario, err := utils.BuildManualScenario(utils.ManualScenarioArgs{
-					TestCaseType:   args.TestCaseType,
-					Instructions:   args.Instructions,
-					ExpectedResult: args.ExpectedResult,
-					Preconditions:  args.Preconditions,
-					Requirements:   args.Requirements,
-					Steps:          args.Steps,
-				})
+				scenario, uploadedAttachmentIDs, err := utils.BuildManualScenario(
+					ctx,
+					tr.client,
+					project,
+					utils.ManualScenarioArgs{
+						TestCaseType:             args.TestCaseType,
+						Instructions:             args.Instructions,
+						ExpectedResult:           args.ExpectedResult,
+						Preconditions:            args.Preconditions,
+						PreconditionsAttachments: args.PreconditionsAttachments,
+						Requirements:             args.Requirements,
+						Steps:                    args.Steps,
+						Attachments:              args.Attachments,
+					},
+				)
 				if err != nil {
-					return nil, nil, err
+					return nil, nil, utils.WithUploadedAttachmentIDs(err, uploadedAttachmentIDs)
 				}
 
 				rq := openapi.NewComEpamReportportalBaseCoreTmsDtoTmsTestCaseRQ()
@@ -876,7 +891,10 @@ func (tr *TMSResources) toolCreateTestCase() (*mcp.Tool, utils.ToolHandler[Creat
 						args.Attributes,
 					)
 					if attrErr != nil {
-						return nil, nil, attrErr
+						return nil, nil, utils.WithUploadedAttachmentIDs(
+							attrErr,
+							uploadedAttachmentIDs,
+						)
 					}
 					rq.SetAttributes(attrs)
 				}
@@ -884,7 +902,11 @@ func (tr *TMSResources) toolCreateTestCase() (*mcp.Tool, utils.ToolHandler[Creat
 				_, response, err := tr.client.TestCaseAPI.CreateTestCase(ctx, project).
 					ComEpamReportportalBaseCoreTmsDtoTmsTestCaseRQ(*rq).
 					Execute()
-				return utils.ReadAPIResponse(response, err)
+				result, out, apiErr := utils.ReadAPIResponse(response, err)
+				if apiErr != nil {
+					return nil, nil, utils.WithUploadedAttachmentIDs(apiErr, uploadedAttachmentIDs)
+				}
+				return result, out, apiErr
 			},
 		)
 }
@@ -1089,19 +1111,21 @@ func (tr *TMSResources) toolCreateTestPlan() (*mcp.Tool, utils.ToolHandler[Creat
 
 // UpdateTestCaseArgs represents the arguments for the update_test_case tool.
 type UpdateTestCaseArgs struct {
-	ProjectKey     string                `json:"projectKey"`
-	TestCaseID     int64                 `json:"testCaseId"`
-	Name           *string               `json:"name,omitempty"`
-	Description    *string               `json:"description,omitempty"`
-	Priority       *string               `json:"priority,omitempty"`
-	TestFolderID   *int64                `json:"test-folder-id,omitempty"`
-	TestCaseType   *string               `json:"test-case-type,omitempty"`
-	Instructions   *string               `json:"instructions,omitempty"`
-	ExpectedResult *string               `json:"expected-result,omitempty"`
-	Steps          *[]utils.StepArg      `json:"steps,omitempty"`
-	Preconditions  *string               `json:"preconditions,omitempty"`
-	Requirements   *[]string             `json:"requirements,omitempty"`
-	Attributes     *[]utils.AttributeArg `json:"attributes,omitempty"`
+	ProjectKey               string                          `json:"projectKey"`
+	TestCaseID               int64                           `json:"testCaseId"`
+	Name                     *string                         `json:"name,omitempty"`
+	Description              *string                         `json:"description,omitempty"`
+	Priority                 *string                         `json:"priority,omitempty"`
+	TestFolderID             *int64                          `json:"test-folder-id,omitempty"`
+	TestCaseType             *string                         `json:"test-case-type,omitempty"`
+	Instructions             *string                         `json:"instructions,omitempty"`
+	ExpectedResult           *string                         `json:"expected-result,omitempty"`
+	Steps                    *[]utils.StepArg                `json:"steps,omitempty"`
+	Preconditions            *string                         `json:"preconditions,omitempty"`
+	PreconditionsAttachments *[]utils.ExecutionAttachmentArg `json:"preconditions-attachments,omitempty"`
+	Requirements             *[]string                       `json:"requirements,omitempty"`
+	Attachments              *[]utils.ExecutionAttachmentArg `json:"attachments,omitempty"`
+	Attributes               *[]utils.AttributeArg           `json:"attributes,omitempty"`
 }
 
 func (tr *TMSResources) toolUpdateTestCase() (*mcp.Tool, utils.ToolHandler[UpdateTestCaseArgs, any]) {
@@ -1160,8 +1184,14 @@ func (tr *TMSResources) toolUpdateTestCase() (*mcp.Tool, utils.ToolHandler[Updat
 						Type:        "string",
 						Description: "Preconditions for the test case",
 					},
+					"preconditions-attachments": utils.AttachmentsSchema(
+						`Optional attachments for the scenario preconditions. Only valid when test-case-type is "steps" and preconditions is provided.`,
+					),
 					"requirements": utils.RequirementsSchema(true),
-					"attributes":   utils.AttributesSchema(true),
+					"attachments": utils.AttachmentsSchema(
+						`Optional attachments for the whole scenario. Only valid when test-case-type is "text"; for "steps", attach files to individual steps instead via each step's "attachments" field.`,
+					),
+					"attributes": utils.AttributesSchema(true),
 				},
 				Required: []string{"testCaseId"},
 			},
@@ -1193,24 +1223,38 @@ func (tr *TMSResources) toolUpdateTestCase() (*mcp.Tool, utils.ToolHandler[Updat
 				}
 				hasScenarioFields := args.Instructions != nil ||
 					args.ExpectedResult != nil || args.Preconditions != nil ||
-					args.Requirements != nil || args.Steps != nil
+					args.Requirements != nil || args.Steps != nil ||
+					args.Attachments != nil || args.PreconditionsAttachments != nil
+				var uploadedAttachmentIDs []string
 				if args.TestCaseType != nil || hasScenarioFields {
 					if args.TestCaseType == nil && hasScenarioFields {
 						return nil, nil, fmt.Errorf(
-							"test-case-type must be specified when updating manual scenario fields (instructions, expected-result, preconditions, requirements, steps)",
+							"test-case-type must be specified when updating manual scenario fields (instructions, expected-result, preconditions, requirements, steps, attachments, preconditions-attachments)",
 						)
 					}
-					scenario, scenarioErr := utils.BuildManualScenario(utils.ManualScenarioArgs{
-						TestCaseType:   args.TestCaseType,
-						Instructions:   args.Instructions,
-						ExpectedResult: args.ExpectedResult,
-						Preconditions:  args.Preconditions,
-						Requirements:   args.Requirements,
-						Steps:          args.Steps,
-						IsUpdate:       true,
-					})
+					var scenario openapi.ComEpamReportportalBaseCoreTmsDtoTmsTestCaseRQManualScenario
+					var scenarioErr error
+					scenario, uploadedAttachmentIDs, scenarioErr = utils.BuildManualScenario(
+						ctx,
+						tr.client,
+						project,
+						utils.ManualScenarioArgs{
+							TestCaseType:             args.TestCaseType,
+							Instructions:             args.Instructions,
+							ExpectedResult:           args.ExpectedResult,
+							Preconditions:            args.Preconditions,
+							PreconditionsAttachments: args.PreconditionsAttachments,
+							Requirements:             args.Requirements,
+							Steps:                    args.Steps,
+							Attachments:              args.Attachments,
+							IsUpdate:                 true,
+						},
+					)
 					if scenarioErr != nil {
-						return nil, nil, scenarioErr
+						return nil, nil, utils.WithUploadedAttachmentIDs(
+							scenarioErr,
+							uploadedAttachmentIDs,
+						)
 					}
 					rq.SetManualScenario(scenario)
 				}
@@ -1223,7 +1267,10 @@ func (tr *TMSResources) toolUpdateTestCase() (*mcp.Tool, utils.ToolHandler[Updat
 						*args.Attributes,
 					)
 					if attrErr != nil {
-						return nil, nil, attrErr
+						return nil, nil, utils.WithUploadedAttachmentIDs(
+							attrErr,
+							uploadedAttachmentIDs,
+						)
 					}
 					rq.SetAttributes(attrs)
 				}
@@ -1231,7 +1278,11 @@ func (tr *TMSResources) toolUpdateTestCase() (*mcp.Tool, utils.ToolHandler[Updat
 				_, response, err := tr.client.TestCaseAPI.PatchTestCase(ctx, project, args.TestCaseID).
 					ComEpamReportportalBaseCoreTmsDtoTmsTestCaseRQ(*rq).
 					Execute()
-				return utils.ReadAPIResponse(response, err)
+				result, out, apiErr := utils.ReadAPIResponse(response, err)
+				if apiErr != nil {
+					return nil, nil, utils.WithUploadedAttachmentIDs(apiErr, uploadedAttachmentIDs)
+				}
+				return result, out, apiErr
 			},
 		)
 }
@@ -2071,51 +2122,9 @@ func (tr *TMSResources) toolUpdateManualLaunchExecution() (*mcp.Tool, utils.Tool
 								Type:        "string",
 								Description: "Text comment for the execution",
 							},
-							"attachments": {
-								Type: "array",
-								Description: "Attachments to link to the execution. Each item must provide either " +
-									"'id' (an attachment already uploaded via the TMS attachment upload endpoint) or " +
-									"'content' (base64-encoded file bytes to upload automatically), but not both.",
-								Items: &jsonschema.Schema{
-									Type: "object",
-									AdditionalProperties: &jsonschema.Schema{
-										Not: &jsonschema.Schema{},
-									},
-									Properties: map[string]*jsonschema.Schema{
-										"id": {
-											Type: "integer",
-											Description: "ID of an attachment already uploaded via the TMS attachment " +
-												"upload endpoint. Omit when providing 'content'.",
-											Minimum: openapi.PtrFloat64(1),
-										},
-										"fileName": {
-											Type:        "string",
-											Description: "Original file name with extension (e.g. Logo_Black.png). Always required.",
-											MinLength:   openapi.PtrInt(1),
-										},
-										"fileType": {
-											Type: "string",
-											Description: "MIME type of the file (e.g. image/png). Required when 'id' is set; " +
-												"optional when 'content' is set (inferred from fileName/content if omitted).",
-											MinLength: openapi.PtrInt(1),
-										},
-										"fileSize": {
-											Type: "integer",
-											Description: "File size in bytes. Required when 'id' is set; ignored " +
-												"(computed automatically) when 'content' is set.",
-											Minimum: openapi.PtrFloat64(1),
-										},
-										"content": {
-											Type: "string",
-											Description: "Base64-encoded file content to upload automatically via " +
-												"POST /project/{projectKey}/tms/attachment/upload before linking it to " +
-												"the execution. Omit when providing 'id'.",
-											MinLength: openapi.PtrInt(1),
-										},
-									},
-									Required: []string{"fileName"},
-								},
-							},
+							"attachments": utils.AttachmentsSchema(
+								"Attachments to link to the execution.",
+							),
 						},
 					},
 				},
