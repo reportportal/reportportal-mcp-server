@@ -35,6 +35,10 @@ func NewServer(
 	analyticsOn bool,
 	tlsCfg *tls.Config,
 ) (*mcp.Server, *analytics.Analytics, error) {
+	if err := utils.ValidateAuthenticatedBaseURL(hostUrl, token); err != nil {
+		return nil, nil, err
+	}
+
 	s := mcp.NewServer(
 		&mcp.Implementation{
 			Name:    "reportportal-mcp-server",
@@ -48,7 +52,7 @@ func NewServer(
 	// Build an HTTP client for analytics and import operations.
 	// Bearer token injection is not needed here; the oauth2 transport handles
 	// that separately for the ReportPortal API client.
-	httpClient := buildHTTPClient(tlsCfg)
+	httpClient := buildHTTPClient(tlsCfg, hostUrl)
 
 	// Always thread httpClient into the oauth2 context so the oauth2 transport
 	// uses it for every outbound RP call — this preserves both Bearer token
@@ -134,9 +138,13 @@ func ReadPrompts(files embed.FS, dir string) ([]promptreader.PromptHandlerPair, 
 // When tlsCfg is nil the default transport is used unchanged, preserving
 // HTTP_PROXY and other default behaviours. When non-nil the default transport
 // is cloned and its TLSClientConfig replaced so proxy/dial settings are still
-// inherited.
-func buildHTTPClient(tlsCfg *tls.Config) *http.Client {
-	client := &http.Client{Timeout: 30 * time.Second}
+// inherited. CheckRedirect rejects redirects that downgrade to HTTP or leave
+// hostUrl, so the bearer token is never forwarded elsewhere.
+func buildHTTPClient(tlsCfg *tls.Config, hostUrl *url.URL) *http.Client {
+	client := &http.Client{
+		Timeout:       30 * time.Second,
+		CheckRedirect: utils.SameHostHTTPSRedirectPolicy(hostUrl),
+	}
 	if tlsCfg != nil {
 		t := utils.NewBaseTransport()
 		t.TLSClientConfig = tlsCfg

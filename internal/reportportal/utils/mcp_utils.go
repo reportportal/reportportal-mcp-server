@@ -42,6 +42,36 @@ const tmsAttachmentMaxDecodedBytes int64 = 50 * 1024 * 1024 // 50 MiB (52 428 80
 // reference this constant.
 const ProjectKeyField = "projectKey"
 
+// ValidateAuthenticatedBaseURL prevents API credentials from being sent over
+// an unencrypted connection.
+func ValidateAuthenticatedBaseURL(baseURL *url.URL, apiKey string) error {
+	if apiKey != "" && (baseURL == nil || !strings.EqualFold(baseURL.Scheme, "https")) {
+		return fmt.Errorf("authenticated ReportPortal requests require an HTTPS base URL")
+	}
+	return nil
+}
+
+// SameHostHTTPSRedirectPolicy returns an http.Client CheckRedirect callback that
+// rejects redirects downgrading to plain HTTP or targeting a host other than
+// allowedHostURL, so bearer tokens are never forwarded to an unsafe destination.
+// Same-host HTTPS redirects are permitted.
+func SameHostHTTPSRedirectPolicy(
+	allowedHostURL *url.URL,
+) func(req *http.Request, via []*http.Request) error {
+	return func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 10 {
+			return fmt.Errorf("stopped after %d redirects", len(via))
+		}
+		if !strings.EqualFold(req.URL.Scheme, "https") {
+			return fmt.Errorf("refusing to follow redirect to non-HTTPS URL: %s", req.URL)
+		}
+		if allowedHostURL != nil && !strings.EqualFold(req.URL.Host, allowedHostURL.Host) {
+			return fmt.Errorf("refusing to follow redirect to untrusted host: %s", req.URL.Host)
+		}
+		return nil
+	}
+}
+
 // requirementIDCharset is the alphabet used for generated requirement IDs.
 const requirementIDCharset = "abcdefghijklmnopqrstuvwxyz0123456789"
 
@@ -246,8 +276,9 @@ const (
 
 // StepArg represents a single manual scenario step from tool input.
 type StepArg struct {
-	Instructions   string  `json:"instructions"`
-	ExpectedResult *string `json:"expected-result,omitempty"`
+	Instructions   string                   `json:"instructions"`
+	ExpectedResult *string                  `json:"expected-result,omitempty"`
+	Attachments    []ExecutionAttachmentArg `json:"attachments,omitempty"`
 }
 
 // AttributeArg represents a single test case attribute (tag) from tool input.
@@ -290,18 +321,21 @@ func AttributesSchema(isUpdate bool) *jsonschema.Schema {
 // ManualScenarioArgs carries the manual scenario inputs shared by the
 // create_test_case and update_test_case tools. Requirements is a pointer so a
 // nil value (field omitted) can be distinguished from an explicit empty slice
-// (field provided as []), which clears the existing requirements.
+// (field provided as []), which clears the existing requirements. Attachments
+// and PreconditionsAttachments follow the same nil-means-omitted convention.
 // IsUpdate changes the steps validation rule: on a create, Steps must be
 // non-nil and non-empty; on an update, Steps may be nil (leave existing steps
 // unchanged), but if provided must still be non-empty.
 type ManualScenarioArgs struct {
-	TestCaseType   *string
-	Instructions   *string
-	ExpectedResult *string
-	Preconditions  *string
-	Requirements   *[]string
-	Steps          *[]StepArg
-	IsUpdate       bool
+	TestCaseType             *string
+	Instructions             *string
+	ExpectedResult           *string
+	Preconditions            *string
+	PreconditionsAttachments *[]ExecutionAttachmentArg
+	Requirements             *[]string
+	Steps                    *[]StepArg
+	Attachments              *[]ExecutionAttachmentArg
+	IsUpdate                 bool
 }
 
 // TestCaseTypeSchema builds the JSON schema for the optional "test-case-type" field.
@@ -339,6 +373,9 @@ func StepsSchema() *jsonschema.Schema {
 					Type:        "string",
 					Description: "Optional expected result of the step",
 				},
+				"attachments": AttachmentsSchema(
+					"Optional attachments for this step.",
+				),
 			},
 			Required:             []string{"instructions"},
 			AdditionalProperties: &jsonschema.Schema{Not: &jsonschema.Schema{}},
@@ -346,35 +383,139 @@ func StepsSchema() *jsonschema.Schema {
 	}
 }
 
-// ToStepsRQ converts step arguments into the openapi request model.
-func ToStepsRQ(steps []StepArg) []openapi.ComEpamReportportalBaseCoreTmsDtoTmsStepRQ {
+// ToStepsRQ converts step arguments into the openapi request model, uploading any
+// inline attachment content (via ToManualScenarioAttachmentsRQ) along the way.
+// The second return value lists the IDs of attachments freshly uploaded from
+// inline content (across all steps, in order), even when a later step fails,
+// so callers can surface them instead of losing track of the upload.
+func ToStepsRQ(
+	ctx context.Context,
+	client *gorp.Client,
+	project string,
+	steps []StepArg,
+) ([]openapi.ComEpamReportportalBaseCoreTmsDtoTmsStepRQ, []string, error) {
 	result := make([]openapi.ComEpamReportportalBaseCoreTmsDtoTmsStepRQ, 0, len(steps))
-	for _, s := range steps {
+	var uploadedIDs []string
+	for i, s := range steps {
 		item := openapi.NewComEpamReportportalBaseCoreTmsDtoTmsStepRQ()
 		item.SetInstructions(s.Instructions)
 		if s.ExpectedResult != nil {
 			item.SetExpectedResult(*s.ExpectedResult)
 		}
+		if s.Attachments != nil {
+			attachments, ids, err := ToManualScenarioAttachmentsRQ(
+				ctx,
+				client,
+				project,
+				s.Attachments,
+			)
+			uploadedIDs = append(uploadedIDs, ids...)
+			if err != nil {
+				return nil, uploadedIDs, fmt.Errorf("steps[%d].attachments: %w", i, err)
+			}
+			item.SetAttachments(attachments)
+		}
 		result = append(result, *item)
 	}
-	return result
+	return result, uploadedIDs, nil
 }
 
+// newPreconditionsRQ builds the preconditions request model, resolving (and
+// uploading, where necessary) any attachments via ToManualScenarioAttachmentsRQ.
+// The second return value lists the IDs of attachments freshly uploaded from
+// inline content, even when err is non-nil.
 func newPreconditionsRQ(
+	ctx context.Context,
+	client *gorp.Client,
+	project string,
 	value string,
-) openapi.ComEpamReportportalBaseCoreTmsDtoTmsManualScenarioPreconditionsRQ {
+	attachments []ExecutionAttachmentArg,
+) (openapi.ComEpamReportportalBaseCoreTmsDtoTmsManualScenarioPreconditionsRQ, []string, error) {
 	pre := openapi.NewComEpamReportportalBaseCoreTmsDtoTmsManualScenarioPreconditionsRQ()
 	pre.SetValue(value)
-	return *pre
+	if attachments != nil {
+		resolved, ids, err := ToManualScenarioAttachmentsRQ(ctx, client, project, attachments)
+		if err != nil {
+			return *pre, ids, err
+		}
+		pre.SetAttachments(resolved)
+		return *pre, ids, nil
+	}
+	return *pre, nil, nil
+}
+
+// manualScenarioAttachmentContentBudget sums the decoded size of every inline
+// (content-bearing) attachment across the whole manual scenario: scenario-level,
+// per-step, and precondition attachments. ResolveExecutionCommentAttachments only
+// enforces tmsAttachmentMaxDecodedBytes per call, so without this aggregate check a
+// caller could split a large payload across many steps/preconditions, each within
+// the limit individually, to bypass it.
+func decodedBase64ContentLen(content string) int64 {
+	encodedLen := 0
+	padding := 0
+	for i := range content {
+		switch content[i] {
+		case '\r', '\n':
+			continue
+		case '=':
+			padding++
+		default:
+			padding = 0
+		}
+		encodedLen++
+	}
+	return int64((encodedLen/4)*3 - padding)
+}
+
+func manualScenarioAttachmentContentBudget(a ManualScenarioArgs) int64 {
+	var total int64
+	sum := func(atts []ExecutionAttachmentArg) {
+		for _, att := range atts {
+			if att.Content != "" {
+				total += decodedBase64ContentLen(att.Content)
+			}
+		}
+	}
+	if a.Attachments != nil {
+		sum(*a.Attachments)
+	}
+	if a.PreconditionsAttachments != nil {
+		sum(*a.PreconditionsAttachments)
+	}
+	if a.Steps != nil {
+		for _, s := range *a.Steps {
+			sum(s.Attachments)
+		}
+	}
+	return total
 }
 
 // BuildManualScenario constructs a test case manual scenario request from tool
-// input. The test case type selects between a TEXT ("text") scenario and a
+// input, uploading any inline attachment content via UploadTMSAttachment along
+// the way. The test case type selects between a TEXT ("text") scenario and a
 // STEPS ("steps") scenario; an empty/nil type defaults to TEXT.
+//
+// The second return value lists the IDs of attachments freshly uploaded from
+// inline content across the whole scenario (scenario-level, precondition, and
+// per-step attachments). Callers should surface these IDs if a downstream
+// request (e.g. creating/patching the test case) fails after the scenario was
+// built, so already-uploaded attachments aren't silently orphaned.
 func BuildManualScenario(
+	ctx context.Context,
+	client *gorp.Client,
+	project string,
 	a ManualScenarioArgs,
-) (openapi.ComEpamReportportalBaseCoreTmsDtoTmsTestCaseRQManualScenario, error) {
+) (openapi.ComEpamReportportalBaseCoreTmsDtoTmsTestCaseRQManualScenario, []string, error) {
 	var zero openapi.ComEpamReportportalBaseCoreTmsDtoTmsTestCaseRQManualScenario
+	var uploadedIDs []string
+
+	if budget := manualScenarioAttachmentContentBudget(a); budget > tmsAttachmentMaxDecodedBytes {
+		return zero, nil, fmt.Errorf(
+			"combined decoded size of inline attachments (%d bytes) exceeds the "+
+				"%d-byte limit (%d MiB) across the whole manual scenario",
+			budget, tmsAttachmentMaxDecodedBytes, tmsAttachmentMaxDecodedBytes/(1024*1024),
+		)
+	}
 
 	tcType := TestCaseTypeDescription
 	if a.TestCaseType != nil && strings.TrimSpace(*a.TestCaseType) != "" {
@@ -384,7 +525,7 @@ func BuildManualScenario(
 	if a.Requirements != nil {
 		for i, r := range *a.Requirements {
 			if strings.TrimSpace(r) == "" {
-				return zero, fmt.Errorf("requirements[%d] value must be non-empty", i)
+				return zero, nil, fmt.Errorf("requirements[%d] value must be non-empty", i)
 			}
 		}
 	}
@@ -392,8 +533,13 @@ func BuildManualScenario(
 	switch tcType {
 	case TestCaseTypeDescription:
 		if a.Steps != nil {
-			return zero, fmt.Errorf(
+			return zero, nil, fmt.Errorf(
 				`steps are only valid when test-case-type is "steps"`,
+			)
+		}
+		if a.PreconditionsAttachments != nil {
+			return zero, nil, fmt.Errorf(
+				`preconditions-attachments is only valid when test-case-type is "steps"`,
 			)
 		}
 		text := openapi.NewComEpamReportportalBaseCoreTmsDtoTmsTextManualScenarioRQ("TEXT")
@@ -404,58 +550,120 @@ func BuildManualScenario(
 			text.SetExpectedResult(*a.ExpectedResult)
 		}
 		if a.Preconditions != nil {
-			text.SetPreconditions(newPreconditionsRQ(*a.Preconditions))
+			pre, ids, err := newPreconditionsRQ(ctx, client, project, *a.Preconditions, nil)
+			uploadedIDs = append(uploadedIDs, ids...)
+			if err != nil {
+				return zero, uploadedIDs, fmt.Errorf("preconditions: %w", err)
+			}
+			text.SetPreconditions(pre)
 		}
 		if a.Requirements != nil {
 			text.SetRequirements(ToRequirementsRQ(*a.Requirements))
 		}
+		if a.Attachments != nil {
+			attachments, ids, err := ToManualScenarioAttachmentsRQ(
+				ctx,
+				client,
+				project,
+				*a.Attachments,
+			)
+			uploadedIDs = append(uploadedIDs, ids...)
+			if err != nil {
+				return zero, uploadedIDs, fmt.Errorf("attachments: %w", err)
+			}
+			text.SetAttachments(attachments)
+		}
 		return openapi.ComEpamReportportalBaseCoreTmsDtoTmsTextManualScenarioRQAsComEpamReportportalBaseCoreTmsDtoTmsTestCaseRQManualScenario(
 			text,
-		), nil
+		), uploadedIDs, nil
 
 	case TestCaseTypeWithSteps:
 		if a.Instructions != nil || a.ExpectedResult != nil {
-			return zero, fmt.Errorf(
+			return zero, nil, fmt.Errorf(
 				`instructions and expected-result are not valid for "steps"; provide them inside each step`,
 			)
 		}
+		if a.Attachments != nil {
+			return zero, nil, fmt.Errorf(
+				`attachments is only valid when test-case-type is "text"; attach files to individual steps instead`,
+			)
+		}
 		if a.Steps == nil && !a.IsUpdate {
-			return zero, fmt.Errorf(
+			return zero, nil, fmt.Errorf(
 				`steps must not be empty when test-case-type is "steps"`,
 			)
 		}
 		if a.Steps != nil && len(*a.Steps) == 0 {
-			return zero, fmt.Errorf(
+			return zero, nil, fmt.Errorf(
 				`steps must not be empty when test-case-type is "steps"`,
 			)
 		}
 		if a.Steps != nil {
 			for i, s := range *a.Steps {
 				if strings.TrimSpace(s.Instructions) == "" {
-					return zero, fmt.Errorf("steps[%d] instructions must be non-empty", i)
+					return zero, nil, fmt.Errorf("steps[%d] instructions must be non-empty", i)
 				}
 			}
 		}
+		if a.PreconditionsAttachments != nil && a.Preconditions == nil {
+			return zero, nil, fmt.Errorf(
+				`preconditions-attachments requires preconditions to be provided`,
+			)
+		}
 		steps := openapi.NewComEpamReportportalBaseCoreTmsDtoTmsStepsManualScenarioRQ("STEPS")
 		if a.Steps != nil {
-			steps.SetSteps(ToStepsRQ(*a.Steps))
+			stepsRQ, ids, err := ToStepsRQ(ctx, client, project, *a.Steps)
+			uploadedIDs = append(uploadedIDs, ids...)
+			if err != nil {
+				return zero, uploadedIDs, err
+			}
+			steps.SetSteps(stepsRQ)
 		}
 		if a.Preconditions != nil {
-			steps.SetPreconditions(newPreconditionsRQ(*a.Preconditions))
+			var preAttachments []ExecutionAttachmentArg
+			if a.PreconditionsAttachments != nil {
+				preAttachments = *a.PreconditionsAttachments
+			}
+			pre, ids, err := newPreconditionsRQ(
+				ctx,
+				client,
+				project,
+				*a.Preconditions,
+				preAttachments,
+			)
+			uploadedIDs = append(uploadedIDs, ids...)
+			if err != nil {
+				return zero, uploadedIDs, fmt.Errorf("preconditions: %w", err)
+			}
+			steps.SetPreconditions(pre)
 		}
 		if a.Requirements != nil {
 			steps.SetRequirements(ToRequirementsRQ(*a.Requirements))
 		}
 		return openapi.ComEpamReportportalBaseCoreTmsDtoTmsStepsManualScenarioRQAsComEpamReportportalBaseCoreTmsDtoTmsTestCaseRQManualScenario(
 			steps,
-		), nil
+		), uploadedIDs, nil
 
 	default:
-		return zero, fmt.Errorf(
+		return zero, nil, fmt.Errorf(
 			"invalid test-case-type %q: must be %q or %q",
 			tcType, TestCaseTypeDescription, TestCaseTypeWithSteps,
 		)
 	}
+}
+
+// WithUploadedAttachmentIDs appends already-uploaded inline attachment IDs to err so a
+// failure anywhere after BuildManualScenario doesn't leave the caller unaware of
+// attachments that were already created server-side and can be reused by id.
+func WithUploadedAttachmentIDs(err error, uploadedAttachmentIDs []string) error {
+	if err == nil || len(uploadedAttachmentIDs) == 0 {
+		return err
+	}
+	return fmt.Errorf(
+		"%w; uploaded attachment IDs (use via 'id' field to avoid re-uploading): %s",
+		err,
+		strings.Join(uploadedAttachmentIDs, ", "),
+	)
 }
 
 // ExecutionAttachmentArg describes an attachment to link to a test case execution.
@@ -470,6 +678,63 @@ type ExecutionAttachmentArg struct {
 	FileType string `json:"fileType,omitempty"`
 	FileSize int64  `json:"fileSize,omitempty"`
 	Content  string `json:"content,omitempty"`
+}
+
+// AttachmentItemSchema returns the shared JSON schema for a single attachment
+// entry: either a reference to an existing attachment (id/fileName/fileType/
+// fileSize) or inline content to upload automatically (fileName/content).
+// Shared by every tool that links TMS attachments (execution comments, test
+// case scenarios, steps, and preconditions).
+func AttachmentItemSchema() *jsonschema.Schema {
+	return &jsonschema.Schema{
+		Type:                 "object",
+		AdditionalProperties: &jsonschema.Schema{Not: &jsonschema.Schema{}},
+		Properties: map[string]*jsonschema.Schema{
+			"id": {
+				Type: "integer",
+				Description: "ID of an attachment already uploaded via the TMS attachment " +
+					"upload endpoint. Omit when providing 'content'.",
+				Minimum: openapi.PtrFloat64(1),
+			},
+			"fileName": {
+				Type:        "string",
+				Description: "Original file name with extension (e.g. Logo_Black.png). Always required.",
+				MinLength:   openapi.PtrInt(1),
+			},
+			"fileType": {
+				Type: "string",
+				Description: "MIME type of the file (e.g. image/png). Required when 'id' is set; " +
+					"optional when 'content' is set (inferred from fileName/content if omitted).",
+				MinLength: openapi.PtrInt(1),
+			},
+			"fileSize": {
+				Type: "integer",
+				Description: "File size in bytes. Required when 'id' is set; ignored " +
+					"(computed automatically) when 'content' is set.",
+				Minimum: openapi.PtrFloat64(1),
+			},
+			"content": {
+				Type: "string",
+				Description: "Base64-encoded file content to upload automatically via " +
+					"POST /project/{projectKey}/tms/attachment/upload before linking it. " +
+					"Omit when providing 'id'.",
+				MinLength: openapi.PtrInt(1),
+			},
+		},
+		Required: []string{"fileName"},
+	}
+}
+
+// AttachmentsSchema returns the JSON schema for an array of attachments (see
+// AttachmentItemSchema), using description for the array field itself.
+func AttachmentsSchema(description string) *jsonschema.Schema {
+	return &jsonschema.Schema{
+		Type: "array",
+		Description: description + " Each item must provide either 'id' (an attachment " +
+			"already uploaded via the TMS attachment upload endpoint) or 'content' " +
+			"(base64-encoded file bytes to upload automatically), but not both.",
+		Items: AttachmentItemSchema(),
+	}
 }
 
 // ExecutionCommentAttachmentRQ is the attachment representation sent to the
@@ -583,6 +848,19 @@ func UploadTMSAttachment(
 	copyClient := *srcClient
 	if copyClient.Timeout == 0 {
 		copyClient.Timeout = defaultAttachmentUploadTimeout
+	}
+	// Go's default redirect handling only strips the Authorization header when the
+	// destination host changes, not on a same-host HTTPS->HTTP downgrade, so enforce
+	// HTTPS explicitly here while still honouring any pre-existing redirect policy.
+	existingCheckRedirect := copyClient.CheckRedirect
+	copyClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if !strings.EqualFold(req.URL.Scheme, "https") {
+			return fmt.Errorf("refusing to follow redirect to non-HTTPS URL: %s", req.URL)
+		}
+		if existingCheckRedirect != nil {
+			return existingCheckRedirect(req, via)
+		}
+		return nil
 	}
 	httpClient := &copyClient
 
@@ -761,6 +1039,46 @@ func ResolveExecutionCommentAttachments(
 		}
 	}
 	return resolved, nil
+}
+
+// ToManualScenarioAttachmentsRQ resolves attachment arguments (uploading any that
+// carry inline base64 content via UploadTMSAttachment, through
+// ResolveExecutionCommentAttachments) and converts the result into the id-only
+// attachment reference format shared by the TMS test case manual scenario, step,
+// and precondition attachment fields. The second return value lists the IDs of
+// attachments freshly uploaded from inline content (i.e. the input entry had
+// Content set rather than an existing ID), in input order.
+func ToManualScenarioAttachmentsRQ(
+	ctx context.Context,
+	client *gorp.Client,
+	project string,
+	attachments []ExecutionAttachmentArg,
+) ([]openapi.ComEpamReportportalBaseCoreTmsDtoTmsManualScenarioAttachmentRQ, []string, error) {
+	resolved, err := ResolveExecutionCommentAttachments(ctx, client, project, attachments)
+	if err != nil {
+		return nil, nil, err
+	}
+	// Always return a non-nil slice (even when empty) so callers that explicitly
+	// pass an empty attachments array to clear existing attachments aren't
+	// silently turned into a no-op by omitempty on the resulting RQ field.
+	out := make(
+		[]openapi.ComEpamReportportalBaseCoreTmsDtoTmsManualScenarioAttachmentRQ,
+		0,
+		len(resolved),
+	)
+	var uploadedIDs []string
+	for i, r := range resolved {
+		out = append(
+			out,
+			*openapi.NewComEpamReportportalBaseCoreTmsDtoTmsManualScenarioAttachmentRQ(
+				strconv.FormatInt(r.ID, 10),
+			),
+		)
+		if attachments[i].Content != "" {
+			uploadedIDs = append(uploadedIDs, strconv.FormatInt(r.ID, 10))
+		}
+	}
+	return out, uploadedIDs, nil
 }
 
 // ResolveTestCaseAttributes ensures that every requested attribute (tag, identified

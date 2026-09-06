@@ -87,39 +87,54 @@ func TestNewServer_BearerTokenSentWithTLSConfig(t *testing.T) {
 	assert.Contains(t, auth, token)
 }
 
-// TestNewServer_BearerTokenSentWithoutTLS is the nil-tlsCfg counterpart of
-// TestNewServer_BearerTokenSentWithTLSConfig and covers the most common
-// production configuration. This test would have caught the original regression
-// (plain HTTPClient overwrite) had it existed before the bug was introduced.
-func TestNewServer_BearerTokenSentWithoutTLS(t *testing.T) {
+func TestNewServer_RejectsAuthenticatedHTTPURL(t *testing.T) {
 	const token = "test-api-token"
-	const project = "test-project"
 
-	var capturedAuth atomic.Value
-	fakeRP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		capturedAuth.Store(r.Header.Get("Authorization"))
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write(emptyLaunchPageJSON(t))
-	}))
-	defer fakeRP.Close()
-
-	rpURL, err := url.Parse(fakeRP.URL)
+	rpURL, err := url.Parse("http://reportportal.example.com")
 	require.NoError(t, err)
 
-	mcpSrv, _, err := NewServer("test", rpURL, token, "", project, "", false, nil)
+	_, _, err = NewServer("test", rpURL, token, "", "test-project", "", false, nil)
+	require.EqualError(t, err, "authenticated ReportPortal requests require an HTTPS base URL")
+}
+
+func TestBuildHTTPClient_RejectsUnsafeRedirects(t *testing.T) {
+	hostURL, err := url.Parse("https://reportportal.example.com")
 	require.NoError(t, err)
 
-	cs := connectInProcess(t, mcpSrv)
-	defer func() { require.NoError(t, cs.Close()) }()
+	client := buildHTTPClient(nil, hostURL)
+	require.NotNil(t, client.CheckRedirect)
 
-	_, err = cs.CallTool(context.Background(), &mcp.CallToolParams{
-		Name:      "get_launches",
-		Arguments: map[string]any{"projectKey": project},
-	})
-	require.NoError(t, err, "CallTool returned protocol error")
+	tests := []struct {
+		name        string
+		target      string
+		expectError bool
+	}{
+		{
+			name:   "same host HTTPS redirect is allowed",
+			target: "https://reportportal.example.com/redirected",
+		},
+		{
+			name:        "HTTPS to HTTP downgrade is rejected",
+			target:      "http://reportportal.example.com/redirected",
+			expectError: true,
+		},
+		{
+			name:        "redirect to a different host is rejected",
+			target:      "https://attacker.example.com/redirected",
+			expectError: true,
+		},
+	}
 
-	auth, _ := capturedAuth.Load().(string)
-	assert.True(t, strings.HasPrefix(auth, "Bearer "),
-		"expected Authorization header to start with 'Bearer ', got: %q", auth)
-	assert.Contains(t, auth, token)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			targetURL, parseErr := url.Parse(tt.target)
+			require.NoError(t, parseErr)
+			err := client.CheckRedirect(&http.Request{URL: targetURL}, nil)
+			if tt.expectError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
 }
