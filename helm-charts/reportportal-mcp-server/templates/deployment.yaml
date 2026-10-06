@@ -48,6 +48,20 @@ spec:
               value: {{ .Values.rpHost | quote }}
             - name: RP_MCP_ANALYTICS_OFF
               value: {{ .Values.rpMcpAnalyticsOff | quote }}
+            {{- if (.Values.oauth).enabled }}
+            - name: MCP_OAUTH_ENABLED
+              value: "true"
+            - name: MCP_PUBLIC_URL
+              value: {{ .Values.oauth.publicUrl | quote }}
+            - name: MCP_OAUTH_ISSUER
+              value: {{ .Values.oauth.issuer | quote }}
+            - name: MCP_OAUTH_JWKS_URL
+              value: {{ .Values.oauth.jwksUrl | quote }}
+            - name: MCP_OAUTH_AUDIENCE
+              value: {{ .Values.oauth.audience | quote }}
+            - name: MCP_OAUTH_SCOPE
+              value: {{ .Values.oauth.scope | quote }}
+            {{- end }}
             {{- if .Values.extraEnv }}
             {{- toYaml .Values.extraEnv | nindent 12 }}
             {{- end }}
