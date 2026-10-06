@@ -18,6 +18,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/auth"
+
 	"github.com/reportportal/reportportal-mcp-server/internal/reportportal/utils"
 )
 
@@ -366,6 +368,14 @@ func (a *Analytics) getUserIDFromContext(ctx context.Context) string {
 		// Config has a real user ID (from RP_API_TOKEN env var or RP_USER_ID)
 		slog.Debug("Using RP_API_TOKEN or RP_USER_ID for analytics", "source", "env_var")
 		return a.Config.UserID
+	}
+
+	if tokenInfo := auth.TokenInfoFromContext(ctx); tokenInfo != nil && tokenInfo.Extra != nil {
+		if _, ok := tokenInfo.Extra["claims"]; ok && tokenInfo.UserID != "" {
+			hashed := HashToken(tokenInfo.UserID)
+			slog.Debug("Using OAuth JWT subject for analytics", "source", "oauth_jwt")
+			return hashed
+		}
 	}
 
 	// If no env var token/user ID was set (anonymous mode), try to get token from context
