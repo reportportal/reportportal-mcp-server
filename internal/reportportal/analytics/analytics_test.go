@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1703,4 +1704,85 @@ func TestAnalyticsInstanceIDFetching(t *testing.T) {
 			"Should remain empty even after ensureInstanceID call",
 		)
 	})
+}
+
+func TestGetUserIDFromContext_OAuthTokenInfo(t *testing.T) {
+	analytics, err := NewAnalytics("", "test-secret", "", "", nil)
+	require.NoError(t, err)
+	defer analytics.Stop()
+
+	jwtCtx := context.Background()
+	handler := auth.RequireBearerToken(
+		func(context.Context, string, *http.Request) (*auth.TokenInfo, error) {
+			return &auth.TokenInfo{
+				UserID:     "oid-from-jwt",
+				Expiration: time.Now().Add(time.Hour),
+				Extra: map[string]any{
+					"claims": map[string]interface{}{"oid": "oid-from-jwt"},
+				},
+			}, nil
+		},
+		nil,
+	)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		jwtCtx = r.Context()
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Authorization", "Bearer jwt-token")
+	handler.ServeHTTP(httptest.NewRecorder(), req)
+
+	assert.Equal(t, HashToken("oid-from-jwt"), analytics.getUserIDFromContext(jwtCtx))
+}
+
+func TestGetUserIDFromContext_APIKeyTokenInfoUsesBearerHash(t *testing.T) {
+	analytics, err := NewAnalytics("", "test-secret", "", "", nil)
+	require.NoError(t, err)
+	defer analytics.Stop()
+
+	apiKey := testToken1
+	var reqCtx context.Context
+	handler := auth.RequireBearerToken(
+		func(context.Context, string, *http.Request) (*auth.TokenInfo, error) {
+			return &auth.TokenInfo{
+				UserID:     HashToken(apiKey),
+				Expiration: time.Now().Add(time.Hour),
+			}, nil
+		},
+		nil,
+	)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reqCtx = utils.WithTokenInContext(r.Context(), apiKey)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	handler.ServeHTTP(httptest.NewRecorder(), req)
+
+	assert.Equal(t, HashToken(apiKey), analytics.getUserIDFromContext(reqCtx))
+}
+
+func TestGetUserIDFromContext_ConfigUserIDPrecedence(t *testing.T) {
+	analytics, err := NewAnalytics("custom-user", "test-secret", "", "", nil)
+	require.NoError(t, err)
+	defer analytics.Stop()
+
+	jwtCtx := context.Background()
+	handler := auth.RequireBearerToken(
+		func(context.Context, string, *http.Request) (*auth.TokenInfo, error) {
+			return &auth.TokenInfo{
+				UserID:     "oid-from-jwt",
+				Expiration: time.Now().Add(time.Hour),
+				Extra: map[string]any{
+					"claims": map[string]interface{}{"oid": "oid-from-jwt"},
+				},
+			}, nil
+		},
+		nil,
+	)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		jwtCtx = r.Context()
+	}))
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Authorization", "Bearer jwt-token")
+	handler.ServeHTTP(httptest.NewRecorder(), req)
+
+	assert.Equal(t, analytics.Config.UserID, analytics.getUserIDFromContext(jwtCtx))
 }

@@ -139,6 +139,56 @@ If the ReportPortal MCP Server is already **deployed** and accessible via HTTP, 
 - `headers.Authorization`: Bearer token for authentication (required)
 - `headers.X-Project`: The ReportPortal project name (optional)
 
+#### OAuth login (Microsoft Entra ID)
+
+When the MCP server is deployed with OAuth enabled (`MCP_OAUTH_ENABLED=true`), MCP clients
+authenticate through your corporate IdP instead of a static ReportPortal API key. The server
+validates JWTs and still accepts ReportPortal API keys for backward compatibility.
+
+**Entra app registration (summary):**
+
+1. Register an app (e.g. "ReportPortal MCP") and set **Application ID URI** / exposed API scope
+   (e.g. `api://<app-id>/access_as_user`).
+2. Set **Access token version** to **2** (`requestedAccessTokenVersion: 2`).
+3. Under **Authorized client applications**, add the VS Code MCP client ID
+   `aebc6443-996d-45c2-90f0-388ff96faa56` and grant the exposed scope.
+4. Grant **admin consent** for the tenant.
+
+**Server environment variables:**
+
+| Variable | Description |
+|----------|-------------|
+| `MCP_OAUTH_ENABLED` | `true` to enable OAuth |
+| `MCP_PUBLIC_URL` | Full public URL of the MCP endpoint (e.g. `https://mcp.example.com/mcp`) |
+| `MCP_OAUTH_ISSUER` | Entra v2 issuer: `https://login.microsoftonline.com/{tenant-id}/v2.0` |
+| `MCP_OAUTH_JWKS_URL` | `https://login.microsoftonline.com/{tenant-id}/discovery/v2.0/keys` |
+| `MCP_OAUTH_AUDIENCE` | Application (client) ID of the MCP app registration (JWT `aud`) |
+| `MCP_OAUTH_SCOPE` | Scope clients must request, e.g. `api://<app-id>/access_as_user` |
+
+Clients must use exactly the same URL as `MCP_PUBLIC_URL` — the protected-resource metadata
+`resource` field must match, or token acquisition can fail.
+
+**VS Code `mcp.json` example (OAuth):**
+
+```json
+{
+  "servers": {
+    "reportportal": {
+      "type": "http",
+      "url": "https://mcp.example.com/mcp",
+      "headers": {
+        "X-Project": "YourProjectInReportPortal"
+      }
+    }
+  }
+}
+```
+
+Do not set `Authorization` in the client config; VS Code obtains a bearer token via Entra.
+
+Other MCP clients need a pre-registered public client in Entra with loopback redirect URIs and
+must request the scope from `MCP_OAUTH_SCOPE`.
+
 ## AI Tool Setup
 
 Choose your favourite AI Tool to connect.
