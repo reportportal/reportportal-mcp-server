@@ -69,6 +69,12 @@ The following table lists the MCP-specific environment variables and their corre
 | `mcpMode` | `MCP_MODE` | MCP operation mode | `http` |
 | `rpHost` | `RP_HOST` | ReportPortal instance URL | `https://your-reportportal-instance.com` |
 | `rpMcpAnalyticsOff` | `RP_MCP_ANALYTICS_OFF` | Disable analytics tracking | `true` |
+| `oauth.enabled` | `MCP_OAUTH_ENABLED` | Enable OAuth for MCP HTTP endpoints | `false` |
+| `oauth.publicUrl` | `MCP_PUBLIC_URL` | Public MCP endpoint URL (must match client `url`) | `""` |
+| `oauth.issuer` | `MCP_OAUTH_ISSUER` | IdP issuer (e.g. Entra v2.0) | `""` |
+| `oauth.jwksUrl` | `MCP_OAUTH_JWKS_URL` | JWKS URL for JWT verification | `""` |
+| `oauth.audience` | `MCP_OAUTH_AUDIENCE` | Expected JWT `aud` (MCP app registration client ID) | `""` |
+| `oauth.scope` | `MCP_OAUTH_SCOPE` | Scope advertised to clients (e.g. `api://<app-id>/access_as_user`) | `""` |
 
 ## Ingress Configuration
 

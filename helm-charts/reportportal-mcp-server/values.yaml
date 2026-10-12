@@ -36,6 +36,15 @@ rpHost: "https://your-reportportal-instance.com"
 # Disable MCP analytics (set to "true" to disable)
 rpMcpAnalyticsOff: "true"
 
+# OAuth resource-server settings (HTTP mode). Disabled by default.
+oauth:
+  enabled: false
+  publicUrl: ""
+  issuer: ""
+  jwksUrl: ""
+  audience: ""
+  scope: ""
+
 # Extra environment variables (key-value pairs)
 # Example:
 # extraEnv:
