@@ -2,11 +2,17 @@ package mcphandlers
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"testing"
 
 	"github.com/google/jsonschema-go/jsonschema"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/reportportal/goRP/v5/pkg/gorp"
+	"github.com/reportportal/goRP/v5/pkg/openapi"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -187,4 +193,71 @@ func TestUpdateDefectTypeForTestItemsTool(t *testing.T) {
 	require.Equal(t, "array", testItemsIDsProp.Type, "test_items_ids should be an array type")
 	require.NotNil(t, testItemsIDsProp.Items, "test_items_ids must have items property (issue #66)")
 	require.Equal(t, "string", testItemsIDsProp.Items.Type, "items should be of type string")
+
+	ignoreAnalyzerProp, ok := schema.Properties["ignore_analyzer"]
+	require.True(t, ok, "ignore_analyzer property should exist")
+	require.Equal(t, "boolean", ignoreAnalyzerProp.Type)
+	require.NotContains(t, schema.Required, "ignore_analyzer")
+}
+
+func TestUpdateDefectTypeForTestItemsTool_IgnoreAnalyzer(t *testing.T) {
+	tests := []struct {
+		name           string
+		ignoreAnalyzer *bool
+		expected       any
+	}{
+		{name: "true", ignoreAnalyzer: openapi.PtrBool(true), expected: true},
+		{name: "false", ignoreAnalyzer: openapi.PtrBool(false), expected: false},
+		{name: "omitted", ignoreAnalyzer: nil, expected: nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			testProject := "test-project"
+
+			var issue map[string]any
+			mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				assert.Equal(t, "/api/v1/"+testProject+"/item", r.URL.Path)
+				assert.Equal(t, http.MethodPut, r.Method)
+
+				var body struct {
+					Issues []struct {
+						Issue map[string]any `json:"issue"`
+					} `json:"issues"`
+				}
+				assert.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+				if assert.Len(t, body.Issues, 1) {
+					issue = body.Issues[0].Issue
+				}
+
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`[]`))
+			}))
+			defer mockServer.Close()
+
+			serverURL, _ := url.Parse(mockServer.URL)
+			_, handler := NewTestItemResources(
+				gorp.NewClient(serverURL, gorp.WithApiKeyAuth(ctx, "")),
+				nil,
+				"",
+			).toolUpdateDefectTypeForTestItems()
+
+			_, _, err := handler(ctx, &mcp.CallToolRequest{}, UpdateDefectTypeArgs{
+				Project:        testProject,
+				TestItemsIDs:   []string{"1474305"},
+				DefectTypeID:   "si001",
+				IgnoreAnalyzer: tt.ignoreAnalyzer,
+			})
+			require.NoError(t, err)
+			require.NotNil(t, issue)
+
+			value, present := issue["ignoreAnalyzer"]
+			if tt.expected == nil {
+				assert.False(t, present, "ignoreAnalyzer must be omitted when not set")
+			} else {
+				assert.Equal(t, tt.expected, value)
+			}
+		})
+	}
 }

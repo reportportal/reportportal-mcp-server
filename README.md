@@ -470,7 +470,7 @@ The ReportPortal MCP server provides a comprehensive set of capabilities for int
 | Get Attachment by ID        | Retrieves an attachment binary by id        | `attachment-content-id` (required)                                                                                                |
 | Get Test Item by ID        | Retrieves details of a specific test item        | `test_item_id` (required)                                                                                                |
 | Get Project Defect Types        | Retrieves available defect types for the specific project        | None                                                                                              |
-| Update defect types by item ids        | Updates defect types for multiple test items        |`test_items_ids` (required), `defect_type_id` (required), `defect_type_comment` (optional)                                                                                               |
+| Update defect types by item ids        | Updates defect types for multiple test items        |`test_items_ids` (required), `defect_type_id` (required), `defect_type_comment` (optional), `ignore_analyzer` (optional)                                                                 |
 | Get Test Items History | Retrieves execution history of test items for a specific launch or parent suite | `filter-eq-launchId` or `filter-eq-parentId` (one required), `historyDepth`, `type`, `name`, `description`, `status`, `start_time_from`, `start_time_to`, `attributes`, `has_retries`, `defect_comment`, `auto_analyzed`, `ignored_in_aa`, `ticket_id`, `pattern_name`, `page`, `page-size`, `page-sort` (all optional) |
 
 ### Available Prompts
