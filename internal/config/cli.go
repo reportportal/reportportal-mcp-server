@@ -35,6 +35,10 @@ AUTHENTICATION:
    stdio mode: RP_API_TOKEN is REQUIRED (must be set via environment variable or --token flag)
    http mode:  RP_API_TOKEN and --token are COMPLETELY IGNORED
                Tokens MUST be passed per-request via 'Authorization: Bearer <token>' header
+               With OAuth disabled (default), any bearer token of sufficient length is accepted.
+               With OAuth enabled (--oauth-enabled / MCP_OAUTH_ENABLED), clients authenticate via
+               your IdP (e.g. Microsoft Entra ID); the server validates JWTs and still accepts
+               ReportPortal API keys. Set MCP_PUBLIC_URL and related MCP_OAUTH_* variables — see README.
 
 ANALYTICS:
    stdio mode: RP_API_TOKEN is required for analytics (used for secure user identification)
@@ -124,6 +128,43 @@ func GetHTTPFlags() []cli.Flag {
 			Sources:  cli.EnvVars("RP_CONNECTION_TIMEOUT"),
 			Usage:    "[HTTP-ONLY] Connection timeout in seconds",
 			Value:    30,
+		},
+		&cli.BoolFlag{
+			Name:     "oauth-enabled",
+			Required: false,
+			Sources:  cli.EnvVars("MCP_OAUTH_ENABLED"),
+			Usage:    "[HTTP-ONLY] Enable OAuth 2.1 resource-server authentication for MCP HTTP endpoints",
+			Value:    false,
+		},
+		&cli.StringFlag{
+			Name:     "public-url",
+			Required: false,
+			Sources:  cli.EnvVars("MCP_PUBLIC_URL"),
+			Usage:    "[HTTP-ONLY] Full public URL of the MCP endpoint (required when OAuth is enabled)",
+		},
+		&cli.StringFlag{
+			Name:     "oauth-issuer",
+			Required: false,
+			Sources:  cli.EnvVars("MCP_OAUTH_ISSUER"),
+			Usage:    "[HTTP-ONLY] OAuth issuer URL (e.g. Entra v2.0 issuer; required when OAuth is enabled)",
+		},
+		&cli.StringFlag{
+			Name:     "oauth-jwks-url",
+			Required: false,
+			Sources:  cli.EnvVars("MCP_OAUTH_JWKS_URL"),
+			Usage:    "[HTTP-ONLY] JWKS URL for JWT signature verification (required when OAuth is enabled)",
+		},
+		&cli.StringFlag{
+			Name:     "oauth-audience",
+			Required: false,
+			Sources:  cli.EnvVars("MCP_OAUTH_AUDIENCE"),
+			Usage:    "[HTTP-ONLY] Expected JWT aud claim — MCP app registration Application (client) ID",
+		},
+		&cli.StringFlag{
+			Name:     "oauth-scope",
+			Required: false,
+			Sources:  cli.EnvVars("MCP_OAUTH_SCOPE"),
+			Usage:    "[HTTP-ONLY] OAuth scope advertised to clients (e.g. api://<app-id>/access_as_user)",
 		},
 	}
 }
