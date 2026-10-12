@@ -217,7 +217,7 @@ func TestUpdateDefectTypeForTestItemsTool_IgnoreAnalyzer(t *testing.T) {
 			testProject := "test-project"
 
 			var issue map[string]any
-			mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			rpHandler := func(w http.ResponseWriter, r *http.Request) {
 				assert.Equal(t, "/api/v1/"+testProject+"/item", r.URL.Path)
 				assert.Equal(t, http.MethodPut, r.Method)
 
@@ -233,7 +233,8 @@ func TestUpdateDefectTypeForTestItemsTool_IgnoreAnalyzer(t *testing.T) {
 
 				w.Header().Set("Content-Type", "application/json")
 				_, _ = w.Write([]byte(`[]`))
-			}))
+			}
+			mockServer := httptest.NewServer(http.HandlerFunc(rpHandler))
 			defer mockServer.Close()
 
 			serverURL, _ := url.Parse(mockServer.URL)
