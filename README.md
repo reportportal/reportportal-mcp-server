@@ -139,7 +139,7 @@ If the ReportPortal MCP Server is already **deployed** and accessible via HTTP, 
 - `headers.Authorization`: Bearer token for authentication (required)
 - `headers.X-Project`: The ReportPortal project name (optional)
 
-#### OAuth login (Microsoft Entra ID)
+#### OAuth login
 
 When the MCP server is deployed with OAuth enabled (`MCP_OAUTH_ENABLED=true`), MCP clients
 authenticate through your corporate IdP instead of a static ReportPortal API key. The server
