@@ -383,9 +383,10 @@ func (hs *HTTPServer) setupRoutes() {
 			BearerMethodsSupported: []string{"header"},
 		}
 		metadataHandler := auth.ProtectedResourceMetadataHandler(metadata)
-		hs.Router.Handle("/.well-known/oauth-protected-resource", metadataHandler)
+		const metadataPath = "/.well-known/oauth-protected-resource"
+		hs.Router.Handle(metadataPath, metadataHandler)
 		if hs.config.OAuth.PublicURLPath != "" {
-			hs.Router.Handle("/.well-known/oauth-protected-resource"+hs.config.OAuth.PublicURLPath, metadataHandler)
+			hs.Router.Handle(metadataPath+hs.config.OAuth.PublicURLPath, metadataHandler)
 		}
 	}
 
