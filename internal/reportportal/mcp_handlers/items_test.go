@@ -2,10 +2,13 @@ package mcphandlers
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"testing"
 
 	"github.com/google/jsonschema-go/jsonschema"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/reportportal/goRP/v5/pkg/gorp"
 	"github.com/stretchr/testify/require"
 
@@ -189,4 +192,80 @@ func TestUpdateDefectTypeForTestItemsTool(t *testing.T) {
 	require.Equal(t, "array", testItemsIDsProp.Type, "test_items_ids should be an array type")
 	require.NotNil(t, testItemsIDsProp.Items, "test_items_ids must have items property (issue #66)")
 	require.Equal(t, "string", testItemsIDsProp.Items.Type, "items should be of type string")
+}
+
+func TestGetTestItemAttachmentTool(t *testing.T) {
+	jpegBytes := []byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 'J', 'F', 'I', 'F'}
+	zipBytes := []byte{'P', 'K', 0x03, 0x04}
+
+	tests := []struct {
+		name        string
+		contentType string
+		body        []byte
+		check       func(t *testing.T, content mcp.Content)
+	}{
+		{
+			name:        "image is returned as image content",
+			contentType: "image/jpeg",
+			body:        jpegBytes,
+			check: func(t *testing.T, content mcp.Content) {
+				image, ok := content.(*mcp.ImageContent)
+				require.True(t, ok, "expected *mcp.ImageContent, got %T", content)
+				require.Equal(t, "image/jpeg", image.MIMEType)
+				require.Equal(t, jpegBytes, image.Data)
+			},
+		},
+		{
+			name:        "text is returned as text content",
+			contentType: "text/plain",
+			body:        []byte("hello"),
+			check: func(t *testing.T, content mcp.Content) {
+				text, ok := content.(*mcp.TextContent)
+				require.True(t, ok, "expected *mcp.TextContent, got %T", content)
+				require.Equal(t, "Text content (text/plain, 5 bytes)\nhello", text.Text)
+			},
+		},
+		{
+			name:        "other binary is returned as base64 text",
+			contentType: "application/zip",
+			body:        zipBytes,
+			check: func(t *testing.T, content mcp.Content) {
+				text, ok := content.(*mcp.TextContent)
+				require.True(t, ok, "expected *mcp.TextContent, got %T", content)
+				require.Equal(
+					t,
+					"Binary content (application/zip, 4 bytes)\nBase64: UEsDBA==",
+					text.Text,
+				)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(
+				http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Content-Type", tt.contentType)
+					_, _ = w.Write(tt.body)
+				}),
+			)
+			defer server.Close()
+
+			serverURL, _ := url.Parse(server.URL)
+			_, handler := NewTestItemResources(
+				gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+				nil,
+				"",
+			).toolGetTestItemAttachment()
+
+			result, _, err := handler(
+				context.Background(),
+				&mcp.CallToolRequest{},
+				GetTestItemAttachmentArgs{ProjectKey: "test-project", AttachmentContentID: "42"},
+			)
+			require.NoError(t, err)
+			require.Len(t, result.Content, 1)
+			tt.check(t, result.Content[0])
+		})
+	}
 }

@@ -365,3 +365,41 @@ func TestReadAPIResponse_HTTPErrorPropagates(t *testing.T) {
 		t.Fatalf("error = %q, want body detail", err.Error())
 	}
 }
+
+func TestImageMediaType(t *testing.T) {
+	tests := []struct {
+		name        string
+		contentType string
+		want        string
+		wantOK      bool
+	}{
+		{name: "jpeg", contentType: "image/jpeg", want: "image/jpeg", wantOK: true},
+		{name: "png", contentType: "image/png", want: "image/png", wantOK: true},
+		{name: "gif", contentType: "image/gif", want: "image/gif", wantOK: true},
+		{name: "webp", contentType: "image/webp", want: "image/webp", wantOK: true},
+		{
+			name:        "parameters stripped",
+			contentType: "image/png; charset=binary",
+			want:        "image/png",
+			wantOK:      true,
+		},
+		{name: "upper case", contentType: "IMAGE/JPEG", want: "image/jpeg", wantOK: true},
+		{name: "svg not supported", contentType: "image/svg+xml"},
+		{name: "text", contentType: "text/plain"},
+		{name: "binary", contentType: "application/octet-stream"},
+		{name: "empty", contentType: ""},
+		{name: "malformed", contentType: "image/"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := ImageMediaType(tt.contentType)
+			if got != tt.want || ok != tt.wantOK {
+				t.Errorf(
+					"ImageMediaType(%q) = (%q, %v), want (%q, %v)",
+					tt.contentType, got, ok, tt.want, tt.wantOK,
+				)
+			}
+		})
+	}
+}

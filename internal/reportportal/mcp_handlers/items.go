@@ -539,6 +539,16 @@ func (lr *TestItemResources) toolGetTestItemAttachment() (*mcp.Tool, utils.ToolH
 						},
 					},
 				}, nil, nil
+			} else if imageType, ok := utils.ImageMediaType(contentType); ok {
+				// Return images as MCP image content so clients can display them to the model
+				return &mcp.CallToolResult{
+					Content: []mcp.Content{
+						&mcp.ImageContent{
+							Data:     rawBody,
+							MIMEType: imageType,
+						},
+					},
+				}, nil, nil
 			} else {
 				return &mcp.CallToolResult{
 					Content: []mcp.Content{
