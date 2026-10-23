@@ -366,6 +366,7 @@ func TestReadAPIResponse_HTTPErrorPropagates(t *testing.T) {
 	}
 }
 
+// TestImageMediaType tests which content types ImageMediaType accepts and how it normalizes them.
 func TestImageMediaType(t *testing.T) {
 	tests := []struct {
 		name        string

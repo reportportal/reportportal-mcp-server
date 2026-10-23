@@ -468,6 +468,8 @@ type GetTestItemAttachmentArgs struct {
 	AttachmentContentID string `json:"attachment-content-id"`
 }
 
+// toolGetTestItemAttachment creates a tool to download a test item attachment by its content ID.
+// Images are returned as image content, text as text, and other binary data as base64 text.
 func (lr *TestItemResources) toolGetTestItemAttachment() (*mcp.Tool, utils.ToolHandler[GetTestItemAttachmentArgs, any]) {
 	properties := make(map[string]*jsonschema.Schema)
 	pkSchema, err := utils.ProjectKeySchema(lr.defaultProjectKey)

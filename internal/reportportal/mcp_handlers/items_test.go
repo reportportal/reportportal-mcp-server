@@ -194,6 +194,8 @@ func TestUpdateDefectTypeForTestItemsTool(t *testing.T) {
 	require.Equal(t, "string", testItemsIDsProp.Items.Type, "items should be of type string")
 }
 
+// TestGetTestItemAttachmentTool tests that the get_test_item_attachment_by_id tool handler
+// returns image, text and other binary attachments in the expected content form.
 func TestGetTestItemAttachmentTool(t *testing.T) {
 	jpegBytes := []byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 'J', 'F', 'I', 'F'}
 	zipBytes := []byte{'P', 'K', 0x03, 0x04}
