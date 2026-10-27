@@ -1,10 +1,12 @@
 package oauth
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -16,6 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/reportportal/reportportal-mcp-server/internal/reportportal/analytics"
+	"github.com/reportportal/reportportal-mcp-server/internal/reportportal/audit"
 )
 
 const (
@@ -253,6 +256,89 @@ func TestTokenVerifier_GarbageString(t *testing.T) {
 	_, err := verifier(context.Background(), "totally-invalid", nil)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, auth.ErrInvalidToken)
+}
+
+func TestTokenVerifier_AuditRejectedOmitsUser(t *testing.T) {
+	jwks := newTestJWKS(t)
+	defer jwks.close()
+
+	cfg, err := BuildConfig(
+		true,
+		"https://mcp.example.com/mcp",
+		testIssuer,
+		jwks.server.URL,
+		testAudience,
+		testScope,
+	)
+	require.NoError(t, err)
+
+	var buf bytes.Buffer
+	emitter := audit.New(
+		audit.ServerInfo{Name: "reportportal-mcp-server", Version: "1.5.0", Instance: "pod"},
+		slog.New(slog.NewJSONHandler(&buf, nil)),
+	)
+	cfg.Audit = emitter.AuthRejected
+	verifier, err := NewTokenVerifier(context.Background(), cfg)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
+	req.RemoteAddr = "192.0.2.10:1234"
+
+	const hiddenOID = "UNIQUE-OID-SHOULD-NOT-APPEAR"
+	const hiddenUser = "hidden-user@corp.com"
+	scoped := jwks.signToken(t, map[string]interface{}{
+		"oid":                hiddenOID,
+		"preferred_username": hiddenUser,
+		"scp":                "other_scope",
+	}, 0)
+	_, err = verifier(context.Background(), scoped, req)
+	require.Error(t, err)
+	assert.Contains(t, buf.String(), audit.EventAuthRejected)
+	assert.Contains(t, buf.String(), audit.ReasonMissingScope)
+	assert.Contains(t, buf.String(), "192.0.2.10")
+	assert.Contains(t, buf.String(), "/mcp")
+	assert.NotContains(t, buf.String(), hiddenOID)
+	assert.NotContains(t, buf.String(), hiddenUser)
+	assert.NotContains(t, buf.String(), scoped)
+
+	buf.Reset()
+	expired := jwks.signToken(t, map[string]interface{}{
+		"oid": hiddenOID,
+		"scp": "access_as_user",
+	}, -2*time.Hour)
+	_, err = verifier(context.Background(), expired, req)
+	require.Error(t, err)
+	assert.Contains(t, buf.String(), audit.ReasonExpired)
+	assert.NotContains(t, buf.String(), hiddenOID)
+	assert.NotContains(t, buf.String(), expired)
+
+	buf.Reset()
+	other := newTestJWKS(t)
+	defer other.close()
+	badSig := other.signToken(t, map[string]interface{}{
+		"oid": hiddenOID,
+		"scp": "access_as_user",
+	}, 0)
+	_, err = verifier(context.Background(), badSig, req)
+	require.Error(t, err)
+	assert.Contains(t, buf.String(), audit.ReasonInvalidSignature)
+	assert.NotContains(t, buf.String(), badSig)
+	assert.NotContains(t, buf.String(), hiddenOID)
+
+	buf.Reset()
+	_, err = verifier(context.Background(), "short", req)
+	require.Error(t, err)
+	assert.Contains(t, buf.String(), audit.ReasonInvalidAPIKey)
+	assert.NotContains(t, buf.String(), "short")
+
+	buf.Reset()
+	good := jwks.signToken(t, map[string]interface{}{
+		"oid": hiddenOID,
+		"scp": "access_as_user",
+	}, 0)
+	_, err = verifier(context.Background(), good, req)
+	require.NoError(t, err)
+	assert.Empty(t, buf.String())
 }
 
 func TestIsJWT(t *testing.T) {

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"runtime"
 	"strings"
 	"sync/atomic"
@@ -23,6 +24,7 @@ import (
 
 	"github.com/reportportal/reportportal-mcp-server/internal/config"
 	"github.com/reportportal/reportportal-mcp-server/internal/reportportal/analytics"
+	"github.com/reportportal/reportportal-mcp-server/internal/reportportal/audit"
 	mcphandlers "github.com/reportportal/reportportal-mcp-server/internal/reportportal/mcp_handlers"
 	app_middleware "github.com/reportportal/reportportal-mcp-server/internal/reportportal/middleware"
 	rpoauth "github.com/reportportal/reportportal-mcp-server/internal/reportportal/oauth"
@@ -66,7 +68,13 @@ type HTTPServerConfig struct {
 	// HTTP/2 is always enabled for optimal performance
 
 	OAuth rpoauth.Config
+
+	// AuditLog emits JSON audit events on stdout. When unset on the CLI it
+	// follows OAuth: on when OAuth is enabled, off otherwise.
+	AuditLog bool
 }
+
+const mcpServerName = "reportportal-mcp-server"
 
 // HTTPServer is an enhanced MCP server with Chi router
 type HTTPServer struct {
@@ -108,7 +116,7 @@ func NewHTTPServer(
 	// Create base MCP server
 	mcpServer := mcp.NewServer(
 		&mcp.Implementation{
-			Name:    "reportportal-mcp-server",
+			Name:    mcpServerName,
 			Version: config.Version,
 		},
 		&mcp.ServerOptions{
@@ -118,6 +126,22 @@ func NewHTTPServer(
 
 	// Create HTTP client
 	httpClient := createHTTPClient(config.ConnectionTimeout, config.TLSConfig)
+
+	if config.AuditLog {
+		instance, hostErr := os.Hostname()
+		if hostErr != nil {
+			slog.Debug("audit server instance unavailable", "error", hostErr)
+			instance = ""
+		}
+		auditor := audit.New(audit.ServerInfo{
+			Name:     mcpServerName,
+			Version:  config.Version,
+			Instance: instance,
+		}, nil)
+		httpClient.Transport = audit.WrapRoundTripper(httpClient.Transport)
+		mcpServer.AddReceivingMiddleware(auditor.Middleware())
+		config.OAuth.Audit = auditor.AuthRejected
+	}
 
 	// Initialize batch-based analytics
 	// Note: In HTTP mode, FallbackRPToken is always empty (tokens come from HTTP headers).
@@ -717,5 +741,16 @@ func buildHTTPServerConfig(cmd *cli.Command) (HTTPServerConfig, error) {
 		ConnectionTimeout:     time.Duration(connectionTimeoutSec) * time.Second,
 		TLSConfig:             tlsCfg,
 		OAuth:                 oauthCfg,
+		AuditLog:              auditLogEnabled(cmd, oauthCfg.Enabled),
 	}, nil
+}
+
+// auditLogEnabled reports whether HTTP mode should emit audit events.
+// An explicit --audit-log / MCP_AUDIT_LOG value wins. Otherwise auditing
+// follows OAuth and is on only when OAuth is enabled.
+func auditLogEnabled(cmd *cli.Command, oauthEnabled bool) bool {
+	if cmd.IsSet("audit-log") {
+		return cmd.Bool("audit-log")
+	}
+	return oauthEnabled
 }
