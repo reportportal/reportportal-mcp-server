@@ -76,6 +76,8 @@ The following table lists the MCP-specific environment variables and their corre
 | `oauth.audience` | `MCP_OAUTH_AUDIENCE` | Expected JWT `aud` (MCP app registration client ID) | `""` |
 | `oauth.scope` | `MCP_OAUTH_SCOPE` | Scope advertised to clients (e.g. `api://<app-id>/access_as_user`) | `""` |
 
+Audit events (`MCP_AUDIT_LOG`) are written as JSON to stdout. When the variable is unset, auditing is on if OAuth is enabled and off otherwise. Set it through `extraEnv` to override that default.
+
 ## Ingress Configuration
 
 The ingress is configured with prefix path support. You can customize the path prefix in the values file:
