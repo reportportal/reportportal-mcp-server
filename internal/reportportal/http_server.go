@@ -316,6 +316,25 @@ func (hs *HTTPServer) conditionalTimeoutMiddleware(next http.Handler) http.Handl
 	})
 }
 
+// skipAccessLog applies logger to all requests except the given paths.
+func skipAccessLog(
+	logger func(http.Handler) http.Handler,
+	paths ...string,
+) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		logged := logger(next)
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			for _, path := range paths {
+				if r.URL.Path == path {
+					next.ServeHTTP(w, r)
+					return
+				}
+			}
+			logged.ServeHTTP(w, r)
+		})
+	}
+}
+
 // setupChiRouter creates and configures the Chi router with all routes and middleware
 func (hs *HTTPServer) setupChiRouter() {
 	r := chi.NewRouter()
@@ -326,7 +345,7 @@ func (hs *HTTPServer) setupChiRouter() {
 	// Add Chi middleware
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
-	r.Use(middleware.Logger)
+	r.Use(skipAccessLog(middleware.Logger, "/health"))
 	r.Use(middleware.Recoverer)
 	// Use conditional timeout that skips SSE streams
 	r.Use(hs.conditionalTimeoutMiddleware)

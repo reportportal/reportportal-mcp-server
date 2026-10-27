@@ -1,6 +1,8 @@
 package mcpreportportal
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"testing"
 	"time"
@@ -366,6 +368,43 @@ func TestGetHTTPServerInfo(t *testing.T) {
 				assert.False(t, info.Analytics.Enabled)
 			}
 		})
+	}
+}
+
+func TestSkipAccessLog(t *testing.T) {
+	logged := 0
+	logger := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			logged++
+			next.ServeHTTP(w, r)
+		})
+	}
+
+	const body = "ok"
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTeapot)
+		_, err := w.Write([]byte(body))
+		require.NoError(t, err)
+	})
+	handler := skipAccessLog(logger, "/health")(inner)
+
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, 0, logged)
+	assert.Equal(t, http.StatusTeapot, rec.Code)
+	assert.Equal(t, body, rec.Body.String())
+
+	for _, path := range []string{"/mcp", "/health/extra"} {
+		before := logged
+		req = httptest.NewRequest(http.MethodGet, path, nil)
+		rec = httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		assert.Equal(t, before+1, logged, path)
+		assert.Equal(t, http.StatusTeapot, rec.Code)
+		assert.Equal(t, body, rec.Body.String())
 	}
 }
 
