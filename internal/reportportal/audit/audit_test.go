@@ -528,6 +528,14 @@ func TestVerifyReason(t *testing.T) {
 			`oidc: id token issued by a different provider, expected "a" got "b"`,
 			ReasonInvalidIssuer,
 		},
+		{
+			`oidc: id token issued by a different provider, expected "a" got "bad-signature-expired"`,
+			ReasonInvalidIssuer,
+		},
+		{
+			`oidc: expected audience "aud" got ["api://signature-expired"]`,
+			ReasonInvalidAudience,
+		},
 		{"something else", ReasonInvalidToken},
 	}
 	for _, tc := range cases {

@@ -161,18 +161,20 @@ func VerifyReason(err error) string {
 	if errors.As(err, &expired) {
 		return ReasonExpired
 	}
+	// Issuer and audience errors embed claim values, so match their fixed
+	// prefixes before any substring check.
 	msg := strings.ToLower(err.Error())
 	switch {
-	case strings.Contains(msg, "expired"):
+	case strings.HasPrefix(msg, "oidc: token is expired"):
 		return ReasonExpired
+	case strings.HasPrefix(msg, "oidc: id token issued by a different provider"):
+		return ReasonInvalidIssuer
+	case strings.HasPrefix(msg, "oidc: expected audience"):
+		return ReasonInvalidAudience
 	case strings.Contains(msg, "signature") ||
 		strings.Contains(msg, "not signed") ||
 		strings.Contains(msg, "malformed jwt"):
 		return ReasonInvalidSignature
-	case strings.Contains(msg, "audience"):
-		return ReasonInvalidAudience
-	case strings.Contains(msg, "issuer") || strings.Contains(msg, "different provider"):
-		return ReasonInvalidIssuer
 	default:
 		return ReasonInvalidToken
 	}

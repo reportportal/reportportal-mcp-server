@@ -326,6 +326,28 @@ func TestTokenVerifier_AuditRejectedOmitsUser(t *testing.T) {
 	assert.NotContains(t, buf.String(), hiddenOID)
 
 	buf.Reset()
+	wrongAud := jwks.signToken(t, map[string]interface{}{
+		"aud": "api://signature-expired",
+		"oid": hiddenOID,
+		"scp": "access_as_user",
+	}, 0)
+	_, err = verifier(context.Background(), wrongAud, req)
+	require.Error(t, err)
+	assert.Contains(t, buf.String(), audit.ReasonInvalidAudience)
+	assert.NotContains(t, buf.String(), "signature-expired")
+
+	buf.Reset()
+	wrongIss := jwks.signToken(t, map[string]interface{}{
+		"iss": "https://signature-expired.example.com",
+		"oid": hiddenOID,
+		"scp": "access_as_user",
+	}, 0)
+	_, err = verifier(context.Background(), wrongIss, req)
+	require.Error(t, err)
+	assert.Contains(t, buf.String(), audit.ReasonInvalidIssuer)
+	assert.NotContains(t, buf.String(), "signature-expired")
+
+	buf.Reset()
 	_, err = verifier(context.Background(), "short", req)
 	require.Error(t, err)
 	assert.Contains(t, buf.String(), audit.ReasonInvalidAPIKey)
