@@ -1302,7 +1302,8 @@ func TestCreateTestCaseTool_PartialAttachmentUploadFailureRetainsIDs(t *testing.
 			"only attachment uploads should be attempted",
 		)
 		r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
-		require.NoError(t, r.ParseMultipartForm(10<<20))
+		parseErr := r.ParseMultipartForm(10 << 20) //nolint:gosec // capped by MaxBytesReader
+		require.NoError(t, parseErr)
 		_, header, err := r.FormFile("file")
 		require.NoError(t, err)
 		switch header.Filename {
@@ -2963,7 +2964,8 @@ func TestUpdateManualLaunchExecutionTool_ContentUploadsThenLinksAttachment(t *te
 		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/tms/attachment/upload"):
 			uploadCalled = true
 			r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
-			require.NoError(t, r.ParseMultipartForm(10<<20))
+			parseErr := r.ParseMultipartForm(10 << 20) //nolint:gosec // capped by MaxBytesReader
+			require.NoError(t, parseErr)
 			file, header, err := r.FormFile("file")
 			require.NoError(t, err)
 			defer file.Close() //nolint:errcheck
@@ -3420,7 +3422,8 @@ func TestCreateTestCaseTool_AttachmentContentUploadsThenLinks(t *testing.T) {
 		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/tms/attachment/upload"):
 			uploadCalled = true
 			r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
-			require.NoError(t, r.ParseMultipartForm(10<<20))
+			parseErr := r.ParseMultipartForm(10 << 20) //nolint:gosec // capped by MaxBytesReader
+			require.NoError(t, parseErr)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write(
