@@ -8,7 +8,7 @@ require (
 	github.com/google/jsonschema-go v0.4.3
 	github.com/google/uuid v1.6.0
 	github.com/modelcontextprotocol/go-sdk v1.7.0
-	github.com/reportportal/goRP/v5 v5.2.3-0.20261109135631-ea66b8c10ab7
+	github.com/reportportal/goRP/v5 v5.2.3-0.20261111135208-38c0bc544138
 	github.com/stretchr/testify v1.12.1
 	github.com/urfave/cli/v3 v3.13.0
 	github.com/yosida95/uritemplate/v3 v3.0.2

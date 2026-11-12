@@ -16,8 +16,8 @@ github.com/mattn/go-isatty v0.0.24 h1:tGZZoVgT/KiqK1c8ocVLeDS8BSWMRd47J3Lbz7vsRe
 github.com/mattn/go-isatty v0.0.24/go.mod h1:nMCL3Zebbrt45jsMDgnfIwz6ydEQApk5oEI3HqDio6A=
 github.com/modelcontextprotocol/go-sdk v1.7.0 h1:yqjY2dsbKAC0LSuWZVBMrHgiG8ukXv6NRo0JiALay44=
 github.com/modelcontextprotocol/go-sdk v1.7.0/go.mod h1:dL7u98E/zjJTGzEq+j30jQ8K2k1mb6LeAH4inEcSGts=
-github.com/reportportal/goRP/v5 v5.2.3-0.20261109135631-ea66b8c10ab7 h1:9iKNXdG6KzjTTzWbWeRaRE0+0xQb3GmyzpGYf169GHQ=
-github.com/reportportal/goRP/v5 v5.2.3-0.20261109135631-ea66b8c10ab7/go.mod h1:xYoiLLG8etL0gjlglZoxJ5xFfX81ZVc4iB/ITeFgHRA=
+github.com/reportportal/goRP/v5 v5.2.3-0.20261111135208-38c0bc544138 h1:6D7sQg80dYg7kBBGi5Kq8Vv5yzNQ5abcjYU57RXjclU=
+github.com/reportportal/goRP/v5 v5.2.3-0.20261111135208-38c0bc544138/go.mod h1:xYoiLLG8etL0gjlglZoxJ5xFfX81ZVc4iB/ITeFgHRA=
 github.com/segmentio/asm v1.2.1 h1:DTNbBqs57ioxAD4PrArqftgypG4/qNpXoJx8TVXxPR0=
 github.com/segmentio/asm v1.2.1/go.mod h1:BqMnlJP91P8d+4ibuonYZw9mfnzI9HfxselHZr5aAcs=
 github.com/segmentio/encoding v0.5.4 h1:OW1VRern8Nw6ITAtwSZ7Idrl3MXCFwXHPgqESYfvNt0=
