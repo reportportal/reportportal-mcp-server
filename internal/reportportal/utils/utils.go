@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mime"
 	"net"
 	"net/http"
 	"strconv"
@@ -230,6 +231,21 @@ func IsTextContent(mediaType string) bool {
 	}
 
 	return false
+}
+
+// ImageMediaType returns the bare media type (without parameters) of a raster image
+// that MCP clients commonly display: PNG, JPEG, GIF or WebP.
+// Other types, including SVG, are reported as not supported.
+func ImageMediaType(contentType string) (string, bool) {
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		return "", false
+	}
+	switch mediaType {
+	case "image/png", "image/jpeg", "image/gif", "image/webp":
+		return mediaType, true
+	}
+	return "", false
 }
 
 // isAlreadyClosedError checks if the error indicates that the response body is already closed.
