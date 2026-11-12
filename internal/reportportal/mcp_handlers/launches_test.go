@@ -77,13 +77,13 @@ func TestGetLaunchByIdTool(t *testing.T) {
 	launchID := uint32(123)
 
 	// Create expected launch response
-	expectedLaunch := openapi.ComEpamReportportalBaseReportingLaunchResource{
+	expectedLaunch := openapi.ComEpamReportportalBaseModelLaunchLaunchViewModel{
 		Id:        int64(launchID),
 		Name:      "Test Launch by ID",
 		Uuid:      "014b329b-a882-4c2d-9988-c2f6179a421b",
 		Number:    int64(launchID),
 		StartTime: time.Now(),
-		Status:    string(gorp.Statuses.Passed),
+		Status:    openapi.PtrString(string(gorp.Statuses.Passed)),
 	}
 
 	launchJSON, _ := json.Marshal(expectedLaunch)
@@ -127,7 +127,7 @@ func TestGetLaunchByIdTool(t *testing.T) {
 	require.True(t, ok, "expected TextContent")
 
 	// Verify the response contains the expected launch
-	var responseLaunch openapi.ComEpamReportportalBaseReportingLaunchResource
+	var responseLaunch openapi.ComEpamReportportalBaseModelLaunchLaunchViewModel
 	err = json.Unmarshal([]byte(textContent.Text), &responseLaunch)
 	require.NoError(t, err)
 	assert.Equal(t, expectedLaunch.Id, responseLaunch.Id)
@@ -286,16 +286,16 @@ func TestRunAutoAnalysisTool(t *testing.T) {
 	assert.Equal(t, []string{"to_investigate", "auto_analyzed"}, capturedRequest.AnalyzeItemsMode)
 }
 
-func testLaunches() *openapi.ComEpamReportportalBaseModelPageComEpamReportportalBaseReportingLaunchResource {
-	launches := openapi.NewComEpamReportportalBaseModelPageComEpamReportportalBaseReportingLaunchResource()
-	launches.SetContent([]openapi.ComEpamReportportalBaseReportingLaunchResource{
+func testLaunches() *openapi.ComEpamReportportalBaseModelPageComEpamReportportalBaseModelLaunchLaunchViewModel {
+	launches := openapi.NewComEpamReportportalBaseModelPageComEpamReportportalBaseModelLaunchLaunchViewModel()
+	launches.SetContent([]openapi.ComEpamReportportalBaseModelLaunchLaunchViewModel{
 		{
 			Id:        1,
 			Name:      "Test Launch 1",
 			Uuid:      "014b329b-a882-4c2d-9988-c2f6179a421b",
 			Number:    1,
 			StartTime: time.Now(),
-			Status:    string(gorp.Statuses.Passed),
+			Status:    openapi.PtrString(string(gorp.Statuses.Passed)),
 		},
 		{
 			Id:        2,
@@ -303,7 +303,7 @@ func testLaunches() *openapi.ComEpamReportportalBaseModelPageComEpamReportportal
 			Uuid:      "014b329b-a882-4c2d-9988-c2f6179a421c",
 			Number:    2,
 			StartTime: time.Now(),
-			Status:    string(gorp.Statuses.Passed),
+			Status:    openapi.PtrString(string(gorp.Statuses.Passed)),
 		},
 	})
 	launches.SetPage(openapi.ComEpamReportportalBaseModelPagePageMetadata{

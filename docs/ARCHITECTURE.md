@@ -233,7 +233,7 @@ change the underlying behavior.
     `filepath.Clean(dir)+"/"+entry.Name()` — forward slash is hard-coded
     because `embed.FS` always uses `/`, even when the host OS (e.g. Windows)
     uses `\`. Don't switch this to `filepath.Join`.
-14. **Go version drift risk.** `go.mod` currently pins `go 1.25.0`; the root
+14. **Go version drift risk.** `go.mod` currently pins `go 1.27.0`; the root
     `README.md` "Prerequisites" section may quote a different minimum (e.g.
     1.24.4). Treat `go.mod` and `.golangci.yml`'s `GOLANGCI_LINT_VERSION`
     comment as the source of truth and keep the README in sync when bumping.

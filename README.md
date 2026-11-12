@@ -510,7 +510,7 @@ These features let you query and manage your test reports in many ways through s
 ## For developers
 
 ### Prerequisites
-- Go 1.24.4 or later
+- Go 1.27 or later
 - A ReportPortal instance
 
 ### Building from Source

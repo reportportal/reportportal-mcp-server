@@ -801,7 +801,7 @@ func (lr *LaunchResources) toolUpdateLaunch() (*mcp.Tool, utils.ToolHandler[Upda
 				}
 				if args.Attributes != nil {
 					attrs := make(
-						[]openapi.ComEpamReportportalBaseReportingItemAttributeResource,
+						[]openapi.ComEpamReportportalBaseReportingAttributeResource,
 						0,
 						len(args.Attributes),
 					)
@@ -816,7 +816,7 @@ func (lr *LaunchResources) toolUpdateLaunch() (*mcp.Tool, utils.ToolHandler[Upda
 							}
 							return nil, nil, fmt.Errorf("attribute[%d] has empty value", i)
 						}
-						attr := openapi.ComEpamReportportalBaseReportingItemAttributeResource{
+						attr := openapi.ComEpamReportportalBaseReportingAttributeResource{
 							Value: a.Value,
 						}
 						if trimmedKey := strings.TrimSpace(a.Key); trimmedKey != "" {
@@ -1160,52 +1160,52 @@ func (lr *LaunchResources) toolImportLaunchFromFile() (*mcp.Tool, utils.ToolHand
 // resourceLaunch creates a resource template for accessing launches by URI.
 func (lr *LaunchResources) resourceLaunch() (*mcp.ResourceTemplate, mcp.ResourceHandler) {
 	return &mcp.ResourceTemplate{
-			Name:        "reportportal-launch-by-id",
-			Description: "Access ReportPortal launches by URI (reportportal://{projectKey}/launch/{launchId})",
-			MIMEType:    "application/json",
-			URITemplate: "reportportal://{projectKey}/launch/{launchId}",
-		}, func(ctx context.Context, request *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
-			// Parse the URI to extract parameters
+		Name:        "reportportal-launch-by-id",
+		Description: "Access ReportPortal launches by URI (reportportal://{projectKey}/launch/{launchId})",
+		MIMEType:    "application/json",
+		URITemplate: "reportportal://{projectKey}/launch/{launchId}",
+	}, func(ctx context.Context, request *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+		// Parse the URI to extract parameters
 
-			uri := request.Params.URI
-			project, launchIdStr, err := utils.ParseReportPortalURI(uri, "launch")
-			if err != nil {
-				return nil, err
-			}
-
-			// Convert launchId to integer
-			launchId, err := strconv.ParseUint(launchIdStr, 10, 64)
-			if err != nil {
-				return nil, fmt.Errorf("invalid launchId: %w", err)
-			}
-
-			// Fetch the launch from ReportPortal
-			launchPage, _, err := lr.client.LaunchAPI.GetProjectLaunches(ctx, project).
-				FilterEqId(int32(launchId)). //nolint:gosec
-				Execute()
-			if err != nil {
-				return nil, fmt.Errorf("failed to get launch page: %w", err)
-			}
-
-			if len(launchPage.Content) < 1 {
-				return nil, fmt.Errorf("launch not found: %d", launchId)
-			}
-
-			// Marshal the launch to JSON
-			launchPayload, err := json.Marshal(launchPage.Content[0])
-			if err != nil {
-				return nil, fmt.Errorf("failed to marshal response: %w", err)
-			}
-
-			// Return the resource contents
-			return &mcp.ReadResourceResult{
-				Contents: []*mcp.ResourceContents{
-					{
-						URI:      uri,
-						MIMEType: "application/json",
-						Text:     string(launchPayload),
-					},
-				},
-			}, nil
+		uri := request.Params.URI
+		project, launchIdStr, err := utils.ParseReportPortalURI(uri, "launch")
+		if err != nil {
+			return nil, err
 		}
+
+		// Convert launchId to integer
+		launchId, err := strconv.ParseUint(launchIdStr, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid launchId: %w", err)
+		}
+
+		// Fetch the launch from ReportPortal
+		launchPage, _, err := lr.client.LaunchAPI.GetProjectLaunches(ctx, project).
+			FilterEqId(int32(launchId)). //nolint:gosec
+			Execute()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get launch page: %w", err)
+		}
+
+		if len(launchPage.Content) < 1 {
+			return nil, fmt.Errorf("launch not found: %d", launchId)
+		}
+
+		// Marshal the launch to JSON
+		launchPayload, err := json.Marshal(launchPage.Content[0])
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal response: %w", err)
+		}
+
+		// Return the resource contents
+		return &mcp.ReadResourceResult{
+			Contents: []*mcp.ResourceContents{
+				{
+					URI:      uri,
+					MIMEType: "application/json",
+					Text:     string(launchPayload),
+				},
+			},
+		}, nil
+	}
 }

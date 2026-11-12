@@ -9,7 +9,7 @@ See also: [Architecture & Limitations](ARCHITECTURE.md) · [Release Workflow](RE
 
 ## 1. Prerequisites & setup
 
-* Go — version pinned in `go.mod` (currently `1.25.0`; the CI build matrix in
+* Go — version pinned in `go.mod` (currently `1.27.0`; the CI build matrix in
   `.github/workflows/build.yml` is the source of truth if it ever drifts from
   `go.mod`).
 * [Go Task](https://taskfile.dev/) v3: `go install github.com/go-task/task/v3/cmd/task@latest`
@@ -86,7 +86,7 @@ same change rather than leaving it in place "for now."
   task lint    # golangci-lint run ./...
   task checks  # go mod tidy && fmt && lint, the combined pre-PR gate
   ```
-  CI (`.github/workflows/build.yml`) runs `golangci-lint` (v2.11.4, pinned —
+  CI (`.github/workflows/build.yml`) runs `golangci-lint` (v2.15.0, pinned —
   keep `Taskfile.yaml`'s `GOLANGCI_LINT_VERSION` and the workflow version in
   sync) and `task test` + `task app:build` on every push/PR to `main`/`develop`.
 * **`gosec` is enabled** — expect it to flag things like `math/rand`,

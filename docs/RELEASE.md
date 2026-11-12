@@ -44,7 +44,7 @@ try to bypass the check.
 `.github/workflows/build.yml` runs on push/PR to `main` and `develop`:
 
 1. `golangci-lint` (pinned version — keep in sync with
-   `Taskfile.yaml`'s `GOLANGCI_LINT_VERSION`; both currently `v2.11.4`).
+   `Taskfile.yaml`'s `GOLANGCI_LINT_VERSION`; both currently `v2.15.0`).
 2. `task test` (`go test ./...`).
 3. `task app:build` (compiles the binary).
 

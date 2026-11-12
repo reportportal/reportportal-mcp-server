@@ -12,9 +12,9 @@ version: '3'
 # task docker:run RP_INSECURE_TLS=true               # Skip TLS certificate verification (do not combine with RP_TLS_CA_CERT)
 
 vars:
-  # >= v2.4 required for go.mod `go 1.25` (see golangci-lint changelog / FAQ)
-  GOLANGCI_LINT_VERSION: 'v2.11.4'
-  GOLANG_CI: "docker run --rm -v $(pwd):/app -w /app golangci/golangci-lint:{{.GOLANGCI_LINT_VERSION}} golangci-lint"
+  # >= v2.4 required for go.mod `go 1.27` (see golangci-lint changelog / FAQ)
+  GOLANGCI_LINT_VERSION: 'v2.15.0'
+  GOLANG_CI: "docker run --rm -v \"$(pwd)\":/app -w /app golangci/golangci-lint:{{.GOLANGCI_LINT_VERSION}} golangci-lint"
   IMAGE_NAME: "reportportal-mcp-server"
   IMAGE_NAME_DEBUG: "reportportal-mcp-server-debug"
   INSPECTOR: "npx @modelcontextprotocol/inspector"
