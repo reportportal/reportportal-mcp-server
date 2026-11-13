@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"runtime"
 	"strings"
 	"sync/atomic"
@@ -15,14 +16,18 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/modelcontextprotocol/go-sdk/oauthex"
 	"github.com/reportportal/goRP/v5/pkg/gorp"
 	"github.com/urfave/cli/v3"
 
 	"github.com/reportportal/reportportal-mcp-server/internal/config"
 	"github.com/reportportal/reportportal-mcp-server/internal/reportportal/analytics"
+	"github.com/reportportal/reportportal-mcp-server/internal/reportportal/audit"
 	mcphandlers "github.com/reportportal/reportportal-mcp-server/internal/reportportal/mcp_handlers"
 	app_middleware "github.com/reportportal/reportportal-mcp-server/internal/reportportal/middleware"
+	rpoauth "github.com/reportportal/reportportal-mcp-server/internal/reportportal/oauth"
 	"github.com/reportportal/reportportal-mcp-server/internal/reportportal/utils"
 )
 
@@ -65,7 +70,15 @@ type HTTPServerConfig struct {
 	ConnectionTimeout     time.Duration // Request timeout
 	TLSConfig             *tls.Config   // Optional TLS config (nil = system defaults)
 	// HTTP/2 is always enabled for optimal performance
+
+	OAuth rpoauth.Config
+
+	// AuditLog emits JSON audit events on stdout. When unset on the CLI it
+	// follows OAuth: on when OAuth is enabled, off otherwise.
+	AuditLog bool
 }
+
+const mcpServerName = "reportportal-mcp-server"
 
 // HTTPServer is an enhanced MCP server with Chi router
 type HTTPServer struct {
@@ -75,6 +88,7 @@ type HTTPServer struct {
 	Router            chi.Router   // Made public for CreateHTTPServerWithMiddleware
 	mcpHTTPHandler    http.Handler // Official SDK HTTP handler
 	httpClient        *http.Client // Direct HTTP client instead of ConnectionManager
+	oauthVerifier     auth.TokenVerifier
 
 	// State management
 	running atomic.Bool
@@ -106,7 +120,7 @@ func NewHTTPServer(
 	// Create base MCP server
 	mcpServer := mcp.NewServer(
 		&mcp.Implementation{
-			Name:    "reportportal-mcp-server",
+			Name:    mcpServerName,
 			Version: config.Version,
 		},
 		&mcp.ServerOptions{
@@ -116,6 +130,22 @@ func NewHTTPServer(
 
 	// Create HTTP client
 	httpClient := createHTTPClient(config.ConnectionTimeout, config.TLSConfig, config.HostURL)
+
+	if config.AuditLog {
+		instance, hostErr := os.Hostname()
+		if hostErr != nil {
+			slog.Debug("audit server instance unavailable", "error", hostErr)
+			instance = ""
+		}
+		auditor := audit.New(audit.ServerInfo{
+			Name:     mcpServerName,
+			Version:  config.Version,
+			Instance: instance,
+		}, nil)
+		httpClient.Transport = audit.WrapRoundTripper(httpClient.Transport)
+		mcpServer.AddReceivingMiddleware(auditor.Middleware())
+		config.OAuth.Audit = auditor.AuthRejected
+	}
 
 	// Initialize batch-based analytics
 	// Note: In HTTP mode, FallbackRPToken is always empty (tokens come from HTTP headers).
@@ -144,6 +174,14 @@ func NewHTTPServer(
 		AnalyticsInstance: analyticsInstance,
 		config:            config,
 		httpClient:        httpClient,
+	}
+
+	if config.OAuth.Enabled {
+		verifier, err := rpoauth.NewTokenVerifier(context.Background(), config.OAuth)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create OAuth token verifier: %w", err)
+		}
+		httpServer.oauthVerifier = verifier
 	}
 
 	// Initialize tools and resources
@@ -287,7 +325,7 @@ func corsMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
 		w.Header().
 			Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept, mcp-session-id")
-		w.Header().Set("Access-Control-Expose-Headers", "mcp-session-id")
+		w.Header().Set("Access-Control-Expose-Headers", "mcp-session-id, WWW-Authenticate")
 		w.Header().Set("Access-Control-Max-Age", "86400") // 24 hours
 
 		// Handle preflight OPTIONS requests
@@ -314,6 +352,25 @@ func (hs *HTTPServer) conditionalTimeoutMiddleware(next http.Handler) http.Handl
 	})
 }
 
+// skipAccessLog applies logger to all requests except the given paths.
+func skipAccessLog(
+	logger func(http.Handler) http.Handler,
+	paths ...string,
+) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		logged := logger(next)
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			for _, path := range paths {
+				if r.URL.Path == path {
+					next.ServeHTTP(w, r)
+					return
+				}
+			}
+			logged.ServeHTTP(w, r)
+		})
+	}
+}
+
 // setupChiRouter creates and configures the Chi router with all routes and middleware
 func (hs *HTTPServer) setupChiRouter() {
 	r := chi.NewRouter()
@@ -323,7 +380,8 @@ func (hs *HTTPServer) setupChiRouter() {
 
 	// Add Chi middleware
 	r.Use(middleware.RequestID)
-	r.Use(middleware.Logger)
+	r.Use(middleware.RealIP)
+	r.Use(skipAccessLog(middleware.Logger, "/health"))
 	r.Use(middleware.Recoverer)
 	// Use conditional timeout that skips SSE streams
 	r.Use(hs.conditionalTimeoutMiddleware)
@@ -372,8 +430,28 @@ func (hs *HTTPServer) setupRoutes() {
 	// Static files or documentation (if needed in the future)
 	hs.Router.Get("/", hs.rootHandler)
 
+	if hs.config.OAuth.Enabled {
+		metadata := &oauthex.ProtectedResourceMetadata{
+			Resource:               hs.config.OAuth.PublicURL,
+			AuthorizationServers:   []string{hs.config.OAuth.Issuer},
+			ScopesSupported:        []string{hs.config.OAuth.Scope},
+			BearerMethodsSupported: []string{"header"},
+		}
+		metadataHandler := auth.ProtectedResourceMetadataHandler(metadata)
+		const metadataPath = "/.well-known/oauth-protected-resource"
+		hs.Router.Handle(metadataPath, metadataHandler)
+		if hs.config.OAuth.PublicURLPath != "" {
+			hs.Router.Handle(metadataPath+hs.config.OAuth.PublicURLPath, metadataHandler)
+		}
+	}
+
 	// MCP endpoints using chi.Group pattern
 	hs.Router.Group(func(mcpRouter chi.Router) {
+		if hs.config.OAuth.Enabled {
+			mcpRouter.Use(auth.RequireBearerToken(hs.oauthVerifier, &auth.RequireBearerTokenOptions{
+				ResourceMetadataURL: hs.config.OAuth.ResourceMetadataURL,
+			}))
+		}
 		// Add MCP-specific middleware for token extraction and validation
 		mcpRouter.Use(app_middleware.HTTPTokenMiddleware)
 		mcpRouter.Use(hs.mcpMiddleware)
@@ -647,6 +725,18 @@ func buildHTTPServerConfig(cmd *cli.Command) (HTTPServerConfig, error) {
 		return HTTPServerConfig{}, fmt.Errorf("build TLS config: %w", err)
 	}
 
+	oauthCfg, err := rpoauth.BuildConfig(
+		cmd.Bool("oauth-enabled"),
+		cmd.String("public-url"),
+		cmd.String("oauth-issuer"),
+		cmd.String("oauth-jwks-url"),
+		cmd.String("oauth-audience"),
+		cmd.String("oauth-scope"),
+	)
+	if err != nil {
+		return HTTPServerConfig{}, err
+	}
+
 	return HTTPServerConfig{
 		Version: fmt.Sprintf(
 			"%s (%s) %s",
@@ -662,5 +752,17 @@ func buildHTTPServerConfig(cmd *cli.Command) (HTTPServerConfig, error) {
 		MaxConcurrentRequests: maxWorkers,
 		ConnectionTimeout:     time.Duration(connectionTimeoutSec) * time.Second,
 		TLSConfig:             tlsCfg,
+		OAuth:                 oauthCfg,
+		AuditLog:              auditLogEnabled(cmd, oauthCfg.Enabled),
 	}, nil
+}
+
+// auditLogEnabled reports whether HTTP mode should emit audit events.
+// An explicit --audit-log / MCP_AUDIT_LOG value wins. Otherwise auditing
+// follows OAuth and is on only when OAuth is enabled.
+func auditLogEnabled(cmd *cli.Command, oauthEnabled bool) bool {
+	if cmd.IsSet("audit-log") {
+		return cmd.Bool("audit-log")
+	}
+	return oauthEnabled
 }
