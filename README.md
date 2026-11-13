@@ -32,7 +32,7 @@ The URL of your ReportPortal instance:
 
 ### Project Key (`RP_PROJECT`) — Optional
 
-This value is optional. When set, it defines the default project key used for all requests. The `projectKey` tool argument is only used as a fallback when no project is available from the context (i.e. `RP_PROJECT` env variable in stdio mode, or the `X-Project` HTTP header in HTTP mode).
+This value is optional. When set, it defines the default project key used for all requests. The `projectKey` tool argument can be used to override the project specified in the context (e.g. `RP_PROJECT` env variable in stdio mode, or the `X-Project` HTTP header in HTTP mode).
 
 The project key is the **unique project identifier** within the ReportPortal instance, do not use the project display name as project key. Find this on the ReportPortal general settings page:
 
