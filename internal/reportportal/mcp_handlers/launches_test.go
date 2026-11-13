@@ -17,7 +17,15 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/yosida95/uritemplate/v3"
+
+	"github.com/reportportal/reportportal-mcp-server/internal/reportportal/middleware"
 )
+
+func newLaunchResourcesForHTTPTest(ctx context.Context, serverURL *url.URL) *LaunchResources {
+	client := gorp.NewClient(serverURL, gorp.WithApiKeyAuth(ctx, ""))
+	client.APIClient.GetConfig().Middleware = middleware.QueryParamsMiddleware
+	return NewLaunchResources(client, nil, "", nil)
+}
 
 func TestLaunchByIdTemplate(t *testing.T) {
 	uritmpl := uritemplate.MustNew(
@@ -39,20 +47,15 @@ func TestListLaunchesTool(t *testing.T) {
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, fmt.Sprintf("/api/v1/%s/launch", testProject), r.URL.Path)
 		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, automationLaunchTypes, r.URL.Query().Get("filter.in.launchType"))
 
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(launchesJSON)
 	}))
 	defer mockServer.Close()
 
-	// Create launch resources with mocked RP client
 	serverURL, _ := url.Parse(mockServer.URL)
-	launchTools := NewLaunchResources(
-		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(ctx, "")),
-		nil,
-		"",
-		nil,
-	)
+	launchTools := newLaunchResourcesForHTTPTest(ctx, serverURL)
 
 	// Get the tool and handler
 	_, handler := launchTools.toolGetLaunches()
@@ -68,6 +71,68 @@ func TestListLaunchesTool(t *testing.T) {
 	textContent, ok := result.Content[0].(*mcp.TextContent)
 	require.True(t, ok, "expected TextContent")
 	assert.Equal(t, string(launchesJSON), textContent.Text)
+}
+
+func TestListLaunchesTool_PassesFiltersAndLaunchType(t *testing.T) {
+	ctx := context.Background()
+	testProject := "test-project"
+	expectedLaunches := testLaunches()
+	launchesJSON, _ := json.Marshal(expectedLaunches)
+
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query()
+		assert.Equal(t, "My Launch", query.Get("filter.cnt.name"))
+		assert.Equal(t, "alice,bob", query.Get("filter.in.user"))
+		assert.Equal(t, automationLaunchTypes, query.Get("filter.in.launchType"))
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(launchesJSON)
+	}))
+	defer mockServer.Close()
+
+	serverURL, _ := url.Parse(mockServer.URL)
+	launchTools := newLaunchResourcesForHTTPTest(ctx, serverURL)
+
+	_, handler := launchTools.toolGetLaunches()
+	result, _, err := handler(ctx, &mcp.CallToolRequest{}, GetLaunchesArgs{
+		ProjectKey:    testProject,
+		FilterCntName: "My Launch",
+		FilterInUser:  "alice,bob",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.False(t, result.IsError)
+}
+
+func TestGetLastLaunchByNameTool_IncludesLaunchTypeFilter(t *testing.T) {
+	ctx := context.Background()
+	testProject := "test-project"
+	launchName := "Demo Api Tests"
+	expectedLaunches := testLaunches()
+	launchesJSON, _ := json.Marshal(expectedLaunches)
+
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query()
+		assert.Equal(t, launchName, query.Get("filter.cnt.name"))
+		assert.Equal(t, automationLaunchTypes, query.Get("filter.in.launchType"))
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(launchesJSON)
+	}))
+	defer mockServer.Close()
+
+	serverURL, _ := url.Parse(mockServer.URL)
+	launchTools := newLaunchResourcesForHTTPTest(ctx, serverURL)
+
+	_, handler := launchTools.toolGetLastLaunchByName()
+	result, _, err := handler(ctx, &mcp.CallToolRequest{}, GetLastLaunchByNameArgs{
+		ProjectKey: testProject,
+		Launch:     launchName,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.False(t, result.IsError)
+	require.Len(t, result.Content, 1)
 }
 
 // TestGetLaunchByIdTool tests the get_launch_by_id tool handler directly
