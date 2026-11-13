@@ -820,7 +820,7 @@ task fmt
 
 ### Project Documentation
 
-For a deeper dive beyond this README, see the docs in [`docs/`](docs/):
+For a deeper dive beyond this README, see the docs in [`docs/`](./docs):
 
 - [**Architecture & Limitations**](docs/ARCHITECTURE.md) — process layout, request lifecycle, package map, and known design limitations/gotchas.
 - [**Development & Style Guide**](docs/DEVELOPMENT.md) — environment setup, coding conventions, and the established approaches for configuration, validation, analytics, and testing.
