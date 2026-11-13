@@ -375,7 +375,6 @@ func (hs *HTTPServer) setupChiRouter() {
 
 	// Add Chi middleware
 	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
 	r.Use(skipAccessLog(middleware.Logger, "/health"))
 	r.Use(middleware.Recoverer)
 	// Use conditional timeout that skips SSE streams
