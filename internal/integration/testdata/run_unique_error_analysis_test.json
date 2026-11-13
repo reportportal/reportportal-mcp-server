@@ -68,7 +68,7 @@
       ],
       "body": {
         "mode": "raw",
-        "raw": "{\n  \"id\": 1,\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"arguments\": {\n      \"launch_id\": 9683161,\n      \"remove_numbers\": false\n    },\n    \"name\": \"run_unique_error_analysis\"\n  }\n}"
+        "raw": "{\n  \"id\": 1,\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"arguments\": {\n      \"projectKey\": \"test-project\",\n      \"launch_id\": 9683161,\n      \"remove_numbers\": false\n    },\n    \"name\": \"run_unique_error_analysis\"\n  }\n}"
       },
       "url": {
         "raw": "/mcp",

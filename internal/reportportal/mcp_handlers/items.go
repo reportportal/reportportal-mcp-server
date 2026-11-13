@@ -19,127 +19,49 @@ import (
 	"github.com/reportportal/reportportal-mcp-server/internal/reportportal/utils"
 )
 
-// projectSchema returns a JSON schema for the project parameter
-func (lr *TestItemResources) projectSchema() *jsonschema.Schema {
-	return &jsonschema.Schema{
-		Type:        "string",
-		Description: "Project name",
-		Default:     mustMarshalJSON(lr.defaultProject),
-	}
-}
-
 // RegisterTestItemTools registers all test item-related tools and resources with the MCP server
 func RegisterTestItemTools(
 	s *mcp.Server,
 	rpClient *gorp.Client,
-	defaultProject string,
+	defaultProjectKey string,
 	analyticsClient *analytics.Analytics,
 ) {
-	testItems := NewTestItemResources(rpClient, analyticsClient, defaultProject)
+	testItems := NewTestItemResources(rpClient, analyticsClient, defaultProjectKey)
 
-	registerTool(s, testItems.toolGetTestItemById)
-	registerTool(s, testItems.toolGetTestItemsByFilter)
-	registerTool(s, testItems.toolGetTestItemLogsByFilter)
-	registerTool(s, testItems.toolGetTestItemAttachment)
-	registerTool(s, testItems.toolGetTestSuitesByFilter)
-	registerTool(s, testItems.toolGetProjectDefectTypes)
-	registerTool(s, testItems.toolUpdateDefectTypeForTestItems)
-	registerTool(s, testItems.toolGetTestItemsHistory)
+	utils.RegisterTool(s, testItems.toolGetTestItemById)
+	utils.RegisterTool(s, testItems.toolGetTestItemsByFilter)
+	utils.RegisterTool(s, testItems.toolGetTestItemLogsByFilter)
+	utils.RegisterTool(s, testItems.toolGetTestItemAttachment)
+	utils.RegisterTool(s, testItems.toolGetTestSuitesByFilter)
+	utils.RegisterTool(s, testItems.toolGetProjectDefectTypes)
+	utils.RegisterTool(s, testItems.toolUpdateDefectTypeForTestItems)
+	utils.RegisterTool(s, testItems.toolGetTestItemsHistory)
 
-	registerResourceTemplate(s, testItems.resourceTestItem)
+	utils.RegisterResourceTemplate(s, testItems.resourceTestItem)
 }
 
 // TestItemResources is a struct that encapsulates the ReportPortal client.
 type TestItemResources struct {
-	client         *gorp.Client // Client to interact with the ReportPortal API
-	defaultProject string       // Default project name
-	analytics      *analytics.Analytics
+	client            *gorp.Client // Client to interact with the ReportPortal API
+	defaultProjectKey string       // Default project key
+	analytics         *analytics.Analytics
 }
 
 func NewTestItemResources(
 	client *gorp.Client,
 	analytics *analytics.Analytics,
-	project string,
+	projectKey string,
 ) *TestItemResources {
 	return &TestItemResources{
-		client:         client,
-		defaultProject: project,
-		analytics:      analytics,
+		client:            client,
+		defaultProjectKey: projectKey,
+		analytics:         analytics,
 	}
-}
-
-// resolveSavedFilterIDByName returns the numeric filter ID for the filterId query parameter
-// using GET /v1/{projectName}/filter with filter.eq.name.
-func (lr *TestItemResources) resolveSavedFilterIDByName(
-	ctx context.Context,
-	project, filterName string,
-) (string, error) {
-	page, resp, err := lr.client.UserFilterAPI.GetAllFilters(ctx, project).
-		FilterEqName(filterName).
-		Execute()
-	if err != nil {
-		return "", fmt.Errorf("%s: %w", utils.ExtractResponseError(err, resp), err)
-	}
-	content := page.GetContent()
-	if len(content) == 0 {
-		return "", fmt.Errorf("no saved filter found with name %q", filterName)
-	}
-	return strconv.FormatInt(content[0].GetId(), 10), nil
-}
-
-// isAllDecimalDigits reports whether s is non-empty and contains only ASCII digits (saved filter IDs are numeric).
-func isAllDecimalDigits(s string) bool {
-	if s == "" {
-		return false
-	}
-	for i := 0; i < len(s); i++ {
-		if s[i] < '0' || s[i] > '9' {
-			return false
-		}
-	}
-	return true
-}
-
-// resolveFilterIDForProvider returns the value for the filterId query parameter when using providerType=filter.
-// All-decimal strings are treated as saved filter IDs and passed through; any other non-empty string is resolved
-// as a saved filter name via resolveSavedFilterIDByName.
-func (lr *TestItemResources) resolveFilterIDForProvider(
-	ctx context.Context,
-	project, filterIDOrName string,
-) (filterID string, err error) {
-	trimmed := strings.TrimSpace(filterIDOrName)
-	if trimmed == "" {
-		return "", fmt.Errorf("filter-id is empty")
-	}
-	if isAllDecimalDigits(trimmed) {
-		slog.Debug(
-			"filter-id is numeric; using as saved filter ID",
-			"filterId",
-			trimmed,
-			"project",
-			project,
-		)
-		return trimmed, nil
-	}
-	id, err := lr.resolveSavedFilterIDByName(ctx, project, trimmed)
-	if err != nil {
-		return "", err
-	}
-	slog.Debug(
-		"resolved filter-id from saved filter name",
-		"filterName",
-		trimmed,
-		"filterId",
-		id,
-		"project",
-		project,
-	)
-	return id, nil
 }
 
 // GetTestItemsByFilterArgs holds filter and pagination params for get_test_items_by_filter.
 type GetTestItemsByFilterArgs struct {
-	Project                     string `json:"project"`
+	ProjectKey                  string `json:"projectKey"`
 	LaunchID                    int32  `json:"launch-id"`
 	Page                        uint   `json:"page"`
 	PageSize                    uint   `json:"page-size"`
@@ -168,11 +90,15 @@ type GetTestItemsByFilterArgs struct {
 }
 
 // toolGetTestItemsByFilter creates a tool to list test items for a specific launch.
-func (lr *TestItemResources) toolGetTestItemsByFilter() (*mcp.Tool, ToolHandler[GetTestItemsByFilterArgs, any]) {
+func (lr *TestItemResources) toolGetTestItemsByFilter() (*mcp.Tool, utils.ToolHandler[GetTestItemsByFilterArgs, any]) {
 	properties := make(map[string]*jsonschema.Schema)
 
 	// Required parameters
-	properties["project"] = lr.projectSchema()
+	pkSchema, err := utils.ProjectKeySchema(lr.defaultProjectKey)
+	if err != nil {
+		slog.Error("failed to build project key schema", "error", err)
+	}
+	properties[utils.ProjectKeyField] = pkSchema
 
 	// Conditionally required parameters
 	properties["launch-id"] = &jsonschema.Schema{
@@ -221,7 +147,7 @@ func (lr *TestItemResources) toolGetTestItemsByFilter() (*mcp.Tool, ToolHandler[
 		Type:        "string",
 		Description: "Items have retries or not, can be a list of values: TRUE, FALSE, -- (default, filter is not applied)",
 		Enum:        []any{"TRUE", "FALSE", "--"},
-		Default:     mustMarshalJSON("--"),
+		Default:     utils.MustMarshalJSON("--"),
 	}
 	properties["filter-eq-parentId"] = &jsonschema.Schema{
 		Type:        "string",
@@ -258,7 +184,7 @@ func (lr *TestItemResources) toolGetTestItemsByFilter() (*mcp.Tool, ToolHandler[
 	properties["include-before-after-hooks"] = &jsonschema.Schema{
 		Type:        "boolean",
 		Description: "Include all Before/After hook item types (BEFORE_SUITE, BEFORE_GROUPS, BEFORE_CLASS, BEFORE_TEST, TEST, BEFORE_METHOD, AFTER_METHOD, AFTER_TEST, AFTER_CLASS, AFTER_GROUPS, AFTER_SUITE, STEP) together with STEP items. Default: false (only STEP items)",
-		Default:     mustMarshalJSON(false),
+		Default:     utils.MustMarshalJSON(false),
 	}
 	properties["filter-any-compositeAttribute"] = &jsonschema.Schema{
 		Type:        "string",
@@ -267,7 +193,7 @@ func (lr *TestItemResources) toolGetTestItemsByFilter() (*mcp.Tool, ToolHandler[
 	properties["launches-limit"] = &jsonschema.Schema{
 		Type:        "integer",
 		Description: "Maps to launchesLimit when providerType is filter. Ignored for providerType launch. Default: 600 if omitted.",
-		Default:     mustMarshalJSON(utils.DefaultLaunchesLimitForFilterProvider),
+		Default:     utils.MustMarshalJSON(utils.DefaultLaunchesLimitForFilterProvider),
 	}
 	properties["filter-eq-defect-type"] = &jsonschema.Schema{
 		Type: "string",
@@ -276,356 +202,375 @@ func (lr *TestItemResources) toolGetTestItemsByFilter() (*mcp.Tool, ToolHandler[
 	}
 
 	return &mcp.Tool{
-			Name:        "get_test_items_by_filter",
-			Description: "Get list of test items with optional filters. Accepts top-level query parameters launchId and filterId (not filter.eq.launchId / filter.eq.name). Either launchId (via launch-id) or filterId (via filter-name) is required; filter-name may be supplied as a saved filter name and the handler will resolve it to a numeric filterId. Optional filter-eq-defect-type narrows items by defect/issue type.",
-			InputSchema: &jsonschema.Schema{
-				Type:       "object",
-				Properties: properties,
-				Required:   []string{"project"},
-			},
-		}, utils.WithAnalytics(lr.analytics, "get_test_items_by_filter", func(ctx context.Context, request *mcp.CallToolRequest, args GetTestItemsByFilterArgs) (*mcp.CallToolResult, any, error) {
-			slog.Debug("START PROCESSING")
-			project, err := utils.ExtractProject(ctx, args.Project)
-			if err != nil {
-				return nil, nil, err
-			}
+		Name:        "get_test_items_by_filter",
+		Description: "Get list of test items with optional filters. Accepts top-level query parameters launchId and filterId (not filter.eq.launchId / filter.eq.name). Either launchId (via launch-id) or filterId (via filter-name) is required; filter-name may be supplied as a saved filter name and the handler will resolve it to a numeric filterId. Optional filter-eq-defect-type narrows items by defect/issue type.",
+		InputSchema: &jsonschema.Schema{
+			Type:       "object",
+			Properties: properties,
+			Required:   nil,
+		},
+	}, utils.WithAnalytics(lr.analytics, "get_test_items_by_filter", func(ctx context.Context, request *mcp.CallToolRequest, args GetTestItemsByFilterArgs) (*mcp.CallToolResult, any, error) {
+		slog.Debug("START PROCESSING")
+		project, err := utils.ExtractProject(ctx, args.ProjectKey)
+		if err != nil {
+			return nil, nil, err
+		}
 
-			if args.LaunchID == 0 && strings.TrimSpace(args.FilterName) == "" {
-				return nil, nil, fmt.Errorf(
-					"either launch-id or filter-name is required",
-				)
-			} else if args.LaunchID != 0 && strings.TrimSpace(args.FilterName) != "" {
-				return nil, nil, fmt.Errorf(
-					"provide either launch-id or filter-name, not both",
-				)
-			}
-			if args.LaunchID < 0 {
-				return nil, nil, fmt.Errorf("launch-id must be non-negative, got %d", args.LaunchID)
-			}
+		if args.LaunchID == 0 && strings.TrimSpace(args.FilterName) == "" {
+			return nil, nil, fmt.Errorf(
+				"either launch-id or filter-name is required",
+			)
+		} else if args.LaunchID != 0 && strings.TrimSpace(args.FilterName) != "" {
+			return nil, nil, fmt.Errorf(
+				"provide either launch-id or filter-name, not both",
+			)
+		}
+		if args.LaunchID < 0 {
+			return nil, nil, fmt.Errorf("launch-id must be non-negative, got %d", args.LaunchID)
+		}
 
-			filterInType := utils.DefaultFilterInType
-			if args.IncludeBeforeAfterHooks != nil && *args.IncludeBeforeAfterHooks {
-				filterInType = utils.AllFilterInTypes
-			}
+		filterInType := utils.DefaultFilterInType
+		if args.IncludeBeforeAfterHooks != nil && *args.IncludeBeforeAfterHooks {
+			filterInType = utils.AllFilterInTypes
+		}
 
-			urlValues := url.Values{
-				"filter.eq.hasStats":    {utils.DefaultFilterEqHasStats},
-				"filter.eq.hasChildren": {utils.DefaultFilterEqHasChildren},
-				"filter.in.type":        {filterInType},
-			}
-			if args.FilterAnyCompositeAttribute != "" {
-				urlValues.Add("filter.any.compositeAttribute", args.FilterAnyCompositeAttribute)
-			}
+		urlValues := url.Values{
+			"filter.eq.hasStats":    {utils.DefaultFilterEqHasStats},
+			"filter.eq.hasChildren": {utils.DefaultFilterEqHasChildren},
+			"filter.in.type":        {filterInType},
+		}
+		if args.FilterAnyCompositeAttribute != "" {
+			urlValues.Add("filter.any.compositeAttribute", args.FilterAnyCompositeAttribute)
+		}
 
-			providerType := utils.DefaultProviderType
-			var resolvedFilterID string
-			if strings.TrimSpace(args.FilterName) != "" {
-				providerType = utils.FilterProviderType
-				resolvedFilterID, err = lr.resolveFilterIDForProvider(ctx, project, args.FilterName)
-				if err != nil {
-					return nil, nil, err
-				}
-				urlValues.Add("filterId", resolvedFilterID)
-				launchesLimit := args.LaunchesLimit
-				if launchesLimit == 0 {
-					launchesLimit = utils.DefaultLaunchesLimitForFilterProvider
-				}
-				urlValues.Add("launchesLimit", strconv.FormatUint(uint64(launchesLimit), 10))
-			} else if args.LaunchID != 0 {
-				// Launch provider expects top-level query param launchId (same as get_test_suites_by_filter); Params() only adds params[launchId].
-				urlValues.Add("launchId", strconv.FormatInt(int64(args.LaunchID), 10))
-			}
-
-			urlValues.Add("providerType", providerType)
-
-			// Add optional filters to urlValues if they have values
-			if args.FilterCntName != "" {
-				urlValues.Add("filter.cnt.name", args.FilterCntName)
-			}
-			if args.FilterCntDescription != "" {
-				urlValues.Add("filter.cnt.description", args.FilterCntDescription)
-			}
-			if args.FilterInStatus != "" {
-				urlValues.Add("filter.in.status", args.FilterInStatus)
-			}
-			if args.FilterEqParentId != "" {
-				_, err := strconv.ParseUint(args.FilterEqParentId, 10, 64)
-				if err != nil {
-					return nil, nil, fmt.Errorf(
-						"invalid parent filter ID value: %s",
-						args.FilterEqParentId,
-					)
-				}
-				urlValues.Add("filter.eq.parentId", args.FilterEqParentId)
-			}
-			if args.FilterCntIssueComment != "" {
-				urlValues.Add("filter.cnt.issueComment", args.FilterCntIssueComment)
-			}
-			if args.FilterHasTicketId != "" {
-				urlValues.Add("filter.has.ticketId", args.FilterHasTicketId)
-			}
-			if args.FilterAnyPatternName != "" {
-				urlValues.Add("filter.any.patternName", args.FilterAnyPatternName)
-			}
-
-			filterStartTime, err := utils.ProcessStartTimeFilter(
-				args.FilterBtwStartTimeFrom,
-				args.FilterBtwStartTimeTo,
+		providerType := utils.DefaultProviderType
+		var resolvedFilterID string
+		if strings.TrimSpace(args.FilterName) != "" {
+			providerType = utils.FilterProviderType
+			resolvedFilterID, err = utils.ResolveFilterIDForProvider(
+				ctx,
+				lr.client,
+				project,
+				args.FilterName,
 			)
 			if err != nil {
 				return nil, nil, err
 			}
-			if filterStartTime != "" {
-				urlValues.Add("filter.btw.startTime", filterStartTime)
+			urlValues.Add("filterId", resolvedFilterID)
+			launchesLimit := args.LaunchesLimit
+			if launchesLimit == 0 {
+				launchesLimit = utils.DefaultLaunchesLimitForFilterProvider
 			}
-			if args.FilterInIgnoreAnalyzer != nil {
-				urlValues.Add(
-					"filter.in.ignoreAnalyzer",
-					strconv.FormatBool(*args.FilterInIgnoreAnalyzer),
-				)
-			}
+			urlValues.Add("launchesLimit", strconv.FormatUint(uint64(launchesLimit), 10))
+		} else if args.LaunchID != 0 {
+			// Launch provider expects top-level query param launchId (same as get_test_suites_by_filter); Params() only adds params[launchId].
+			urlValues.Add("launchId", strconv.FormatInt(int64(args.LaunchID), 10))
+		}
 
-			ctxWithParams := utils.WithQueryParams(ctx, urlValues)
-			// Prepare "requiredUrlParams" for the API request because the ReportPortal API v2 expects them in a specific format
-			requiredUrlParams := map[string]string{}
-			if strings.TrimSpace(args.FilterName) == "" {
-				requiredUrlParams["launchId"] = strconv.FormatInt(int64(args.LaunchID), 10)
-			}
-			// Build the API request with filters
-			apiRequest := lr.client.TestItemAPI.GetTestItemsV2(ctxWithParams, project).
-				Params(requiredUrlParams)
+		urlValues.Add("providerType", providerType)
 
-			// Apply pagination parameters
-			apiRequest = utils.ApplyPaginationOptions(
-				apiRequest,
-				args.Page,
-				args.PageSize,
-				args.PageSort,
-				utils.DefaultSortingForItems,
-			)
-
-			// Process attribute keys and combine with composite attributes
-			filterAttributes := utils.ProcessAttributeKeys(
-				args.FilterHasCompositeAttribute,
-				args.FilterHasAttributeKey,
-			)
-			if filterAttributes != "" {
-				apiRequest = apiRequest.FilterHasCompositeAttribute(filterAttributes)
-			}
-			if args.FilterEqHasRetries != "--" {
-				apiRequest = apiRequest.FilterEqHasRetries(args.FilterEqHasRetries == "TRUE")
-			}
-			if args.FilterEqAutoAnalyzed != nil {
-				apiRequest = apiRequest.FilterEqAutoAnalyzed(*args.FilterEqAutoAnalyzed)
-			}
-			if defectType := strings.TrimSpace(args.FilterEqDefectType); defectType != "" {
-				apiRequest = apiRequest.FilterEqIssueType(defectType)
-			}
-
-			// Execute the request
-			_, response, err := apiRequest.Execute()
+		// Add optional filters to urlValues if they have values
+		if args.FilterCntName != "" {
+			urlValues.Add("filter.cnt.name", args.FilterCntName)
+		}
+		if args.FilterCntDescription != "" {
+			urlValues.Add("filter.cnt.description", args.FilterCntDescription)
+		}
+		if args.FilterInStatus != "" {
+			urlValues.Add("filter.in.status", args.FilterInStatus)
+		}
+		if args.FilterEqParentId != "" {
+			_, err := strconv.ParseUint(args.FilterEqParentId, 10, 64)
 			if err != nil {
 				return nil, nil, fmt.Errorf(
-					"%s: %w",
-					utils.ExtractResponseError(err, response),
-					err,
+					"invalid parent filter ID value: %s",
+					args.FilterEqParentId,
 				)
 			}
+			urlValues.Add("filter.eq.parentId", args.FilterEqParentId)
+		}
+		if args.FilterCntIssueComment != "" {
+			urlValues.Add("filter.cnt.issueComment", args.FilterCntIssueComment)
+		}
+		if args.FilterHasTicketId != "" {
+			urlValues.Add("filter.has.ticketId", args.FilterHasTicketId)
+		}
+		if args.FilterAnyPatternName != "" {
+			urlValues.Add("filter.any.patternName", args.FilterAnyPatternName)
+		}
 
-			// Return the serialized launches as a text result
-			return utils.ReadResponseBody(response)
-		})
+		filterStartTime, err := utils.ProcessStartTimeFilter(
+			args.FilterBtwStartTimeFrom,
+			args.FilterBtwStartTimeTo,
+		)
+		if err != nil {
+			return nil, nil, err
+		}
+		if filterStartTime != "" {
+			urlValues.Add("filter.btw.startTime", filterStartTime)
+		}
+		if args.FilterInIgnoreAnalyzer != nil {
+			urlValues.Add(
+				"filter.in.ignoreAnalyzer",
+				strconv.FormatBool(*args.FilterInIgnoreAnalyzer),
+			)
+		}
+
+		ctxWithParams := utils.WithQueryParams(ctx, urlValues)
+		// Prepare "requiredUrlParams" for the API request because the ReportPortal API v2 expects them in a specific format
+		requiredUrlParams := map[string]string{}
+		if strings.TrimSpace(args.FilterName) == "" {
+			requiredUrlParams["launchId"] = strconv.FormatInt(int64(args.LaunchID), 10)
+		}
+		// Build the API request with filters
+		apiRequest := lr.client.TestItemAPI.GetTestItemsV2(ctxWithParams, project).
+			Params(requiredUrlParams)
+
+		// Apply pagination parameters
+		apiRequest = utils.ApplyPaginationOptions(
+			apiRequest,
+			args.Page,
+			args.PageSize,
+			args.PageSort,
+			utils.DefaultSortingForItems,
+		)
+
+		// Process attribute keys and combine with composite attributes
+		filterAttributes := utils.ProcessAttributeKeys(
+			args.FilterHasCompositeAttribute,
+			args.FilterHasAttributeKey,
+		)
+		if filterAttributes != "" {
+			apiRequest = apiRequest.FilterHasCompositeAttribute(filterAttributes)
+		}
+		if args.FilterEqHasRetries != "--" {
+			apiRequest = apiRequest.FilterEqHasRetries(args.FilterEqHasRetries == "TRUE")
+		}
+		if args.FilterEqAutoAnalyzed != nil {
+			apiRequest = apiRequest.FilterEqAutoAnalyzed(*args.FilterEqAutoAnalyzed)
+		}
+		if defectType := strings.TrimSpace(args.FilterEqDefectType); defectType != "" {
+			apiRequest = apiRequest.FilterEqIssueType(defectType)
+		}
+
+		// Execute the request
+		_, response, err := apiRequest.Execute()
+		if err != nil {
+			return nil, nil, fmt.Errorf(
+				"%s: %w",
+				utils.ExtractResponseError(err, response),
+				err,
+			)
+		}
+
+		// Return the serialized launches as a text result
+		return utils.ReadResponseBody(response)
+	})
 }
 
 // GetTestItemByIdArgs holds params for get_test_item_by_id.
 type GetTestItemByIdArgs struct {
-	Project    string `json:"project"`
+	ProjectKey string `json:"projectKey"`
 	TestItemID string `json:"test_item_id"`
 }
 
 // toolGetTestItemById creates a tool to retrieve a test item by its ID.
-func (lr *TestItemResources) toolGetTestItemById() (*mcp.Tool, ToolHandler[GetTestItemByIdArgs, any]) {
+func (lr *TestItemResources) toolGetTestItemById() (*mcp.Tool, utils.ToolHandler[GetTestItemByIdArgs, any]) {
 	properties := make(map[string]*jsonschema.Schema)
-	properties["project"] = lr.projectSchema()
+	pkSchema, err := utils.ProjectKeySchema(lr.defaultProjectKey)
+	if err != nil {
+		slog.Error("failed to build project key schema", "error", err)
+	}
+	properties[utils.ProjectKeyField] = pkSchema
 	properties["test_item_id"] = &jsonschema.Schema{
 		Type:        "string",
 		Description: "Test Item ID",
 	}
 
 	return &mcp.Tool{
-			Name:        "get_test_item_by_id",
-			Description: "Get test item by ID",
-			InputSchema: &jsonschema.Schema{
-				Type:       "object",
-				Properties: properties,
-				Required:   []string{"project", "test_item_id"},
-			},
-		}, utils.WithAnalytics(lr.analytics, "get_test_item_by_id", func(ctx context.Context, request *mcp.CallToolRequest, args GetTestItemByIdArgs) (*mcp.CallToolResult, any, error) {
-			project, err := utils.ExtractProject(ctx, args.Project)
-			if err != nil {
-				return nil, nil, err
-			}
-			// Extract the "test_item_id" parameter from the request
-			if args.TestItemID == "" {
-				return nil, nil, fmt.Errorf("test_item_id is required")
-			}
+		Name:        "get_test_item_by_id",
+		Description: "Get test item by ID",
+		InputSchema: &jsonschema.Schema{
+			Type:       "object",
+			Properties: properties,
+			Required:   []string{"test_item_id"},
+		},
+	}, utils.WithAnalytics(lr.analytics, "get_test_item_by_id", func(ctx context.Context, request *mcp.CallToolRequest, args GetTestItemByIdArgs) (*mcp.CallToolResult, any, error) {
+		project, err := utils.ExtractProject(ctx, args.ProjectKey)
+		if err != nil {
+			return nil, nil, err
+		}
+		// Extract the "test_item_id" parameter from the request
+		if args.TestItemID == "" {
+			return nil, nil, fmt.Errorf("test_item_id is required")
+		}
 
-			// Fetch the testItem with given ID
-			_, response, err := lr.client.TestItemAPI.GetTestItem(ctx, args.TestItemID, project).
-				Execute()
-			if err != nil {
-				return nil, nil, fmt.Errorf(
-					"%s: %w",
-					utils.ExtractResponseError(err, response),
-					err,
-				)
-			}
+		// Fetch the testItem with given ID
+		_, response, err := lr.client.TestItemAPI.GetTestItem(ctx, args.TestItemID, project).
+			Execute()
+		if err != nil {
+			return nil, nil, fmt.Errorf(
+				"%s: %w",
+				utils.ExtractResponseError(err, response),
+				err,
+			)
+		}
 
-			// Return the serialized testItem as a text result
-			return utils.ReadResponseBody(response)
-		})
+		// Return the serialized testItem as a text result
+		return utils.ReadResponseBody(response)
+	})
 }
 
 // resourceTestItem creates a resource template for accessing test items by URI.
 func (lr *TestItemResources) resourceTestItem() (*mcp.ResourceTemplate, mcp.ResourceHandler) {
 	return &mcp.ResourceTemplate{
-			Name:        "reportportal-test-item-by-id",
-			Description: "Access ReportPortal test items by URI (reportportal://{project}/testitem/{testItemId})",
-			MIMEType:    "application/json",
-			URITemplate: "reportportal://{project}/testitem/{testItemId}",
-		}, func(ctx context.Context, request *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
-			// Parse the URI to extract parameters
-			uri := request.Params.URI
-			project, testItemId, err := parseTestItemURI(uri)
-			if err != nil {
-				return nil, err
-			}
-
-			// Fetch the test item from ReportPortal
-			testItem, _, err := lr.client.TestItemAPI.GetTestItem(ctx, testItemId, project).
-				Execute()
-			if err != nil {
-				return nil, fmt.Errorf("failed to get test item: %w", err)
-			}
-
-			// Marshal the test item to JSON
-			testItemPayload, err := json.Marshal(testItem)
-			if err != nil {
-				return nil, fmt.Errorf("failed to marshal response: %w", err)
-			}
-
-			// Return the resource contents
-			return &mcp.ReadResourceResult{
-				Contents: []*mcp.ResourceContents{
-					{
-						URI:      uri,
-						MIMEType: "application/json",
-						Text:     string(testItemPayload),
-					},
-				},
-			}, nil
+		Name:        "reportportal-test-item-by-id",
+		Description: "Access ReportPortal test items by URI (reportportal://{projectKey}/testitem/{testItemId})",
+		MIMEType:    "application/json",
+		URITemplate: "reportportal://{projectKey}/testitem/{testItemId}",
+	}, func(ctx context.Context, request *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+		// Parse the URI to extract parameters
+		uri := request.Params.URI
+		project, testItemId, err := utils.ParseReportPortalURI(uri, "testitem")
+		if err != nil {
+			return nil, err
 		}
-}
 
-// parseTestItemURI parses a URI like "reportportal://{project}/testitem/{testItemId}"
-// and extracts the project and testItemId parameters.
-func parseTestItemURI(uri string) (project, testItemId string, err error) {
-	return utils.ParseReportPortalURI(uri, "testitem")
+		// Fetch the test item from ReportPortal
+		testItem, _, err := lr.client.TestItemAPI.GetTestItem(ctx, testItemId, project).
+			Execute()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get test item: %w", err)
+		}
+
+		// Marshal the test item to JSON
+		testItemPayload, err := json.Marshal(testItem)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal response: %w", err)
+		}
+
+		// Return the resource contents
+		return &mcp.ReadResourceResult{
+			Contents: []*mcp.ResourceContents{
+				{
+					URI:      uri,
+					MIMEType: "application/json",
+					Text:     string(testItemPayload),
+				},
+			},
+		}, nil
+	}
 }
 
 // GetTestItemAttachmentArgs holds params for get_test_item_attachment_by_id.
 type GetTestItemAttachmentArgs struct {
-	Project             string `json:"project"`
+	ProjectKey          string `json:"projectKey"`
 	AttachmentContentID string `json:"attachment-content-id"`
 }
 
-func (lr *TestItemResources) toolGetTestItemAttachment() (*mcp.Tool, ToolHandler[GetTestItemAttachmentArgs, any]) {
+// toolGetTestItemAttachment creates a tool to download a test item attachment by its content ID.
+// Images are returned as image content, text as text, and other binary data as base64 text.
+func (lr *TestItemResources) toolGetTestItemAttachment() (*mcp.Tool, utils.ToolHandler[GetTestItemAttachmentArgs, any]) {
 	properties := make(map[string]*jsonschema.Schema)
-	properties["project"] = lr.projectSchema()
+	pkSchema, err := utils.ProjectKeySchema(lr.defaultProjectKey)
+	if err != nil {
+		slog.Error("failed to build project key schema", "error", err)
+	}
+	properties[utils.ProjectKeyField] = pkSchema
 	properties["attachment-content-id"] = &jsonschema.Schema{
 		Type:        "string",
 		Description: "Attachment binary content ID",
 	}
 
 	return &mcp.Tool{
-			Name:        "get_test_item_attachment_by_id",
-			Description: "Get test item attachment by ID",
-			InputSchema: &jsonschema.Schema{
-				Type:       "object",
-				Properties: properties,
-				Required:   []string{"project", "attachment-content-id"},
-			},
-		}, utils.WithAnalytics(lr.analytics, "get_test_item_attachment_by_id", func(ctx context.Context, request *mcp.CallToolRequest, args GetTestItemAttachmentArgs) (*mcp.CallToolResult, any, error) {
-			project, err := utils.ExtractProject(ctx, args.Project)
-			if err != nil {
-				return nil, nil, err
-			}
+		Name:        "get_test_item_attachment_by_id",
+		Description: "Get test item attachment by ID",
+		InputSchema: &jsonschema.Schema{
+			Type:       "object",
+			Properties: properties,
+			Required:   []string{"attachment-content-id"},
+		},
+	}, utils.WithAnalytics(lr.analytics, "get_test_item_attachment_by_id", func(ctx context.Context, request *mcp.CallToolRequest, args GetTestItemAttachmentArgs) (*mcp.CallToolResult, any, error) {
+		project, err := utils.ExtractProject(ctx, args.ProjectKey)
+		if err != nil {
+			return nil, nil, err
+		}
 
-			// Extract the "attachment-content-id" parameter from the request
-			if args.AttachmentContentID == "" {
-				return nil, nil, fmt.Errorf("attachment-content-id is required")
-			}
-			attachmentId, err := strconv.ParseInt(args.AttachmentContentID, 10, 64)
-			if err != nil {
-				return nil, nil, fmt.Errorf(
-					"invalid attachment ID value: %s",
-					args.AttachmentContentID,
-				)
-			}
+		// Extract the "attachment-content-id" parameter from the request
+		if args.AttachmentContentID == "" {
+			return nil, nil, fmt.Errorf("attachment-content-id is required")
+		}
+		attachmentId, err := strconv.ParseInt(args.AttachmentContentID, 10, 64)
+		if err != nil {
+			return nil, nil, fmt.Errorf(
+				"invalid attachment ID value: %s",
+				args.AttachmentContentID,
+			)
+		}
 
-			// Fetch the attachment with given ID
-			response, err := lr.client.FileStorageAPI.GetFile(ctx, attachmentId, project).
-				Execute()
-			if err != nil {
-				return nil, nil, fmt.Errorf(
-					"%s: %w",
-					utils.ExtractResponseError(err, response),
-					err,
-				)
-			}
+		// Fetch the attachment with given ID
+		response, err := lr.client.FileStorageAPI.GetFile(ctx, attachmentId, project).
+			Execute()
+		if err != nil {
+			return nil, nil, fmt.Errorf(
+				"%s: %w",
+				utils.ExtractResponseError(err, response),
+				err,
+			)
+		}
 
-			// Handle response body with cleanup
-			rawBody, err := utils.ReadResponseBodyRaw(response)
-			if err != nil {
-				return nil, nil, fmt.Errorf("failed to read attachment body: %w", err)
-			}
+		// Handle response body with cleanup
+		rawBody, err := utils.ReadResponseBodyRaw(response)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to read attachment body: %w", err)
+		}
 
-			contentType := response.Header.Get("Content-Type")
+		contentType := response.Header.Get("Content-Type")
 
-			// Return appropriate MCP result type based on content type
-			if utils.IsTextContent(contentType) {
-				return &mcp.CallToolResult{
-					Content: []mcp.Content{
-						&mcp.TextContent{
-							Text: fmt.Sprintf(
-								"Text content (%s, %d bytes)\n%s",
-								contentType,
-								len(rawBody),
-								string(rawBody),
-							),
-						},
+		// Return appropriate MCP result type based on content type
+		if utils.IsTextContent(contentType) {
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{
+					&mcp.TextContent{
+						Text: fmt.Sprintf(
+							"Text content (%s, %d bytes)\n%s",
+							contentType,
+							len(rawBody),
+							string(rawBody),
+						),
 					},
-				}, nil, nil
-			} else {
-				return &mcp.CallToolResult{
-					Content: []mcp.Content{
-						&mcp.TextContent{
-							Text: fmt.Sprintf(
-								"Binary content (%s, %d bytes)\nBase64: %s",
-								contentType,
-								len(rawBody),
-								base64.StdEncoding.EncodeToString(rawBody),
-							),
-						},
+				},
+			}, nil, nil
+		} else if imageType, ok := utils.ImageMediaType(contentType); ok {
+			// Return images as MCP image content so clients can display them to the model
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{
+					&mcp.ImageContent{
+						Data:     rawBody,
+						MIMEType: imageType,
 					},
-				}, nil, nil
-			}
-		})
+				},
+			}, nil, nil
+		} else {
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{
+					&mcp.TextContent{
+						Text: fmt.Sprintf(
+							"Binary content (%s, %d bytes)\nBase64: %s",
+							contentType,
+							len(rawBody),
+							base64.StdEncoding.EncodeToString(rawBody),
+						),
+					},
+				},
+			}, nil, nil
+		}
+	})
 }
 
 // GetTestItemLogsByFilterArgs holds filter and pagination params for get_test_item_logs_by_filter.
 type GetTestItemLogsByFilterArgs struct {
-	Project               string `json:"project"`
+	ProjectKey            string `json:"projectKey"`
 	ParentItemID          string `json:"parent-item-id"`
 	Page                  uint   `json:"page"`
 	PageSize              uint   `json:"page-size"`
@@ -637,9 +582,13 @@ type GetTestItemLogsByFilterArgs struct {
 }
 
 // toolGetTestItemLogsByFilter creates a tool to get test items logs for a specific launch.
-func (lr *TestItemResources) toolGetTestItemLogsByFilter() (*mcp.Tool, ToolHandler[GetTestItemLogsByFilterArgs, any]) {
+func (lr *TestItemResources) toolGetTestItemLogsByFilter() (*mcp.Tool, utils.ToolHandler[GetTestItemLogsByFilterArgs, any]) {
 	properties := make(map[string]*jsonschema.Schema)
-	properties["project"] = lr.projectSchema()
+	pkSchema, err := utils.ProjectKeySchema(lr.defaultProjectKey)
+	if err != nil {
+		slog.Error("failed to build project key schema", "error", err)
+	}
+	properties[utils.ProjectKeyField] = pkSchema
 	properties["parent-item-id"] = &jsonschema.Schema{
 		Type:        "string",
 		Description: "Items with specific Parent Item ID, this is a required parameter",
@@ -647,22 +596,22 @@ func (lr *TestItemResources) toolGetTestItemLogsByFilter() (*mcp.Tool, ToolHandl
 	properties["page"] = &jsonschema.Schema{
 		Type:        "integer",
 		Description: "Page number",
-		Default:     mustMarshalJSON(utils.FirstPage),
+		Default:     utils.MustMarshalJSON(utils.FirstPage),
 	}
 	properties["page-size"] = &jsonschema.Schema{
 		Type:        "integer",
 		Description: "Page size",
-		Default:     mustMarshalJSON(utils.DefaultPageSize),
+		Default:     utils.MustMarshalJSON(utils.DefaultPageSize),
 	}
 	properties["page-sort"] = &jsonschema.Schema{
 		Type:        "string",
 		Description: "Sorting fields and direction",
-		Default:     mustMarshalJSON(utils.DefaultSortingForLogs),
+		Default:     utils.MustMarshalJSON(utils.DefaultSortingForLogs),
 	}
 	properties["filter-gte-level"] = &jsonschema.Schema{
 		Type:        "string",
 		Description: "Get logs only with specific log level",
-		Default:     mustMarshalJSON(utils.DefaultItemLogLevel),
+		Default:     utils.MustMarshalJSON(utils.DefaultItemLogLevel),
 	}
 	properties["filter-cnt-message"] = &jsonschema.Schema{
 		Type:        "string",
@@ -672,7 +621,7 @@ func (lr *TestItemResources) toolGetTestItemLogsByFilter() (*mcp.Tool, ToolHandl
 		Type:        "string",
 		Description: "Logs with attachment or without, can be a list of values: TRUE, FALSE, -- (default, filter is not applied)",
 		Enum:        []any{"TRUE", "FALSE", "--"},
-		Default:     mustMarshalJSON("--"),
+		Default:     utils.MustMarshalJSON("--"),
 	}
 	properties["filter-in-status"] = &jsonschema.Schema{
 		Type:        "string",
@@ -680,83 +629,83 @@ func (lr *TestItemResources) toolGetTestItemLogsByFilter() (*mcp.Tool, ToolHandl
 	}
 
 	return &mcp.Tool{
-			Name:        "get_test_item_logs_by_filter",
-			Description: "Get list of logs for test item with specific item ID with optional filters",
-			InputSchema: &jsonschema.Schema{
-				Type:       "object",
-				Properties: properties,
-				Required:   []string{"project", "parent-item-id"},
-			},
-		}, utils.WithAnalytics(lr.analytics, "get_test_item_logs_by_filter", func(ctx context.Context, request *mcp.CallToolRequest, args GetTestItemLogsByFilterArgs) (*mcp.CallToolResult, any, error) {
-			slog.Debug("START PROCESSING")
-			project, err := utils.ExtractProject(ctx, args.Project)
-			if err != nil {
-				return nil, nil, err
-			}
+		Name:        "get_test_item_logs_by_filter",
+		Description: "Get list of logs for test item with specific item ID with optional filters",
+		InputSchema: &jsonschema.Schema{
+			Type:       "object",
+			Properties: properties,
+			Required:   []string{"parent-item-id"},
+		},
+	}, utils.WithAnalytics(lr.analytics, "get_test_item_logs_by_filter", func(ctx context.Context, request *mcp.CallToolRequest, args GetTestItemLogsByFilterArgs) (*mcp.CallToolResult, any, error) {
+		slog.Debug("START PROCESSING")
+		project, err := utils.ExtractProject(ctx, args.ProjectKey)
+		if err != nil {
+			return nil, nil, err
+		}
 
-			if args.ParentItemID == "" {
-				return nil, nil, fmt.Errorf("parent-item-id is required")
-			}
+		if args.ParentItemID == "" {
+			return nil, nil, fmt.Errorf("parent-item-id is required")
+		}
 
-			// Process optional log level filter
-			urlValues := url.Values{}
-			// Add optional filters to urlValues if they have values
-			if args.FilterGteLevel != "" {
-				urlValues.Add("filter.gte.level", args.FilterGteLevel)
-			}
-			if args.FilterCntMessage != "" {
-				urlValues.Add("filter.cnt.message", args.FilterCntMessage)
-			}
-			if args.FilterExBinaryContent != "--" {
-				urlValues.Add(
-					"filter.ex.binaryContent",
-					strconv.FormatBool(args.FilterExBinaryContent == "TRUE"),
-				)
-			}
-			if args.FilterInStatus != "" {
-				urlValues.Add("filter.in.status", args.FilterInStatus)
-			}
-			// Validate ParentItemID and convert it to int64
-			parentIdValue, err := strconv.ParseInt(args.ParentItemID, 10, 64)
-			if err != nil || parentIdValue < 0 {
-				return nil, nil, fmt.Errorf("invalid parent filter ID value: %s", args.ParentItemID)
-			}
-
-			ctxWithParams := utils.WithQueryParams(ctx, urlValues)
-			// Prepare "requiredUrlParams" for the API request because the ReportPortal API expects them in a specific format
-			requiredUrlParams := map[string]string{
-				"parentId": args.ParentItemID,
-			}
-			// Build the API request with filters
-			apiRequest := lr.client.LogAPI.GetNestedItems(ctxWithParams, parentIdValue, project).
-				Params(requiredUrlParams)
-
-			// Apply pagination parameters
-			apiRequest = utils.ApplyPaginationOptions(
-				apiRequest,
-				args.Page,
-				args.PageSize,
-				args.PageSort,
-				utils.DefaultSortingForLogs,
+		// Process optional log level filter
+		urlValues := url.Values{}
+		// Add optional filters to urlValues if they have values
+		if args.FilterGteLevel != "" {
+			urlValues.Add("filter.gte.level", args.FilterGteLevel)
+		}
+		if args.FilterCntMessage != "" {
+			urlValues.Add("filter.cnt.message", args.FilterCntMessage)
+		}
+		if args.FilterExBinaryContent != "--" {
+			urlValues.Add(
+				"filter.ex.binaryContent",
+				strconv.FormatBool(args.FilterExBinaryContent == "TRUE"),
 			)
+		}
+		if args.FilterInStatus != "" {
+			urlValues.Add("filter.in.status", args.FilterInStatus)
+		}
+		// Validate ParentItemID and convert it to int64
+		parentIdValue, err := strconv.ParseInt(args.ParentItemID, 10, 64)
+		if err != nil || parentIdValue < 0 {
+			return nil, nil, fmt.Errorf("invalid parent filter ID value: %s", args.ParentItemID)
+		}
 
-			// Execute the request
-			_, response, err := apiRequest.Execute()
-			if err != nil {
-				return nil, nil, fmt.Errorf(
-					"%s: %w",
-					utils.ExtractResponseError(err, response),
-					err,
-				)
-			}
+		ctxWithParams := utils.WithQueryParams(ctx, urlValues)
+		// Prepare "requiredUrlParams" for the API request because the ReportPortal API expects them in a specific format
+		requiredUrlParams := map[string]string{
+			"parentId": args.ParentItemID,
+		}
+		// Build the API request with filters
+		apiRequest := lr.client.LogAPI.GetNestedItems(ctxWithParams, parentIdValue, project).
+			Params(requiredUrlParams)
 
-			return utils.ReadResponseBody(response)
-		})
+		// Apply pagination parameters
+		apiRequest = utils.ApplyPaginationOptions(
+			apiRequest,
+			args.Page,
+			args.PageSize,
+			args.PageSort,
+			utils.DefaultSortingForLogs,
+		)
+
+		// Execute the request
+		_, response, err := apiRequest.Execute()
+		if err != nil {
+			return nil, nil, fmt.Errorf(
+				"%s: %w",
+				utils.ExtractResponseError(err, response),
+				err,
+			)
+		}
+
+		return utils.ReadResponseBody(response)
+	})
 }
 
 // GetTestSuitesByFilterArgs holds filter and pagination params for get_test_suites_by_filter.
 type GetTestSuitesByFilterArgs struct {
-	Project                     string `json:"project"`
+	ProjectKey                  string `json:"projectKey"`
 	LaunchID                    uint32 `json:"launch-id"`
 	Page                        uint   `json:"page"`
 	PageSize                    uint   `json:"page-size"`
@@ -771,9 +720,13 @@ type GetTestSuitesByFilterArgs struct {
 }
 
 // toolGetTestSuitesByFilter creates a tool to get test suites for a specific launch.
-func (lr *TestItemResources) toolGetTestSuitesByFilter() (*mcp.Tool, ToolHandler[GetTestSuitesByFilterArgs, any]) {
+func (lr *TestItemResources) toolGetTestSuitesByFilter() (*mcp.Tool, utils.ToolHandler[GetTestSuitesByFilterArgs, any]) {
 	properties := make(map[string]*jsonschema.Schema)
-	properties["project"] = lr.projectSchema()
+	pkSchema, err := utils.ProjectKeySchema(lr.defaultProjectKey)
+	if err != nil {
+		slog.Error("failed to build project key schema", "error", err)
+	}
+	properties[utils.ProjectKeyField] = pkSchema
 	properties["launch-id"] = &jsonschema.Schema{
 		Type:        "integer",
 		Description: "Suites with specific Launch ID, this is a required parameter",
@@ -816,189 +769,164 @@ func (lr *TestItemResources) toolGetTestSuitesByFilter() (*mcp.Tool, ToolHandler
 	}
 
 	return &mcp.Tool{
-			Name:        "get_test_suites_by_filter",
-			Description: "Get list of test suites for a specific launch ID with optional filters",
-			InputSchema: &jsonschema.Schema{
-				Type:       "object",
-				Properties: properties,
-				Required:   []string{"project", "launch-id"},
-			},
-		}, utils.WithAnalytics(lr.analytics, "get_test_suites_by_filter", func(ctx context.Context, request *mcp.CallToolRequest, args GetTestSuitesByFilterArgs) (*mcp.CallToolResult, any, error) {
-			slog.Debug("START PROCESSING")
-			project, err := utils.ExtractProject(ctx, args.Project)
-			if err != nil {
-				return nil, nil, err
-			}
+		Name:        "get_test_suites_by_filter",
+		Description: "Get list of test suites for a specific launch ID with optional filters",
+		InputSchema: &jsonschema.Schema{
+			Type:       "object",
+			Properties: properties,
+			Required:   []string{"launch-id"},
+		},
+	}, utils.WithAnalytics(lr.analytics, "get_test_suites_by_filter", func(ctx context.Context, request *mcp.CallToolRequest, args GetTestSuitesByFilterArgs) (*mcp.CallToolResult, any, error) {
+		slog.Debug("START PROCESSING")
+		project, err := utils.ExtractProject(ctx, args.ProjectKey)
+		if err != nil {
+			return nil, nil, err
+		}
 
-			if args.LaunchID == 0 {
-				return nil, nil, fmt.Errorf("launch-id is required")
-			}
+		if args.LaunchID == 0 {
+			return nil, nil, fmt.Errorf("launch-id is required")
+		}
 
-			urlValues := url.Values{
-				"providerType":   {utils.DefaultProviderType},
-				"filter.in.type": {utils.DefaultFilterInTypeSuites},
-			}
-			urlValues.Add("launchId", strconv.FormatUint(uint64(args.LaunchID), 10))
+		urlValues := url.Values{
+			"providerType":   {utils.DefaultProviderType},
+			"filter.in.type": {utils.DefaultFilterInTypeSuites},
+		}
+		urlValues.Add("launchId", strconv.FormatUint(uint64(args.LaunchID), 10))
 
-			// Add optional filters to urlValues if they have values
-			if args.FilterCntName != "" {
-				urlValues.Add("filter.cnt.name", args.FilterCntName)
-			}
-			if args.FilterCntDescription != "" {
-				urlValues.Add("filter.cnt.description", args.FilterCntDescription)
-			}
-			if args.FilterEqParentId != "" {
-				_, err := strconv.ParseUint(args.FilterEqParentId, 10, 64)
-				if err != nil {
-					return nil, nil, fmt.Errorf(
-						"invalid parent filter ID value: %s",
-						args.FilterEqParentId,
-					)
-				}
-				urlValues.Add("filter.eq.parentId", args.FilterEqParentId)
-			}
-
-			filterStartTime, err := utils.ProcessStartTimeFilter(
-				args.FilterBtwStartTimeFrom,
-				args.FilterBtwStartTimeTo,
-			)
-			if err != nil {
-				return nil, nil, err
-			}
-			if filterStartTime != "" {
-				urlValues.Add("filter.btw.startTime", filterStartTime)
-			}
-
-			ctxWithParams := utils.WithQueryParams(ctx, urlValues)
-			// Prepare "requiredUrlParams" for the API request because the ReportPortal API v2 expects them in a specific format
-			requiredUrlParams := map[string]string{
-				"launchId": strconv.FormatUint(uint64(args.LaunchID), 10),
-			}
-			// Build the API request with filters
-			apiRequest := lr.client.TestItemAPI.GetTestItemsV2(ctxWithParams, project).
-				Params(requiredUrlParams)
-
-			// Apply pagination parameters
-			apiRequest = utils.ApplyPaginationOptions(
-				apiRequest,
-				args.Page,
-				args.PageSize,
-				args.PageSort,
-				utils.DefaultSortingForSuites,
-			)
-
-			// Process attribute keys and combine with composite attributes
-			filterAttributes := utils.ProcessAttributeKeys(
-				args.FilterHasCompositeAttribute,
-				args.FilterHasAttributeKey,
-			)
-			if filterAttributes != "" {
-				apiRequest = apiRequest.FilterHasCompositeAttribute(filterAttributes)
-			}
-
-			// Execute the request
-			_, response, err := apiRequest.Execute()
+		// Add optional filters to urlValues if they have values
+		if args.FilterCntName != "" {
+			urlValues.Add("filter.cnt.name", args.FilterCntName)
+		}
+		if args.FilterCntDescription != "" {
+			urlValues.Add("filter.cnt.description", args.FilterCntDescription)
+		}
+		if args.FilterEqParentId != "" {
+			_, err := strconv.ParseUint(args.FilterEqParentId, 10, 64)
 			if err != nil {
 				return nil, nil, fmt.Errorf(
-					"%s: %w",
-					utils.ExtractResponseError(err, response),
-					err,
+					"invalid parent filter ID value: %s",
+					args.FilterEqParentId,
 				)
 			}
+			urlValues.Add("filter.eq.parentId", args.FilterEqParentId)
+		}
 
-			// Return the serialized test suites as a text result
-			return utils.ReadResponseBody(response)
-		})
+		filterStartTime, err := utils.ProcessStartTimeFilter(
+			args.FilterBtwStartTimeFrom,
+			args.FilterBtwStartTimeTo,
+		)
+		if err != nil {
+			return nil, nil, err
+		}
+		if filterStartTime != "" {
+			urlValues.Add("filter.btw.startTime", filterStartTime)
+		}
+
+		ctxWithParams := utils.WithQueryParams(ctx, urlValues)
+		// Prepare "requiredUrlParams" for the API request because the ReportPortal API v2 expects them in a specific format
+		requiredUrlParams := map[string]string{
+			"launchId": strconv.FormatUint(uint64(args.LaunchID), 10),
+		}
+		// Build the API request with filters
+		apiRequest := lr.client.TestItemAPI.GetTestItemsV2(ctxWithParams, project).
+			Params(requiredUrlParams)
+
+		// Apply pagination parameters
+		apiRequest = utils.ApplyPaginationOptions(
+			apiRequest,
+			args.Page,
+			args.PageSize,
+			args.PageSort,
+			utils.DefaultSortingForSuites,
+		)
+
+		// Process attribute keys and combine with composite attributes
+		filterAttributes := utils.ProcessAttributeKeys(
+			args.FilterHasCompositeAttribute,
+			args.FilterHasAttributeKey,
+		)
+		if filterAttributes != "" {
+			apiRequest = apiRequest.FilterHasCompositeAttribute(filterAttributes)
+		}
+
+		// Execute the request
+		_, response, err := apiRequest.Execute()
+		if err != nil {
+			return nil, nil, fmt.Errorf(
+				"%s: %w",
+				utils.ExtractResponseError(err, response),
+				err,
+			)
+		}
+
+		// Return the serialized test suites as a text result
+		return utils.ReadResponseBody(response)
+	})
 }
 
-// getDefectTypesFromJson extracts defect types from the project JSON response.
-// It parses the raw JSON and returns the configuration/subTypes field as a JSON string.
-func getDefectTypesFromJson(rawBody []byte) (string, error) {
-	// Parse the JSON response
-	var projectData map[string]interface{}
-	if err := json.Unmarshal(rawBody, &projectData); err != nil {
-		return "", fmt.Errorf("failed to parse response JSON: %v", err)
-	}
-
-	// Extract configuration/subtypes
-	configuration, ok := projectData["configuration"].(map[string]interface{})
-	if !ok {
-		return "", fmt.Errorf("configuration field not found or invalid in response")
-	}
-
-	subtypes, ok := configuration["subTypes"]
-	if !ok {
-		return "", fmt.Errorf("configuration/subTypes field not found in response")
-	}
-
-	// Serialize only the subtypes
-	subtypesJSON, err := json.Marshal(subtypes)
-	if err != nil {
-		return "", fmt.Errorf("failed to serialize defect types: %v", err)
-	}
-
-	return string(subtypesJSON), nil
-}
-
-// ProjectArgs holds just the project parameter.
-type ProjectArgs struct {
-	Project string `json:"project"`
+// ProjectKeyArgs holds just the projectKey parameter.
+type ProjectKeyArgs struct {
+	ProjectKey string `json:"projectKey"`
 }
 
 // toolGetProjectDefectTypes creates a tool to retrieve all defect types for a specific project.
-func (lr *TestItemResources) toolGetProjectDefectTypes() (*mcp.Tool, ToolHandler[ProjectArgs, any]) {
+func (lr *TestItemResources) toolGetProjectDefectTypes() (*mcp.Tool, utils.ToolHandler[ProjectKeyArgs, any]) {
 	properties := make(map[string]*jsonschema.Schema)
-	properties["project"] = lr.projectSchema()
+	pkSchema, err := utils.ProjectKeySchema(lr.defaultProjectKey)
+	if err != nil {
+		slog.Error("failed to build project key schema", "error", err)
+	}
+	properties[utils.ProjectKeyField] = pkSchema
 
 	return &mcp.Tool{
-			Name:        "get_project_defect_types",
-			Description: "Get all defect types for a specific project, returns a JSON which contains a list of defect types in the 'configuration/subtypes' array and represents the defect type ID. Example: {\"NO_DEFECT\": { \"locator\": \"nd001\" }} (where NO_DEFECT is the defect type name, nd001 is the defect type unique id)",
-			InputSchema: &jsonschema.Schema{
-				Type:       "object",
-				Properties: properties,
-				Required:   []string{"project"},
+		Name:        "get_project_defect_types",
+		Description: "Get all defect types for a specific project, returns a JSON which contains a list of defect types in the 'configuration/subtypes' array and represents the defect type ID. Example: {\"NO_DEFECT\": { \"locator\": \"nd001\" }} (where NO_DEFECT is the defect type name, nd001 is the defect type unique id)",
+		InputSchema: &jsonschema.Schema{
+			Type:       "object",
+			Properties: properties,
+			Required:   nil,
+		},
+	}, utils.WithAnalytics(lr.analytics, "get_project_defect_types", func(ctx context.Context, request *mcp.CallToolRequest, args ProjectKeyArgs) (*mcp.CallToolResult, any, error) {
+		project, err := utils.ExtractProject(ctx, args.ProjectKey)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		// Fetch the project with given ID
+		_, response, err := lr.client.ProjectAPI.GetProject(ctx, project).
+			Execute()
+		if err != nil {
+			return nil, nil, fmt.Errorf(
+				"%s: %w",
+				utils.ExtractResponseError(err, response),
+				err,
+			)
+		}
+
+		// Read and parse the response to extract configuration/subtypes
+		rawBody, err := utils.ReadResponseBodyRaw(response)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to read response body: %w", err)
+		}
+
+		// Extract defect types from JSON
+		defectTypesJSON, err := utils.GetDefectTypesFromJSON(rawBody)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		// Return only the defect types data
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{Text: defectTypesJSON},
 			},
-		}, utils.WithAnalytics(lr.analytics, "get_project_defect_types", func(ctx context.Context, request *mcp.CallToolRequest, args ProjectArgs) (*mcp.CallToolResult, any, error) {
-			project, err := utils.ExtractProject(ctx, args.Project)
-			if err != nil {
-				return nil, nil, err
-			}
-
-			// Fetch the project with given ID
-			_, response, err := lr.client.ProjectAPI.GetProject(ctx, project).
-				Execute()
-			if err != nil {
-				return nil, nil, fmt.Errorf(
-					"%s: %w",
-					utils.ExtractResponseError(err, response),
-					err,
-				)
-			}
-
-			// Read and parse the response to extract configuration/subtypes
-			rawBody, err := utils.ReadResponseBodyRaw(response)
-			if err != nil {
-				return nil, nil, fmt.Errorf("failed to read response body: %w", err)
-			}
-
-			// Extract defect types from JSON
-			defectTypesJSON, err := getDefectTypesFromJson(rawBody)
-			if err != nil {
-				return nil, nil, err
-			}
-
-			// Return only the defect types data
-			return &mcp.CallToolResult{
-				Content: []mcp.Content{
-					&mcp.TextContent{Text: defectTypesJSON},
-				},
-			}, nil, nil
-		})
+		}, nil, nil
+	})
 }
 
 // UpdateDefectTypeArgs holds params for update_defect_type_for_test_items.
 type UpdateDefectTypeArgs struct {
-	Project           string   `json:"project"`
+	ProjectKey        string   `json:"projectKey"`
 	TestItemsIDs      []string `json:"test_items_ids"`
 	DefectTypeID      string   `json:"defect_type_id"`
 	DefectTypeComment string   `json:"defect_type_comment"`
@@ -1006,9 +934,13 @@ type UpdateDefectTypeArgs struct {
 }
 
 // toolUpdateDefectTypeForTestItems creates a tool to update the defect type for a list of specific test items.
-func (lr *TestItemResources) toolUpdateDefectTypeForTestItems() (*mcp.Tool, ToolHandler[UpdateDefectTypeArgs, any]) {
+func (lr *TestItemResources) toolUpdateDefectTypeForTestItems() (*mcp.Tool, utils.ToolHandler[UpdateDefectTypeArgs, any]) {
 	properties := make(map[string]*jsonschema.Schema)
-	properties["project"] = lr.projectSchema()
+	pkSchema, err := utils.ProjectKeySchema(lr.defaultProjectKey)
+	if err != nil {
+		slog.Error("failed to build project key schema", "error", err)
+	}
+	properties[utils.ProjectKeyField] = pkSchema
 	properties["test_items_ids"] = &jsonschema.Schema{
 		Type:        "array",
 		Description: "Array of test items IDs",
@@ -1030,81 +962,85 @@ func (lr *TestItemResources) toolUpdateDefectTypeForTestItems() (*mcp.Tool, Tool
 	}
 
 	return &mcp.Tool{
-			Name:        "update_defect_type_for_test_items",
-			Description: "This tool is used to update the defect type for a specific test items. The defect type has a unique id which can be received from the tool 'get_project_defect_types'. Example: {\"NO_DEFECT\": { \"locator\": \"nd001\" }} (where NO_DEFECT is the defect type name, nd001 is the defect type unique id)",
-			InputSchema: &jsonschema.Schema{
-				Type:       "object",
-				Properties: properties,
-				Required:   []string{"project", "test_items_ids", "defect_type_id"},
-			},
-		}, utils.WithAnalytics(lr.analytics, "update_defect_type_for_test_items", func(ctx context.Context, request *mcp.CallToolRequest, args UpdateDefectTypeArgs) (*mcp.CallToolResult, any, error) {
-			project, err := utils.ExtractProject(ctx, args.Project)
+		Name:        "update_defect_type_for_test_items",
+		Description: "This tool is used to update the defect type for a specific test items. The defect type has a unique id which can be received from the tool 'get_project_defect_types'. Example: {\"NO_DEFECT\": { \"locator\": \"nd001\" }} (where NO_DEFECT is the defect type name, nd001 is the defect type unique id)",
+		InputSchema: &jsonschema.Schema{
+			Type:       "object",
+			Properties: properties,
+			Required:   []string{"test_items_ids", "defect_type_id"},
+		},
+	}, utils.WithAnalytics(lr.analytics, "update_defect_type_for_test_items", func(ctx context.Context, request *mcp.CallToolRequest, args UpdateDefectTypeArgs) (*mcp.CallToolResult, any, error) {
+		project, err := utils.ExtractProject(ctx, args.ProjectKey)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		// Extract the "defect_type_id" parameter from the request
+		if args.DefectTypeID == "" {
+			return nil, nil, fmt.Errorf("defect_type_id is required")
+		}
+
+		if len(args.TestItemsIDs) == 0 {
+			return nil, nil, fmt.Errorf(
+				"test_items_ids is required and must be a non-empty array",
+			)
+		}
+
+		// Build the list of issues
+		issues := make(
+			[]openapi.ComEpamReportportalBaseModelIssueIssueDefinition,
+			0,
+			len(args.TestItemsIDs),
+		)
+		var commentPtr *string
+		if args.DefectTypeComment != "" {
+			commentPtr = &args.DefectTypeComment
+		}
+		for _, testItemIdStr := range args.TestItemsIDs {
+			testItemId, err := strconv.ParseInt(testItemIdStr, 10, 64)
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, fmt.Errorf("invalid test item ID '%s': %w", testItemIdStr, err)
 			}
-
-			// Extract the "defect_type_id" parameter from the request
-			if args.DefectTypeID == "" {
-				return nil, nil, fmt.Errorf("defect_type_id is required")
-			}
-
-			if len(args.TestItemsIDs) == 0 {
+			if testItemId <= 0 {
 				return nil, nil, fmt.Errorf(
-					"test_items_ids is required and must be a non-empty array",
+					"invalid non-positive test item ID '%s'",
+					testItemIdStr,
 				)
 			}
+			issues = append(issues, openapi.ComEpamReportportalBaseModelIssueIssueDefinition{
+				TestItemId: testItemId,
+				Issue: openapi.ComEpamReportportalBaseReportingIssue{
+					IssueType:      args.DefectTypeID,
+					AutoAnalyzed:   openapi.PtrBool(false),
+					Comment:        commentPtr,
+					IgnoreAnalyzer: args.IgnoreAnalyzer,
+				},
+			})
+		}
 
-			// Build the list of issues
-			issues := make([]openapi.IssueDefinition, 0, len(args.TestItemsIDs))
-			var commentPtr *string
-			if args.DefectTypeComment != "" {
-				commentPtr = &args.DefectTypeComment
-			}
-			for _, testItemIdStr := range args.TestItemsIDs {
-				testItemId, err := strconv.ParseInt(testItemIdStr, 10, 64)
-				if err != nil {
-					return nil, nil, fmt.Errorf("invalid test item ID '%s': %w", testItemIdStr, err)
-				}
-				if testItemId <= 0 {
-					return nil, nil, fmt.Errorf(
-						"invalid non-positive test item ID '%s'",
-						testItemIdStr,
-					)
-				}
-				issues = append(issues, openapi.IssueDefinition{
-					TestItemId: testItemId,
-					Issue: openapi.Issue{
-						IssueType:      args.DefectTypeID,
-						AutoAnalyzed:   openapi.PtrBool(false),
-						Comment:        commentPtr,
-						IgnoreAnalyzer: args.IgnoreAnalyzer,
-					},
-				})
-			}
+		apiRequest := lr.client.TestItemAPI.DefineTestItemIssueType(ctx, project).
+			ComEpamReportportalBaseModelIssueDefineIssueRQ(openapi.ComEpamReportportalBaseModelIssueDefineIssueRQ{
+				Issues: issues,
+			})
 
-			apiRequest := lr.client.TestItemAPI.DefineTestItemIssueType(ctx, project).
-				DefineIssueRQ(openapi.DefineIssueRQ{
-					Issues: issues,
-				})
+		// Execute the request
+		_, response, err := apiRequest.Execute()
+		if err != nil {
+			return nil, nil, fmt.Errorf(
+				"%s: %w",
+				utils.ExtractResponseError(err, response),
+				err,
+			)
+		}
 
-			// Execute the request
-			_, response, err := apiRequest.Execute()
-			if err != nil {
-				return nil, nil, fmt.Errorf(
-					"%s: %w",
-					utils.ExtractResponseError(err, response),
-					err,
-				)
-			}
-
-			// Return the serialized testItem as a text result
-			return utils.ReadResponseBody(response)
-		})
+		// Return the serialized testItem as a text result
+		return utils.ReadResponseBody(response)
+	})
 }
 
 // GetTestItemsHistoryArgs holds filter and pagination params for get_test_items_history.
 type GetTestItemsHistoryArgs struct {
-	Project                     string   `json:"project"`
+	ProjectKey                  string   `json:"projectKey"`
 	FilterEqLaunchId            int32    `json:"filter-eq-launchId"`
 	FilterEqParentId            uint64   `json:"filter-eq-parentId"`
 	Page                        uint     `json:"page"`
@@ -1128,9 +1064,13 @@ type GetTestItemsHistoryArgs struct {
 }
 
 // toolGetTestItemsHistory creates a tool to retrieve history of test items.
-func (lr *TestItemResources) toolGetTestItemsHistory() (*mcp.Tool, ToolHandler[GetTestItemsHistoryArgs, any]) {
+func (lr *TestItemResources) toolGetTestItemsHistory() (*mcp.Tool, utils.ToolHandler[GetTestItemsHistoryArgs, any]) {
 	properties := make(map[string]*jsonschema.Schema)
-	properties["project"] = lr.projectSchema()
+	pkSchema, err := utils.ProjectKeySchema(lr.defaultProjectKey)
+	if err != nil {
+		slog.Error("failed to build project key schema", "error", err)
+	}
+	properties[utils.ProjectKeyField] = pkSchema
 	properties["filter-eq-launchId"] = &jsonschema.Schema{
 		Type:        "integer",
 		Description: "Filter by Launch ID. Conditionally required if Parent ID is not provided.",
@@ -1149,7 +1089,7 @@ func (lr *TestItemResources) toolGetTestItemsHistory() (*mcp.Tool, ToolHandler[G
 	properties["historyDepth"] = &jsonschema.Schema{
 		Type:        "integer",
 		Description: "Depth of history to retrieve. Allowed values: 1–30.",
-		Default:     mustMarshalJSON(10),
+		Default:     utils.MustMarshalJSON(10),
 		Minimum:     openapi.PtrFloat64(1),
 		Maximum:     openapi.PtrFloat64(30),
 	}
@@ -1157,7 +1097,7 @@ func (lr *TestItemResources) toolGetTestItemsHistory() (*mcp.Tool, ToolHandler[G
 		Type:        "string",
 		Description: "History base: 'table' collects history from all launches (default), 'line' collects history from launches with the same name.",
 		Enum:        []any{"table", "line"},
-		Default:     mustMarshalJSON("table"),
+		Default:     utils.MustMarshalJSON("table"),
 	}
 	properties["filter-cnt-name"] = &jsonschema.Schema{
 		Type:        "string",
@@ -1202,7 +1142,7 @@ func (lr *TestItemResources) toolGetTestItemsHistory() (*mcp.Tool, ToolHandler[G
 		Type:        "string",
 		Description: "Filter items that have retries (TRUE), don't have retries (FALSE), or skip this filter (--)",
 		Enum:        []any{"TRUE", "FALSE", "--"},
-		Default:     mustMarshalJSON("--"),
+		Default:     utils.MustMarshalJSON("--"),
 	}
 	properties["filter-cnt-issueComment"] = &jsonschema.Schema{
 		Type:        "string",
@@ -1226,125 +1166,125 @@ func (lr *TestItemResources) toolGetTestItemsHistory() (*mcp.Tool, ToolHandler[G
 	}
 
 	return &mcp.Tool{
-			Name:        "get_test_items_history",
-			Description: "Get history of test items for a specific launch or parent suite. Either filter-eq-launchId or filter-eq-parentId must be provided.",
-			InputSchema: &jsonschema.Schema{
-				Type:       "object",
-				Properties: properties,
-				Required:   []string{"project"},
-			},
-		}, utils.WithAnalytics(lr.analytics, "get_test_items_history", func(ctx context.Context, request *mcp.CallToolRequest, args GetTestItemsHistoryArgs) (*mcp.CallToolResult, any, error) {
-			slog.Debug("START PROCESSING")
-			project, err := utils.ExtractProject(ctx, args.Project)
-			if err != nil {
-				return nil, nil, err
-			}
+		Name:        "get_test_items_history",
+		Description: "Get history of test items for a specific launch or parent suite. Either filter-eq-launchId or filter-eq-parentId must be provided.",
+		InputSchema: &jsonschema.Schema{
+			Type:       "object",
+			Properties: properties,
+			Required:   nil,
+		},
+	}, utils.WithAnalytics(lr.analytics, "get_test_items_history", func(ctx context.Context, request *mcp.CallToolRequest, args GetTestItemsHistoryArgs) (*mcp.CallToolResult, any, error) {
+		slog.Debug("START PROCESSING")
+		project, err := utils.ExtractProject(ctx, args.ProjectKey)
+		if err != nil {
+			return nil, nil, err
+		}
 
-			if args.FilterEqLaunchId == 0 && args.FilterEqParentId == 0 {
-				return nil, nil, fmt.Errorf(
-					"either filter-eq-launchId or filter-eq-parentId is required",
-				)
-			}
-
-			if args.HistoryDepth != 0 && (args.HistoryDepth < 1 || args.HistoryDepth > 30) {
-				return nil, nil, fmt.Errorf("historyDepth must be between 1 and 30")
-			}
-
-			urlValues := url.Values{
-				"filter.eq.hasStats":    {utils.DefaultFilterEqHasStats},
-				"filter.eq.hasChildren": {utils.DefaultFilterEqHasChildren},
-				"filter.in.type":        {utils.DefaultFilterInType},
-			}
-
-			if args.FilterEqParentId != 0 {
-				urlValues.Add(
-					"filter.eq.parentId",
-					strconv.FormatUint(uint64(args.FilterEqParentId), 10),
-				)
-			}
-
-			if args.FilterCntName != "" {
-				urlValues.Add("filter.cnt.name", args.FilterCntName)
-			}
-			if args.FilterCntDescription != "" {
-				urlValues.Add("filter.cnt.description", args.FilterCntDescription)
-			}
-			if len(args.FilterInStatus) > 0 {
-				urlValues.Add("filter.in.status", strings.Join(args.FilterInStatus, ","))
-			}
-			if args.FilterCntIssueComment != "" {
-				urlValues.Add("filter.cnt.issueComment", args.FilterCntIssueComment)
-			}
-			if args.FilterHasTicketId != "" {
-				urlValues.Add("filter.has.ticketId", args.FilterHasTicketId)
-			}
-			if args.FilterAnyPatternName != "" {
-				urlValues.Add("filter.any.patternName", args.FilterAnyPatternName)
-			}
-			if args.FilterInIgnoreAnalyzer != nil {
-				urlValues.Add(
-					"filter.in.ignoreAnalyzer",
-					strconv.FormatBool(*args.FilterInIgnoreAnalyzer),
-				)
-			}
-			if args.FilterHasCompositeAttribute != "" {
-				urlValues.Add("filter.has.compositeAttribute", args.FilterHasCompositeAttribute)
-			}
-			if args.FilterAnyCompositeAttribute != "" {
-				urlValues.Add("filter.any.compositeAttribute", args.FilterAnyCompositeAttribute)
-			}
-
-			filterStartTime, err := utils.ProcessStartTimeFilter(
-				args.FilterBtwStartTimeFrom,
-				args.FilterBtwStartTimeTo,
+		if args.FilterEqLaunchId == 0 && args.FilterEqParentId == 0 {
+			return nil, nil, fmt.Errorf(
+				"either filter-eq-launchId or filter-eq-parentId is required",
 			)
-			if err != nil {
-				return nil, nil, err
-			}
-			if filterStartTime != "" {
-				urlValues.Add("filter.btw.startTime", filterStartTime)
-			}
+		}
 
-			ctxWithParams := utils.WithQueryParams(ctx, urlValues)
-			apiRequest := lr.client.TestItemAPI.GetItemsHistory(ctxWithParams, project)
+		if args.HistoryDepth != 0 && (args.HistoryDepth < 1 || args.HistoryDepth > 30) {
+			return nil, nil, fmt.Errorf("historyDepth must be between 1 and 30")
+		}
 
-			if args.FilterEqLaunchId != 0 {
-				apiRequest = apiRequest.FilterEqLaunchId(
-					args.FilterEqLaunchId,
-				)
-			}
-			if args.HistoryDepth > 0 {
-				apiRequest = apiRequest.HistoryDepth(args.HistoryDepth)
-			} else {
-				apiRequest = apiRequest.HistoryDepth(10)
-			}
-			if args.HistoryBase != "" {
-				apiRequest = apiRequest.Type_(args.HistoryBase)
-			}
-			if args.FilterEqHasRetries != "--" && args.FilterEqHasRetries != "" {
-				apiRequest = apiRequest.FilterEqHasRetries(args.FilterEqHasRetries == "TRUE")
-			}
-			if args.FilterEqAutoAnalyzed != nil {
-				apiRequest = apiRequest.FilterEqAutoAnalyzed(*args.FilterEqAutoAnalyzed)
-			}
+		urlValues := url.Values{
+			"filter.eq.hasStats":    {utils.DefaultFilterEqHasStats},
+			"filter.eq.hasChildren": {utils.DefaultFilterEqHasChildren},
+			"filter.in.type":        {utils.DefaultFilterInType},
+		}
 
-			apiRequest = utils.ApplyPaginationOptions(
-				apiRequest,
-				args.Page,
-				args.PageSize,
-				args.PageSort,
-				utils.DefaultSortingForItems,
+		if args.FilterEqParentId != 0 {
+			urlValues.Add(
+				"filter.eq.parentId",
+				strconv.FormatUint(uint64(args.FilterEqParentId), 10),
 			)
+		}
 
-			_, response, err := apiRequest.Execute()
-			if err != nil {
-				return nil, nil, fmt.Errorf(
-					"%s: %w",
-					utils.ExtractResponseError(err, response),
-					err,
-				)
-			}
+		if args.FilterCntName != "" {
+			urlValues.Add("filter.cnt.name", args.FilterCntName)
+		}
+		if args.FilterCntDescription != "" {
+			urlValues.Add("filter.cnt.description", args.FilterCntDescription)
+		}
+		if len(args.FilterInStatus) > 0 {
+			urlValues.Add("filter.in.status", strings.Join(args.FilterInStatus, ","))
+		}
+		if args.FilterCntIssueComment != "" {
+			urlValues.Add("filter.cnt.issueComment", args.FilterCntIssueComment)
+		}
+		if args.FilterHasTicketId != "" {
+			urlValues.Add("filter.has.ticketId", args.FilterHasTicketId)
+		}
+		if args.FilterAnyPatternName != "" {
+			urlValues.Add("filter.any.patternName", args.FilterAnyPatternName)
+		}
+		if args.FilterInIgnoreAnalyzer != nil {
+			urlValues.Add(
+				"filter.in.ignoreAnalyzer",
+				strconv.FormatBool(*args.FilterInIgnoreAnalyzer),
+			)
+		}
+		if args.FilterHasCompositeAttribute != "" {
+			urlValues.Add("filter.has.compositeAttribute", args.FilterHasCompositeAttribute)
+		}
+		if args.FilterAnyCompositeAttribute != "" {
+			urlValues.Add("filter.any.compositeAttribute", args.FilterAnyCompositeAttribute)
+		}
 
-			return utils.ReadResponseBody(response)
-		})
+		filterStartTime, err := utils.ProcessStartTimeFilter(
+			args.FilterBtwStartTimeFrom,
+			args.FilterBtwStartTimeTo,
+		)
+		if err != nil {
+			return nil, nil, err
+		}
+		if filterStartTime != "" {
+			urlValues.Add("filter.btw.startTime", filterStartTime)
+		}
+
+		ctxWithParams := utils.WithQueryParams(ctx, urlValues)
+		apiRequest := lr.client.TestItemAPI.GetItemsHistory(ctxWithParams, project)
+
+		if args.FilterEqLaunchId != 0 {
+			apiRequest = apiRequest.FilterEqLaunchId(
+				args.FilterEqLaunchId,
+			)
+		}
+		if args.HistoryDepth > 0 {
+			apiRequest = apiRequest.HistoryDepth(args.HistoryDepth)
+		} else {
+			apiRequest = apiRequest.HistoryDepth(10)
+		}
+		if args.HistoryBase != "" {
+			apiRequest = apiRequest.Type_(args.HistoryBase)
+		}
+		if args.FilterEqHasRetries != "--" && args.FilterEqHasRetries != "" {
+			apiRequest = apiRequest.FilterEqHasRetries(args.FilterEqHasRetries == "TRUE")
+		}
+		if args.FilterEqAutoAnalyzed != nil {
+			apiRequest = apiRequest.FilterEqAutoAnalyzed(*args.FilterEqAutoAnalyzed)
+		}
+
+		apiRequest = utils.ApplyPaginationOptions(
+			apiRequest,
+			args.Page,
+			args.PageSize,
+			args.PageSort,
+			utils.DefaultSortingForItems,
+		)
+
+		_, response, err := apiRequest.Execute()
+		if err != nil {
+			return nil, nil, fmt.Errorf(
+				"%s: %w",
+				utils.ExtractResponseError(err, response),
+				err,
+			)
+		}
+
+		return utils.ReadResponseBody(response)
+	})
 }

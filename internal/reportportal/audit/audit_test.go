@@ -87,7 +87,7 @@ func TestMiddleware_ToolCallFieldsAndRedaction(t *testing.T) {
 	})
 
 	args := `{
-		"project": "superadmin_personal",
+		"projectKey": "superadmin_personal",
 		"launch_id": "123",
 		"test_items_ids": ["10", "11"],
 		"file_content": "` + fileSecret + `",
@@ -423,7 +423,7 @@ func TestMiddleware_ClientInfoFromSession(t *testing.T) {
 
 	_, err = session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "get_launches",
-		Arguments: map[string]any{"project": "demo", "launch_id": "7"},
+		Arguments: map[string]any{"projectKey": "demo", "launch_id": "7"},
 	})
 	require.NoError(t, err)
 	_, err = session.ReadResource(ctx, &mcp.ReadResourceParams{
@@ -628,6 +628,45 @@ func TestMiddleware_DropsObjectIDs(t *testing.T) {
 	ids := auditEvents(t, &buf)[0]["resource_ids"].(map[string]any)
 	assert.Equal(t, "42", ids["test_item_id"])
 	assert.NotContains(t, ids, "launch_id")
-	assert.NotContains(t, buf.String(), "NESTEDSECRET")
 	assert.NotContains(t, buf.String(), "nested")
+	assert.NotContains(t, buf.String(), "NESTEDSECRET")
+}
+
+func TestMiddleware_ProjectKeyAndTMSResourceIDs(t *testing.T) {
+	var buf bytes.Buffer
+	em := testEmitter(&buf)
+	handler := em.Middleware()(func(
+		context.Context, string, mcp.Request,
+	) (mcp.Result, error) {
+		return &mcp.CallToolResult{}, nil
+	})
+
+	args := `{
+		"projectKey": "from-tool-arg",
+		"launchId": 10,
+		"testCaseId": 20,
+		"test-plan-id": 30,
+		"test-case-ids": [1, 2],
+		"filter-cnt-name": "must not log"
+	}`
+	_, err := handler(context.Background(), methodToolsCall, &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{
+			Name:      "create_manual_launch",
+			Arguments: json.RawMessage(args),
+		},
+		Extra: &mcp.RequestExtra{
+			Header: http.Header{"X-Project": []string{"from-header"}},
+		},
+	})
+	require.NoError(t, err)
+
+	ev := auditEvents(t, &buf)[0]
+	assert.Equal(t, "from-tool-arg", ev["project"])
+	ids := ev["resource_ids"].(map[string]any)
+	assert.Equal(t, "10", ids["launchId"])
+	assert.Equal(t, "20", ids["testCaseId"])
+	assert.Equal(t, "30", ids["test-plan-id"])
+	assert.Equal(t, []any{"1", "2"}, ids["test-case-ids"])
+	assert.NotContains(t, ids, "filter-cnt-name")
+	assert.NotContains(t, buf.String(), "must not log")
 }

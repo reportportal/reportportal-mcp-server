@@ -109,6 +109,19 @@ func TestNewHTTPServer_WithoutRPAPIToken(t *testing.T) {
 			expectAnalytics: false,
 			expectError:     false,
 		},
+		{
+			name: "server accepts HTTP HostURL",
+			config: HTTPServerConfig{
+				Version:               "1.0.0",
+				HostURL:               mustParseURL("http://reportportal.example.com"),
+				FallbackRPToken:       "",
+				UserID:                "test-user",
+				MaxConcurrentRequests: 10,
+				ConnectionTimeout:     30 * time.Second,
+			},
+			expectAnalytics: false,
+			expectError:     false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -435,4 +448,44 @@ func mustParseURL(rawURL string) *url.URL {
 		panic(err)
 	}
 	return u
+}
+
+func TestCreateHTTPClient_RejectsUnsafeRedirects(t *testing.T) {
+	hostURL := mustParseURL("https://reportportal.example.com")
+	client := createHTTPClient(30*time.Second, nil, hostURL)
+	require.NotNil(t, client.CheckRedirect)
+
+	tests := []struct {
+		name        string
+		target      string
+		expectError bool
+	}{
+		{
+			name:        "same host HTTPS redirect is allowed",
+			target:      "https://reportportal.example.com/redirected",
+			expectError: false,
+		},
+		{
+			name:        "HTTPS to HTTP downgrade is rejected",
+			target:      "http://reportportal.example.com/redirected",
+			expectError: true,
+		},
+		{
+			name:        "redirect to a different host is rejected",
+			target:      "https://attacker.example.com/redirected",
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := &http.Request{URL: mustParseURL(tt.target)}
+			err := client.CheckRedirect(req, nil)
+			if tt.expectError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
 }

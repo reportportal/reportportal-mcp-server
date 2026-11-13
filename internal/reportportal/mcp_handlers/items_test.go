@@ -14,6 +14,8 @@ import (
 	"github.com/reportportal/goRP/v5/pkg/openapi"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/reportportal/reportportal-mcp-server/internal/reportportal/utils"
 )
 
 func TestGetDefectTypesFromJson(t *testing.T) {
@@ -27,7 +29,7 @@ func TestGetDefectTypesFromJson(t *testing.T) {
 			name: "valid project JSON with defect types",
 			rawBody: []byte(`{
 				"projectId": 123,
-				"projectName": "test_project",
+				"projectKey": "test_project",
 				"entryType": "INTERNAL",
 				"configuration": {
 					"subTypes": {
@@ -61,7 +63,7 @@ func TestGetDefectTypesFromJson(t *testing.T) {
 			name: "missing configuration field",
 			rawBody: []byte(`{
 				"projectId": 1,
-				"projectName": "test_project"
+				"projectKey": "test_project"
 			}`),
 			expectError: true,
 			errorMsg:    "configuration field not found or invalid in response",
@@ -99,7 +101,7 @@ func TestGetDefectTypesFromJson(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := getDefectTypesFromJson(tt.rawBody)
+			result, err := utils.GetDefectTypesFromJSON(tt.rawBody)
 
 			if tt.expectError {
 				if err == nil {
@@ -141,7 +143,7 @@ func TestGetDefectTypesFromJson_VerifyContent(t *testing.T) {
 		}
 	}`)
 
-	result, err := getDefectTypesFromJson(rawBody)
+	result, err := utils.GetDefectTypesFromJSON(rawBody)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -245,7 +247,7 @@ func TestUpdateDefectTypeForTestItemsTool_IgnoreAnalyzer(t *testing.T) {
 			).toolUpdateDefectTypeForTestItems()
 
 			_, _, err := handler(ctx, &mcp.CallToolRequest{}, UpdateDefectTypeArgs{
-				Project:        testProject,
+				ProjectKey:     testProject,
 				TestItemsIDs:   []string{"1474305"},
 				DefectTypeID:   "si001",
 				IgnoreAnalyzer: tt.ignoreAnalyzer,
@@ -259,6 +261,84 @@ func TestUpdateDefectTypeForTestItemsTool_IgnoreAnalyzer(t *testing.T) {
 			} else {
 				assert.Equal(t, tt.expected, value)
 			}
+		})
+	}
+}
+
+// TestGetTestItemAttachmentTool tests that the get_test_item_attachment_by_id tool handler
+// returns image, text and other binary attachments in the expected content form.
+func TestGetTestItemAttachmentTool(t *testing.T) {
+	jpegBytes := []byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 'J', 'F', 'I', 'F'}
+	zipBytes := []byte{'P', 'K', 0x03, 0x04}
+
+	tests := []struct {
+		name        string
+		contentType string
+		body        []byte
+		check       func(t *testing.T, content mcp.Content)
+	}{
+		{
+			name:        "image is returned as image content",
+			contentType: "image/jpeg",
+			body:        jpegBytes,
+			check: func(t *testing.T, content mcp.Content) {
+				image, ok := content.(*mcp.ImageContent)
+				require.True(t, ok, "expected *mcp.ImageContent, got %T", content)
+				require.Equal(t, "image/jpeg", image.MIMEType)
+				require.Equal(t, jpegBytes, image.Data)
+			},
+		},
+		{
+			name:        "text is returned as text content",
+			contentType: "text/plain",
+			body:        []byte("hello"),
+			check: func(t *testing.T, content mcp.Content) {
+				text, ok := content.(*mcp.TextContent)
+				require.True(t, ok, "expected *mcp.TextContent, got %T", content)
+				require.Equal(t, "Text content (text/plain, 5 bytes)\nhello", text.Text)
+			},
+		},
+		{
+			name:        "other binary is returned as base64 text",
+			contentType: "application/zip",
+			body:        zipBytes,
+			check: func(t *testing.T, content mcp.Content) {
+				text, ok := content.(*mcp.TextContent)
+				require.True(t, ok, "expected *mcp.TextContent, got %T", content)
+				require.Equal(
+					t,
+					"Binary content (application/zip, 4 bytes)\nBase64: UEsDBA==",
+					text.Text,
+				)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(
+				http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Content-Type", tt.contentType)
+					_, _ = w.Write(tt.body)
+				}),
+			)
+			defer server.Close()
+
+			serverURL, _ := url.Parse(server.URL)
+			_, handler := NewTestItemResources(
+				gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+				nil,
+				"",
+			).toolGetTestItemAttachment()
+
+			result, _, err := handler(
+				context.Background(),
+				&mcp.CallToolRequest{},
+				GetTestItemAttachmentArgs{ProjectKey: "test-project", AttachmentContentID: "42"},
+			)
+			require.NoError(t, err)
+			require.Len(t, result.Content, 1)
+			tt.check(t, result.Content[0])
 		})
 	}
 }

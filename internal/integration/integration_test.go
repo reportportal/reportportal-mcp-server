@@ -182,6 +182,7 @@ func executeTestCase(t *testing.T, tc *testdata.TestCase) {
 		HostURL:         rpMockURL,
 		FallbackRPToken: "",
 		AnalyticsOn:     false,
+		TLSConfig:       rpMock.TLSConfig(),
 	})
 	require.NoError(t, err, "create MCP server")
 

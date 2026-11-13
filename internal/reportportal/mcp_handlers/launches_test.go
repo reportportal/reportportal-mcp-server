@@ -17,14 +17,23 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/yosida95/uritemplate/v3"
+
+	"github.com/reportportal/reportportal-mcp-server/internal/reportportal/middleware"
 )
+
+func newLaunchResourcesForHTTPTest(ctx context.Context, serverURL *url.URL) *LaunchResources {
+	client := gorp.NewClient(serverURL, gorp.WithApiKeyAuth(ctx, ""))
+	client.APIClient.GetConfig().Middleware = middleware.QueryParamsMiddleware
+	return NewLaunchResources(client, nil, "", nil)
+}
 
 func TestLaunchByIdTemplate(t *testing.T) {
 	uritmpl := uritemplate.MustNew(
-		"reportportal://launch/{launch}{?filter,page,size,tab}")
-	vals := uritmpl.Match("reportportal://launch/123?filter=xxx")
-	require.Equal(t, vals.Get("filter").String(), "xxx")
-	require.Equal(t, vals.Get("launch").String(), "123")
+		"reportportal://{projectKey}/launch/{launchId}{?filter,page,size,tab}")
+	vals := uritmpl.Match("reportportal://myProject/launch/123?filter=xxx")
+	require.Equal(t, "myProject", vals.Get("projectKey").String())
+	require.Equal(t, "123", vals.Get("launchId").String())
+	require.Equal(t, "xxx", vals.Get("filter").String())
 }
 
 // TestListLaunchesTool tests the get_launches tool handler directly
@@ -38,26 +47,21 @@ func TestListLaunchesTool(t *testing.T) {
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, fmt.Sprintf("/api/v1/%s/launch", testProject), r.URL.Path)
 		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, automationLaunchTypes, r.URL.Query().Get("filter.in.launchType"))
 
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(launchesJSON)
 	}))
 	defer mockServer.Close()
 
-	// Create launch resources with mocked RP client
 	serverURL, _ := url.Parse(mockServer.URL)
-	launchTools := NewLaunchResources(
-		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(ctx, "")),
-		nil,
-		"",
-		nil,
-	)
+	launchTools := newLaunchResourcesForHTTPTest(ctx, serverURL)
 
 	// Get the tool and handler
 	_, handler := launchTools.toolGetLaunches()
 
 	// Call the handler directly
-	result, _, err := handler(ctx, &mcp.CallToolRequest{}, GetLaunchesArgs{Project: testProject})
+	result, _, err := handler(ctx, &mcp.CallToolRequest{}, GetLaunchesArgs{ProjectKey: testProject})
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.False(t, result.IsError)
@@ -69,6 +73,68 @@ func TestListLaunchesTool(t *testing.T) {
 	assert.Equal(t, string(launchesJSON), textContent.Text)
 }
 
+func TestListLaunchesTool_PassesFiltersAndLaunchType(t *testing.T) {
+	ctx := context.Background()
+	testProject := "test-project"
+	expectedLaunches := testLaunches()
+	launchesJSON, _ := json.Marshal(expectedLaunches)
+
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query()
+		assert.Equal(t, "My Launch", query.Get("filter.cnt.name"))
+		assert.Equal(t, "alice,bob", query.Get("filter.in.user"))
+		assert.Equal(t, automationLaunchTypes, query.Get("filter.in.launchType"))
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(launchesJSON)
+	}))
+	defer mockServer.Close()
+
+	serverURL, _ := url.Parse(mockServer.URL)
+	launchTools := newLaunchResourcesForHTTPTest(ctx, serverURL)
+
+	_, handler := launchTools.toolGetLaunches()
+	result, _, err := handler(ctx, &mcp.CallToolRequest{}, GetLaunchesArgs{
+		ProjectKey:    testProject,
+		FilterCntName: "My Launch",
+		FilterInUser:  "alice,bob",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.False(t, result.IsError)
+}
+
+func TestGetLastLaunchByNameTool_IncludesLaunchTypeFilter(t *testing.T) {
+	ctx := context.Background()
+	testProject := "test-project"
+	launchName := "Demo Api Tests"
+	expectedLaunches := testLaunches()
+	launchesJSON, _ := json.Marshal(expectedLaunches)
+
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query()
+		assert.Equal(t, launchName, query.Get("filter.cnt.name"))
+		assert.Equal(t, automationLaunchTypes, query.Get("filter.in.launchType"))
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(launchesJSON)
+	}))
+	defer mockServer.Close()
+
+	serverURL, _ := url.Parse(mockServer.URL)
+	launchTools := newLaunchResourcesForHTTPTest(ctx, serverURL)
+
+	_, handler := launchTools.toolGetLastLaunchByName()
+	result, _, err := handler(ctx, &mcp.CallToolRequest{}, GetLastLaunchByNameArgs{
+		ProjectKey: testProject,
+		Launch:     launchName,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.False(t, result.IsError)
+	require.Len(t, result.Content, 1)
+}
+
 // TestGetLaunchByIdTool tests the get_launch_by_id tool handler directly
 func TestGetLaunchByIdTool(t *testing.T) {
 	ctx := context.Background()
@@ -76,20 +142,20 @@ func TestGetLaunchByIdTool(t *testing.T) {
 	launchID := uint32(123)
 
 	// Create expected launch response
-	expectedLaunch := openapi.LaunchResource{
+	expectedLaunch := openapi.ComEpamReportportalBaseModelLaunchLaunchViewModel{
 		Id:        int64(launchID),
 		Name:      "Test Launch by ID",
 		Uuid:      "014b329b-a882-4c2d-9988-c2f6179a421b",
 		Number:    int64(launchID),
 		StartTime: time.Now(),
-		Status:    string(gorp.Statuses.Passed),
+		Status:    openapi.PtrString(string(gorp.Statuses.Passed)),
 	}
 
 	launchJSON, _ := json.Marshal(expectedLaunch)
 
 	// Mock ReportPortal API server
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// GetLaunch uses /api/v1/{projectName}/launch/{launchId}
+		// GetLaunch uses /api/v1/{projectKey}/launch/{launchId}
 		assert.Equal(t, fmt.Sprintf("/api/v1/%s/launch/%d", testProject, launchID), r.URL.Path)
 		assert.Equal(t, http.MethodGet, r.Method)
 
@@ -114,7 +180,7 @@ func TestGetLaunchByIdTool(t *testing.T) {
 	result, _, err := handler(
 		ctx,
 		&mcp.CallToolRequest{},
-		LaunchIDArgs{Project: testProject, LaunchID: launchID},
+		LaunchIDArgs{ProjectKey: testProject, LaunchID: launchID},
 	)
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -126,7 +192,7 @@ func TestGetLaunchByIdTool(t *testing.T) {
 	require.True(t, ok, "expected TextContent")
 
 	// Verify the response contains the expected launch
-	var responseLaunch openapi.LaunchResource
+	var responseLaunch openapi.ComEpamReportportalBaseModelLaunchLaunchViewModel
 	err = json.Unmarshal([]byte(textContent.Text), &responseLaunch)
 	require.NoError(t, err)
 	assert.Equal(t, expectedLaunch.Id, responseLaunch.Id)
@@ -142,7 +208,7 @@ func TestGetLaunchByIdTool_NotFound(t *testing.T) {
 
 	// Mock ReportPortal API server returning 404
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// GetLaunch uses /api/v1/{projectName}/launch/{launchId}
+		// GetLaunch uses /api/v1/{projectKey}/launch/{launchId}
 		assert.Equal(t, fmt.Sprintf("/api/v1/%s/launch/%d", testProject, launchID), r.URL.Path)
 		assert.Equal(t, http.MethodGet, r.Method)
 
@@ -173,7 +239,7 @@ func TestGetLaunchByIdTool_NotFound(t *testing.T) {
 	_, _, err := handler(
 		ctx,
 		&mcp.CallToolRequest{},
-		LaunchIDArgs{Project: testProject, LaunchID: launchID},
+		LaunchIDArgs{ProjectKey: testProject, LaunchID: launchID},
 	)
 
 	// Verify that an error is returned
@@ -193,13 +259,13 @@ func TestRunAutoAnalysisTool(t *testing.T) {
 	expectedMessage := "Auto analysis started successfully"
 
 	// Track the request payload to verify correct parameters
-	var capturedRequest *openapi.AnalyzeLaunchRQ
+	var capturedRequest *openapi.ComEpamReportportalBaseModelLaunchAnalyzeLaunchRQ
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, fmt.Sprintf("/api/v1/%s/launch/analyze", testProject), r.URL.Path)
 		assert.Equal(t, http.MethodPost, r.Method)
 
 		// Parse request body
-		var reqBody openapi.AnalyzeLaunchRQ
+		var reqBody openapi.ComEpamReportportalBaseModelLaunchAnalyzeLaunchRQ
 		err := json.NewDecoder(r.Body).Decode(&reqBody)
 		require.NoError(t, err)
 		capturedRequest = &reqBody
@@ -261,7 +327,7 @@ func TestRunAutoAnalysisTool(t *testing.T) {
 
 	// Call the handler directly
 	result, _, err := handler(ctx, &mcp.CallToolRequest{}, RunAutoAnalysisArgs{
-		Project:           testProject,
+		ProjectKey:        testProject,
 		LaunchID:          uint32(launchID),
 		AnalyzerMode:      "current_launch",
 		AnalyzerType:      "autoAnalyzer",
@@ -285,16 +351,16 @@ func TestRunAutoAnalysisTool(t *testing.T) {
 	assert.Equal(t, []string{"to_investigate", "auto_analyzed"}, capturedRequest.AnalyzeItemsMode)
 }
 
-func testLaunches() *openapi.PageLaunchViewModel {
-	launches := openapi.NewPageLaunchViewModel()
-	launches.SetContent([]openapi.LaunchViewModel{
+func testLaunches() *openapi.ComEpamReportportalBaseModelPageComEpamReportportalBaseModelLaunchLaunchViewModel {
+	launches := openapi.NewComEpamReportportalBaseModelPageComEpamReportportalBaseModelLaunchLaunchViewModel()
+	launches.SetContent([]openapi.ComEpamReportportalBaseModelLaunchLaunchViewModel{
 		{
 			Id:        1,
 			Name:      "Test Launch 1",
 			Uuid:      "014b329b-a882-4c2d-9988-c2f6179a421b",
 			Number:    1,
 			StartTime: time.Now(),
-			Status:    string(gorp.Statuses.Passed),
+			Status:    openapi.PtrString(string(gorp.Statuses.Passed)),
 		},
 		{
 			Id:        2,
@@ -302,10 +368,10 @@ func testLaunches() *openapi.PageLaunchViewModel {
 			Uuid:      "014b329b-a882-4c2d-9988-c2f6179a421c",
 			Number:    2,
 			StartTime: time.Now(),
-			Status:    string(gorp.Statuses.Passed),
+			Status:    openapi.PtrString(string(gorp.Statuses.Passed)),
 		},
 	})
-	launches.SetPage(openapi.PageMetadata{
+	launches.SetPage(openapi.ComEpamReportportalBaseModelPagePageMetadata{
 		TotalPages:    openapi.PtrInt64(1),
 		HasNext:       openapi.PtrBool(false),
 		Number:        openapi.PtrInt64(1),

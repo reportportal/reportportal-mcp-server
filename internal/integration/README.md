@@ -167,7 +167,7 @@ To make sure recorded fixtures stay close to the real MCP behaviour:
    - export your real credentials into the terminal session (`$env:RP_API_TOKEN`, `$env:RP_PROJECT` or set the `X-Project` header).
    - call `initialize` first, capture the returned `mcp-session-id`, and reuse it in subsequent `tools/call` requests.
    - compare the live response payload with the JSON file and adjust the fixture when the structure differs (e.g., IDs, fields that changed in ReportPortal).
-3. **Never persist secrets** – RP tokens, project names, and any other sensitive data must stay outside the JSON files. When the tests run in Cursor/CI, those values come from environment variables, so the fixtures themselves remain generic.
+3. **Never persist secrets** – RP tokens, projectKeys, and any other sensitive data must stay outside the JSON files. When the tests run in Cursor/CI, those values come from environment variables, so the fixtures themselves remain generic.
 
 Following this loop (record → verify against live MCP → commit) keeps the integration tests representative without leaking real credentials.
 

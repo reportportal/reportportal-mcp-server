@@ -77,7 +77,7 @@
       ],
       "body": {
         "mode": "raw",
-        "raw": "{\n  \"id\": 1,\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"arguments\": {},\n    \"name\": \"get_launches\"\n  }\n}"
+        "raw": "{\n  \"id\": 1,\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"arguments\": {\n      \"projectKey\": \"test-project\"\n    },\n    \"name\": \"get_launches\"\n  }\n}"
       },
       "url": {
         "raw": "/mcp",

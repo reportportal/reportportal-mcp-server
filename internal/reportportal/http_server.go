@@ -37,7 +37,10 @@ import (
 // MaxIdleConns=100, MaxIdleConnsPerHost=10, IdleConnTimeout=90s, HTTP/2 forced.
 // The timeout parameter is the per-request deadline and comes from --connection-timeout.
 // tlsCfg may be nil, in which case the Go default TLS behaviour is used.
-func createHTTPClient(timeout time.Duration, tlsCfg *tls.Config) *http.Client {
+// hostURL restricts followed redirects to that same host and rejects downgrades
+// from HTTPS to HTTP, since the per-request Authorization header (injected by
+// QueryParamsMiddleware) must never be forwarded to another host or an unsafe URL.
+func createHTTPClient(timeout time.Duration, tlsCfg *tls.Config, hostURL *url.URL) *http.Client {
 	transport := utils.NewBaseTransport()
 	transport.MaxIdleConns = 100
 	transport.MaxIdleConnsPerHost = 10
@@ -47,8 +50,9 @@ func createHTTPClient(timeout time.Duration, tlsCfg *tls.Config) *http.Client {
 	transport.TLSClientConfig = tlsCfg
 
 	return &http.Client{
-		Transport: transport,
-		Timeout:   timeout,
+		Transport:     transport,
+		Timeout:       timeout,
+		CheckRedirect: utils.SameHostRedirectPolicy(hostURL),
 	}
 }
 
@@ -125,7 +129,7 @@ func NewHTTPServer(
 	)
 
 	// Create HTTP client
-	httpClient := createHTTPClient(config.ConnectionTimeout, config.TLSConfig)
+	httpClient := createHTTPClient(config.ConnectionTimeout, config.TLSConfig, config.HostURL)
 
 	if config.AuditLog {
 		instance, hostErr := os.Hostname()
@@ -193,8 +197,8 @@ func NewHTTPServer(
 
 // initializeTools sets up all MCP tools
 func (hs *HTTPServer) initializeTools() error {
-	// Create ReportPortal client with empty token in HTTP mode
-	// The actual token will be injected per-request via QueryParamsMiddleware from HTTP headers
+	// Create ReportPortal client with empty token in HTTP mode.
+	// The actual token will be injected per-request via QueryParamsMiddleware from HTTP headers.
 	rpClient := gorp.NewClient(
 		hs.config.HostURL,
 		gorp.WithApiKeyAuth(context.Background(), hs.config.FallbackRPToken),
@@ -214,6 +218,9 @@ func (hs *HTTPServer) initializeTools() error {
 		"",
 		hs.AnalyticsInstance,
 	)
+
+	// Register all TMS-related tools
+	mcphandlers.RegisterTMSTools(hs.mcpServer, rpClient, "", hs.AnalyticsInstance)
 
 	// Add prompts
 	prompts, err := mcphandlers.ReadPrompts(mcphandlers.PromptFiles, "prompts")
@@ -368,7 +375,6 @@ func (hs *HTTPServer) setupChiRouter() {
 
 	// Add Chi middleware
 	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
 	r.Use(skipAccessLog(middleware.Logger, "/health"))
 	r.Use(middleware.Recoverer)
 	// Use conditional timeout that skips SSE streams

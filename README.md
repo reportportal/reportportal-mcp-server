@@ -1,5 +1,5 @@
 ﻿![Build Status](https://github.com/reportportal/reportportal-mcp-server/workflows/Build/badge.svg)
-[![Go Report Card](https://goreportcard.com/badge/github.com/reportportal/reportportal-mcp-server)](https://goreportcard.com/report/github.com/reportportal/goRP)
+[![Go Report Card](https://goreportcard.com/badge/github.com/reportportal/reportportal-mcp-server)](https://goreportcard.com/report/github.com/reportportal/reportportal-mcp-server)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
 # ReportPortal MCP Server
@@ -8,14 +8,17 @@
 
 The ReportPortal MCP Server is a bridge between your ReportPortal instance and AI chat assistants (such as Claude Desktop, GitHub Copilot, Cursor). In simple terms, it lets you ask questions in plain English about your test runs and get answers directly from ReportPortal. It follows the official [MCP](https://modelcontextprotocol.io/overview) guidelines.
 
-For example, instead of logging into the ReportPortal UI, you could ask your AI assistant "What tests failed in the last run?" or "List the 5 most recent test runs," and it will fetch that information from ReportPortal for you. This makes it easy for QA testers and managers to query test results using natural language, speeding up analysis and reporting.
+Starting with version 2.x, the server also integrates with the **ReportPortal Test Case Management System (TMS)** — test cases, folders, milestones, and test plans — so you can browse and manage test design data through the same chat interface.
+
+For example, instead of logging into the ReportPortal UI, you could ask your AI assistant "What tests failed in the last run?" or "List the 5 most recent test runs," and it will fetch that information from ReportPortal for you. <br/> With TMS support, you can also ask things like "List test cases in the Smoke folder" or "Create a test plan for the current sprint milestone." This makes it easy for QA testers and managers to manage test cases, query test results and test assets using natural language, speeding up planning, analysis and reporting.
 
 ## Why Use It?
 
 - **Quick Test Insights**: Instantly retrieve summaries of test runs, failure counts, or error details without writing code or navigating the UI.
+- **TMS from Chat**: Browse, create, and update test cases, folders, milestones, and test plans in ReportPortal TMS without leaving your AI assistant.
 - **Chat-Based Queries**: Use your favourite AI assistant (Claude, Cursor, etc.) to converse with ReportPortal data. It's like having a smart test-reporting helper in your chat window.
 - **Integration Flexibility**: Works with any MCP-compatible AI tool. You simply point the tool at this server and it can run ReportPortal queries under the hood.
-- **No Custom Scripts Needed**: Common queries (listing runs, getting failures, analysis) are built-in as simple "commands" you invoke via chat.
+- **No Custom Scripts Needed**: Common queries (listing runs, getting failures, analysis, TMS lookups) are built-in as simple "commands" you invoke via chat.
 
 ## Prerequisites
 
@@ -27,12 +30,15 @@ The URL of your ReportPortal instance:
 - Example: `https://reportportal.example.com`
 - For local: `http://localhost:8080`
 
-### Project Name (`RP_PROJECT`) — Optional
+### Project Key (`RP_PROJECT`) — Optional
 
-This value is optional. When set, it defines the default project used for all requests; individual tools can still override it per request. To find your project name:
-1. Log into ReportPortal
-2. Check the URL: `https://your-rp-instance.com/ui/#PROJECT_NAME/...`
-3. Or find it in the top-left dropdown menu
+This value is optional. When set, it defines the default project key used for all requests. The `projectKey` tool argument can be used to override the project specified in the context (e.g. `RP_PROJECT` env variable in stdio mode, or the `X-Project` HTTP header in HTTP mode).
+
+The project key is the **unique project identifier** within the ReportPortal instance, do not use the project display name as project key. Find this on the ReportPortal general settings page:
+
+```text
+https://your-rp-instance.com/ui/#organizations/{your-organization}/projects/{your_project}/settings/general
+```
 
 ### API Token (`RP_API_TOKEN`)
 
@@ -89,7 +95,7 @@ Configuration:
     "env": {
       "RP_API_TOKEN": "your-api-token",
       "RP_HOST": "https://your-reportportal-instance.com",
-      "RP_PROJECT": "YourProjectInReportPortal"
+      "RP_PROJECT": "YourProjectKeyFromReportPortal"
     }
   }
 }
@@ -108,7 +114,7 @@ Configuration:
     "env": {
       "RP_API_TOKEN": "your-api-token",
       "RP_HOST": "https://your-reportportal-instance.com",
-      "RP_PROJECT": "YourProjectInReportPortal"
+      "RP_PROJECT": "YourProjectKeyFromReportPortal"
     }
   }
 }
@@ -128,7 +134,7 @@ If the ReportPortal MCP Server is already **deployed** and accessible via HTTP, 
     "url": "http://your-mcp-server-host:port/mcp",
     "headers": {
       "Authorization": "Bearer ${RP_API_TOKEN}",
-      "X-Project": "YourProjectInReportPortal"
+      "X-Project": "YourProjectKeyFromReportPortal"
     }
   }
 }
@@ -137,7 +143,7 @@ If the ReportPortal MCP Server is already **deployed** and accessible via HTTP, 
 **Configuration Parameters:**
 - `url`: The HTTP endpoint URL of the remote MCP server (use `/mcp` or `/api/mcp`)
 - `headers.Authorization`: Bearer token for authentication (required)
-- `headers.X-Project`: The ReportPortal project name (optional)
+- `headers.X-Project`: The ReportPortal project key — the unique project identifier, not the display name (optional)
 
 #### OAuth login
 
@@ -145,14 +151,7 @@ When the MCP server is deployed with OAuth enabled (`MCP_OAUTH_ENABLED=true`), M
 authenticate through your corporate IdP instead of a static ReportPortal API key. The server
 validates JWTs and still accepts ReportPortal API keys for backward compatibility.
 
-**Entra app registration (summary):**
-
-1. Register an app (e.g. "ReportPortal MCP") and set **Application ID URI** / exposed API scope
-   (e.g. `api://<app-id>/access_as_user`).
-2. Set **Access token version** to **2** (`requestedAccessTokenVersion: 2`).
-3. Under **Authorized client applications**, add the VS Code MCP client ID
-   `aebc6443-996d-45c2-90f0-388ff96faa56` and grant the exposed scope.
-4. Grant **admin consent** for the tenant.
+**Note:** the corresponding ENV vars should be configured on ReportPortal Service API side as well.
 
 **Server environment variables:**
 
@@ -218,7 +217,7 @@ An operation event looks like this (one JSON object per line):
   "user_name": "jane@corp.com",
   "auth_method": "oauth",
   "server_name": "reportportal-mcp-server",
-  "server_version": "1.5.0",
+  "server_version": "2.0.0",
   "server_instance": "mcp-5bff…",
   "session_id": "XroiJS…",
   "method": "tools/call",
@@ -246,8 +245,8 @@ An operation event looks like this (one JSON object per line):
 | `method` | `tools/call`, `resources/read`, or `prompts/get` |
 | `tool` | Tool name, resource URI, or prompt name |
 | `scopes` | Scopes from the verified token |
-| `project` | Tool argument `project`, the project in a `reportportal://` resource URI, or the `X-Project` header |
-| `resource_ids` | Allow-listed identifier arguments only: `launch_id`, `launch-id`, `test_item_id`, `test_items_ids`, `defect_type_id`, `parent-item-id`, `attachment-content-id`, `filter-eq-parentId`, `filter-eq-launchId` |
+| `project` | Tool argument `projectKey`, the project in a `reportportal://` resource URI, or the `X-Project` header |
+| `resource_ids` | Allow-listed identifier arguments only: `launch_id`, `launch-id`, `launchId`, `test_item_id`, `test_items_ids`, `defect_type_id`, `parent-item-id`, `attachment-content-id`, `filter-eq-parentId`, `filter-eq-launchId`, `testCaseId`, `testCaseExecutionId`, `folderId`, `test-plan-id`, `test-case-ids`, `milestone-id`, `parent-test-folder-id`, `test-folder-id`, `id`, `filter-eq-id`, `filter-eq-testFolderId`, `filter-eq-testPlanId` |
 | `outcome` | `success`, `tool_error` (tool returned an error result), or `error` (the call failed) |
 | `rp_status` | HTTP status of the ReportPortal response for this call (`0` when the call did not reach ReportPortal). When a tool makes several API calls, the first error status (`4xx`/`5xx`) is kept; without errors, the last status is kept |
 | `result_size` | Byte length of the text returned to the client |
@@ -294,10 +293,10 @@ Or follow the next steps:
 {
   "mcpServers": {
     "reportportal": {
-      "url": "http://your-mcp-server-host:port/mcp/",
+      "url": "http://your-mcp-server-host:port/mcp",
       "headers": {
         "Authorization": "Bearer ${RP_API_TOKEN}",
-        "X-Project": "YourProjectInReportPortal"
+        "X-Project": "YourProjectKeyFromReportPortal"
       }
     }
   }
@@ -336,11 +335,11 @@ Documentation: [Cursor MCP](https://cursor.com/en-US/docs/context/mcp).
 {
   "servers": {
     "reportportal": {
-      "url": "http://your-mcp-server-host:port/mcp/",
+      "url": "http://your-mcp-server-host:port/mcp",
       "requestInit": {
         "headers": {
           "Authorization": "Bearer ${RP_API_TOKEN}",
-          "X-Project": "YourProjectInReportPortal"
+          "X-Project": "YourProjectKeyFromReportPortal"
         }
       }
     }
@@ -378,11 +377,11 @@ Documentation: [VS Code Copilot Guide](https://code.visualstudio.com/docs/copilo
 {
   "servers": {
     "reportportal": {
-      "url": "http://your-mcp-server-host:port/mcp/",
+      "url": "http://your-mcp-server-host:port/mcp",
       "requestInit": {
         "headers": {
           "Authorization": "Bearer ${RP_API_TOKEN}",
-          "X-Project": "YourProjectInReportPortal"
+          "X-Project": "YourProjectKeyFromReportPortal"
         }
       }
     }
@@ -425,7 +424,7 @@ Claude Desktop does not natively support direct Server-Sent Events (SSE) transpo
 
 **For local installation (Docker):**
 ```bash
-claude mcp add-json reportportal '{"command": "docker", "args": ["run", "-i", "--rm", "-e", "RP_API_TOKEN", "-e", "RP_HOST", "-e", "RP_PROJECT", "reportportal/mcp-server"], "env": {"RP_API_TOKEN": "${RP_API_TOKEN}", "RP_HOST": "https://your-reportportal-instance.com", "RP_PROJECT": "YourProjectInReportPortal"}}'
+claude mcp add-json reportportal '{"command": "docker", "args": ["run", "-i", "--rm", "-e", "RP_API_TOKEN", "-e", "RP_HOST", "-e", "RP_PROJECT", "reportportal/mcp-server"], "env": {"RP_API_TOKEN": "${RP_API_TOKEN}", "RP_HOST": "https://your-reportportal-instance.com", "RP_PROJECT": "YourProjectKeyFromReportPortal"}}'
 ```
 
 **For remote server:**
@@ -433,7 +432,7 @@ claude mcp add-json reportportal '{"command": "docker", "args": ["run", "-i", "-
 > **Note:** The remote server must be **deployed and running** in HTTP mode before connecting.
 
 ```bash
-claude mcp add-json reportportal '{"url": "http://your-mcp-server-host:port/mcp/", "headers": {"Authorization": "Bearer ${RP_API_TOKEN}", "X-Project": "YourProjectInReportPortal"}}'
+claude mcp add-json reportportal '{"url": "http://your-mcp-server-host:port/mcp", "headers": {"Authorization": "Bearer ${RP_API_TOKEN}", "X-Project": "YourProjectKeyFromReportPortal"}}'
 ```
 
 **Configuration Options:**
@@ -456,7 +455,7 @@ The ReportPortal MCP Server is compatible with any MCP-compatible coding agent. 
     "env": {
       "RP_API_TOKEN": "your-api-token",
       "RP_HOST": "https://your-reportportal-instance.com",
-      "RP_PROJECT": "YourProjectInReportPortal"
+      "RP_PROJECT": "YourProjectKeyFromReportPortal"
     }
   }
 }
@@ -469,10 +468,10 @@ The ReportPortal MCP Server is compatible with any MCP-compatible coding agent. 
 ```json
 {
   "reportportal": {
-    "url": "http://your-mcp-server-host:port/mcp/",
+    "url": "http://your-mcp-server-host:port/mcp",
     "headers": {
       "Authorization": "Bearer your-api-token",
-      "X-Project": "YourProjectInReportPortal"
+      "X-Project": "YourProjectKeyFromReportPortal"
     }
   }
 }
@@ -490,6 +489,8 @@ It is strongly recommended to use the **latest versions** of ReportPortal.
 
 The version 1.x of this MCP server supports ReportPortal product versions from [25.1](https://github.com/reportportal/reportportal/releases/tag/25.1) (where the API service version not lower than [5.14.0](https://github.com/reportportal/service-api/releases/tag/5.14.0)).\
 Compatibility with older versions has not been tested and may result in incorrect work of the MCP server.
+
+Version **2.x** adds ReportPortal TMS tools and requires ReportPortal product version **26.1+**, where the Test Case Management API is available. On older ReportPortal versions TMS tools still appear in `tools/list`, but calls fail because the TMS API is unavailable.
 
 ## Features
 
@@ -517,7 +518,27 @@ The ReportPortal MCP server provides a comprehensive set of capabilities for int
 - Analyze launches to get detailed test execution insights
 - Generate structured reports with statistics and failure analysis
 
+### Test Case Management (TMS)
+
+Available from MCP server version 2.x (requires ReportPortal 26.1+).
+
+- Browse milestones, test folders, and test cases with optional filters and limit/offset pagination
+- Retrieve a specific test plan by its ID
+- Create and organize test folders (including nested subfolders)
+- Create, update, and delete manual test cases in either supported format: `text` scenarios (instructions and expected results) or `steps` scenarios (an ordered list of steps)
+- Create milestones and test plans, then assign or remove test cases from plans
+- Retrieve test cases linked to a specific test plan with optional limit/offset pagination
+- Create a manual launch populated with test plan test cases in one step
+- List manual launches by filter (name, item status, completion state, time range, test plan, attributes) with pagination
+- List test case executions for a manual launch by filter (name, priority, tags) with pagination
+- Batch-add test cases to an existing manual launch
+- Update the status and comment of a test case execution in a manual launch
+
+> **Note:** TMS write tools (`create_*`, `update_*`, `delete_*`, `add_test_cases_to_test_plan`, `delete_test_cases_from_test_plan`, `add_test_cases_to_manual_launch`, `update_manual_launch_execution`) mutate data in ReportPortal. Use them with care in production projects.
+
 ### Available Tools (commands)
+
+#### Tools. Test results
 
 | Tool Name                  | Description                                      | Parameters                                                                                                    |
 |----------------------------|--------------------------------------------------|---------------------------------------------------------------------------------------------------------------|
@@ -530,16 +551,41 @@ The ReportPortal MCP server provides a comprehensive set of capabilities for int
 | Update Launch              | Updates the description and/or attributes of a launch | `launch_id` (required), `description` (optional, replaces existing), `attributes` (optional, array of `{key, value}` objects — replaces all existing attributes) |
 | Force Finish Launch        | Forces a launch to finish                        | `launch_id` (required)                                                                                                   |
 | Delete Launch              | Deletes a specific launch                        | `launch_id` (required)                                                                                                   |
-| Import Launch from File    | Imports a launch from a file using a ReportPortal import plugin. Supported file formats depend on the plugins installed on the server (e.g. JUnit XML, Allure ZIP). Available plugins and their accepted MIME types can be discovered via `GET /api/v1/plugin` (filter by `groupType: "IMPORT"`). The handler enforces a decoded upload limit of up to 50 MiB by default, and may apply a lower cap when the selected plugin advertises a smaller `details.maxFileSize`; base64-encoded uploads are measured after decoding. Imports exceeding the effective limit are rejected — split the file or pre-compress it before upload. | `plugin_name` (required), `file_name` (required, e.g. `results.xml`), `file_content` (required, raw text for text formats or base64 for binary), `content_encoding` (optional, `"none"` (default) or `"base64"`), `project` (optional) |
-
+| Import Launch from File    | Imports a launch from a file using a ReportPortal import plugin. Supported file formats depend on the plugins installed on the server (e.g. JUnit XML, Allure ZIP). Available plugins and their accepted MIME types can be discovered via `GET /api/v1/plugin` (filter by `groupType: "IMPORT"`). The handler enforces a decoded upload limit of up to 50 MiB by default, and may apply a lower cap when the selected plugin advertises a smaller `details.maxFileSize`; base64-encoded uploads are measured after decoding. Imports exceeding the effective limit are rejected — split the file or pre-compress it before upload. | `plugin_name` (required), `file_name` (required, e.g. `results.xml`), `file_content` (required, raw text for text formats or base64 for binary), `content_encoding` (optional, `"none"` (default) or `"base64"`), `content_type` (optional, IANA media type; when omitted, inferred from the file extension and the plugin's accepted MIME list), `project` (optional) |
 | Get Suites by filter  | Lists test suites for a specific launch           | `launch-id` (required), `name`, `description`, `start_time_from`, `start_time_to`, `attributes`, `parent_id`, `sort`, `page`, `page-size` (all optional)                                                        |
 | Get Test Items by filter  | Lists test items for a specific launch or saved filter           | `launch-id` or `filter-name` (one required), `include-before-after-hooks`, `name`, `description`, `status`, `has_retries`, `start_time_from`, `start_time_to`, `attributes`, `parent_id`, `defect_comment`, `auto_analyzed`, `ignored_in_aa`, `pattern_name`, `ticket_id`, `filter-eq-defect-type` (optional defect/issue type locator from `get_project_defect_types`), `sort`, `page`, `page-size` (all optional)                                                        |
 | Get Logs by filter  | Lists logs for a specific test item or nested step          | `parent-item-id` (required), `log_level`, `log_content`, `logs_with_attachments`, `status`, `sort`, `page`, `page-size` (all optional)                                                        |
-| Get Attachment by ID        | Retrieves an attachment binary by id        | `attachment-content-id` (required)                                                                                                |
+| Get Attachment by ID        | Retrieves an attachment by id. PNG, JPEG, GIF and WebP images are returned as MCP image content, text attachments as text, and other binaries as base64-encoded text | `attachment-content-id` (required)                                                                                                |
 | Get Test Item by ID        | Retrieves details of a specific test item        | `test_item_id` (required)                                                                                                |
 | Get Project Defect Types        | Retrieves available defect types for the specific project        | None                                                                                              |
 | Update defect types by item ids        | Updates defect types for multiple test items        |`test_items_ids` (required), `defect_type_id` (required), `defect_type_comment` (optional), `ignore_analyzer` (optional)                                                                 |
 | Get Test Items History | Retrieves execution history of test items for a specific launch or parent suite | `filter-eq-launchId` or `filter-eq-parentId` (one required), `historyDepth`, `type`, `name`, `description`, `status`, `start_time_from`, `start_time_to`, `attributes`, `has_retries`, `defect_comment`, `auto_analyzed`, `ignored_in_aa`, `ticket_id`, `pattern_name`, `page`, `page-size`, `page-sort` (all optional) |
+
+#### Tools. Test Case Management
+
+Available from MCP server version 2.x. Requires ReportPortal 26.1+ with TMS enabled.
+
+| Tool Name                  | Description                                      | Parameters                                                                                                    |
+|----------------------------|--------------------------------------------------|---------------------------------------------------------------------------------------------------------------|
+| Get Milestones by filter | Lists TMS milestones for a project, optionally filtered by name or ID. Supports limit/offset pagination. | `filter-cnt-name` (optional), `filter-id` (optional), `limit` (optional, integer ≥ 1, default 50), `offset` (optional, integer ≥ 0, default 0) |
+| Get Test Plan by ID | Retrieves a TMS test plan by its ID | `id` (required) |
+| Get Test Cases for Test Plan | Lists test cases assigned to a TMS test plan. Supports limit/offset pagination. | `test-plan-id` (required), `limit` (optional, integer ≥ 1, default 50), `offset` (optional, integer ≥ 0, default 0) |
+| Get Test Folders by Filter | Lists TMS test folders for a project. All filters and pagination parameters are optional. | `filter-eq-id` (optional, integer ≥ 1), `filter-eq-parentId` (optional, integer ≥ 1), `filter-cnt-name` (optional), `limit` (optional, integer ≥ 1, default 50), `offset` (optional, integer ≥ 0, default 0) |
+| Get Test Cases by Filter | Lists TMS test cases for a project. All filters and pagination parameters are optional. | `filter-eq-id` (optional, integer ≥ 1), `filter-eq-testFolderId` (optional, integer ≥ 1), `filter-cnt-name` (optional), `filter-has-attributeKey` (optional, comma-separated list of tag keys to filter by, e.g. `smoke,regression,login`), `filter-in-priority` (optional, enum array: `BLOCKER` \| `CRITICAL` \| `HIGH` \| `LOW` \| `MEDIUM` \| `UNSPECIFIED`), `limit` (optional, integer ≥ 1, default 50), `offset` (optional, integer ≥ 0, default 0) |
+| Create Folder | Creates a new test folder (or subfolder) in the TMS. **Mutates TMS data.** | `name` (required), `description` (optional), `parent-test-folder-id` (optional, integer ≥ 1) |
+| Delete Folder | Deletes a test folder by its ID from the TMS. **Mutates TMS data. Irreversible.** | `folderId` (required, integer ≥ 1) |
+| Create Test Case | Creates a new test case. Use `test-case-type` to choose the manual scenario. Attachments (`{ id, fileName, fileType, fileSize, content }`, same shape as Update Manual Launch Execution's attachments — provide either a pre-uploaded `id` or inline base64 `content` to auto-upload) can be linked at the whole-scenario level for `text`, or per-step and on preconditions for `steps`. **Mutates TMS data.** | `name` (required), `test-folder-id` (required, integer ≥ 1 — ID of the folder to place the test case in), `description` (optional), `priority` (optional, enum: `LOW` \| `MEDIUM` \| `HIGH` \| `CRITICAL` \| `BLOCKER` \| `UNSPECIFIED`), `test-case-type` (optional, enum: `text` (default) \| `steps`), `instructions` (optional, for `text` type), `expected-result` (optional, for `text` type), `steps` (optional, array of `{ instructions, expected-result, attachments }`, for `steps` type — each step's `attachments` are attached to that step only), `preconditions` (optional), `preconditions-attachments` (optional, array of attachments for the preconditions; only valid when `test-case-type` is `steps` and `preconditions` is provided), `requirements` (optional, array of value strings; a unique id is generated automatically per entry), `attachments` (optional, array of attachments for the whole scenario; only valid when `test-case-type` is `text`), `attributes` (optional, array of `{ key }` objects — tags to attach; existing project attributes matching the key are reused, missing ones are created automatically) |
+| Update Test Case | Updates an existing test case; only provided fields are changed. **Mutates TMS data.** | `testCaseId` (required, integer ≥ 1), `name` (optional), `description` (optional), `priority` (optional, enum: `LOW` \| `MEDIUM` \| `HIGH` \| `CRITICAL` \| `BLOCKER` \| `UNSPECIFIED`), `test-folder-id` (optional, integer ≥ 1), `test-case-type` (optional, enum: `text` \| `steps`; required if any of `instructions`, `expected-result`, `preconditions`, `requirements`, `steps`, `attachments`, or `preconditions-attachments` is provided), `instructions` (optional, for `text` type), `expected-result` (optional, for `text` type), `steps` (optional, array of `{ instructions, expected-result, attachments }`, for `steps` type), `preconditions` (optional), `preconditions-attachments` (optional, array of attachments for the preconditions; only valid when `test-case-type` is `steps` and `preconditions` is provided), `requirements` (optional, array of value strings; a unique id is generated automatically per entry), `attachments` (optional, array of attachments for the whole scenario; only valid when `test-case-type` is `text`), `attributes` (optional, array of `{ key }` objects — tags to attach; pass `[]` to clear all existing tags; omit to leave unchanged) |
+| Delete Test Case | Deletes a test case by its ID from the TMS. **Mutates TMS data. Irreversible.** | `testCaseId` (required, integer ≥ 1) |
+| Create Milestone | Creates a new milestone in the TMS. **Mutates TMS data.** Dates must be RFC3339 (e.g. `2026-01-01T00:00:00Z`); `end-date` must not precede `start-date`. | `name` (required), `type` (required, enum: `RELEASE` \| `SPRINT` \| `PLAN` \| `FEATURE` \| `OTHER`), `start-date` (required, RFC3339), `end-date` (required, RFC3339), `status` (optional, enum: `SCHEDULED` \| `TESTING` \| `COMPLETED`) |
+| Create Test Plan | Creates a new test plan linked to an existing milestone. **Mutates TMS data.** | `name` (required), `milestone-id` (required, integer ≥ 1), `description` (optional) |
+| Add Test Cases to Test Plan | Adds one or more test cases to an existing TMS test plan. **Mutates TMS data.** | `test-plan-id` (required, integer ≥ 1), `test-case-ids` (required, non-empty array of integers ≥ 1) |
+| Delete Test Cases from Test Plan | Removes one or more test cases from an existing TMS test plan. **Mutates TMS data.** | `test-plan-id` (required, integer ≥ 1), `test-case-ids` (required, non-empty array of integers ≥ 1) |
+| Create Manual Launch | Creates a new manual launch in the TMS and populates it with test cases from a test plan. **Mutates TMS data.** | `name` (required), `startTime` (required, ISO-8601, e.g. `2026-07-29T11:59:04.221Z`), `test-plan-id` (required, integer ≥ 1), `test-case-ids` (required, non-empty array of integers ≥ 1), `description` (optional), `attributes` (optional, array of `{ key, value }` objects — `value` is required per attribute) |
+| Get Manual Launches | Lists manual launches for a project from the TMS, filtered by name, execution status, completion state, time range, test plan, or attributes. Supports limit/offset pagination. | `filter-cnt-name` (optional), `filter-in-itemStatus` (optional, array: `PASSED` \| `FAILED` \| `SKIPPED` \| `IN_PROGRESS`), `filter-eq-completion` (optional, enum: `has_not_executed` \| `done`; omit for all), `filter-gt-startTime` (optional, RFC3339 or Unix epoch), `filter-lt-endTime` (optional, RFC3339 or Unix epoch), `filter-eq-testPlanId` (optional, integer ≥ 1), `filter-has-compositeAttribute` (optional, format: `key1:value1,key2:value2`), `limit` (optional, integer ≥ 1), `offset` (optional, integer ≥ 0) |
+| Get Manual Launch Executions | Lists test case executions for a specific manual launch from the TMS. All filters and pagination parameters are optional. | `launchId` (required, integer ≥ 1), `filter-cnt-name` (optional), `filter-in-priority` (optional, array: `BLOCKER` \| `CRITICAL` \| `HIGH` \| `LOW` \| `MEDIUM` \| `UNSPECIFIED`), `filter-in-attributeKey` (optional, format: `tag1,tag2,tag3`), `limit` (optional, integer ≥ 1), `offset` (optional, integer ≥ 0) |
+| Add Test Cases to Manual Launch | Adds one or more test cases to an existing TMS manual launch. **Mutates TMS data.** | `launchId` (required, integer ≥ 1), `test-case-ids` (required, non-empty array of integers ≥ 1) |
+| Update Manual Launch Execution | Updates the status (and optionally adds a comment with attachments) of a test case execution in a TMS manual launch. Each attachment either references a file already uploaded via `POST /project/{projectKey}/tms/attachment/upload` (by `id`/`fileName`/`fileType`/`fileSize`), or provides the raw file content inline as base64 (`fileName` + `content`), in which case the tool uploads it to that endpoint automatically and links the resulting attachment to the execution. The handler enforces a decoded upload limit of 52,428,800 bytes (50 MiB) per inline attachment; base64-encoded content is measured after decoding. Attachments exceeding this limit are rejected. **Mutates TMS data.** | `launchId` (required, integer ≥ 1), `testCaseExecutionId` (required, integer ≥ 1), `status` (required, enum: `IN_PROGRESS` \| `PASSED` \| `FAILED` \| `SKIPPED`), `executionComment` (optional, object: `comment` (optional, string), `attachments` (optional, array of `{ id, fileName, fileType, fileSize, content }` — provide either `id` (pre-uploaded attachment; `fileType`/`fileSize` required) or `content` (base64-encoded bytes to upload automatically; `fileType`/`fileSize` optional and inferred), plus `fileName` always required)) |
 
 ### Available Prompts
 
@@ -565,6 +611,10 @@ Here are some real-world examples of what you might ask your AI after setup (the
 - **"Finish the running launch with ID 4321."** – forces a currently running test launch to stop.
 - **"Show me the top five 500-level errors in the last hour"** - lists the top 5 such errors from the recent test results.
 - **"Import this JUnit XML report into project 'my_project' using the junit plugin."** – uploads the provided report file to ReportPortal and creates a new launch from it.
+- **"List test cases in the Smoke folder."** – returns TMS test cases filtered by folder.
+- **"Create a test case named 'Login with valid credentials' in folder 42."** – creates a manual test case in the given TMS folder.
+- **"Create a sprint milestone for February and a test plan with the smoke test cases."** – creates TMS milestone and test-plan objects and assigns cases.
+- **"Start a manual launch from test plan 15 with cases 101 and 102, then mark execution 7 as failed with a comment."** – creates or updates TMS manual launch execution data.
 
 Each query above corresponds to a "tool" provided by the MCP server, but you just phrase it naturally.
 The AI will invoke the correct command behind the scenes.
@@ -573,7 +623,7 @@ These features let you query and manage your test reports in many ways through s
 ## For developers
 
 ### Prerequisites
-- Go 1.24.4 or later
+- Go 1.27 or later
 - A ReportPortal instance
 
 ### Building from Source
@@ -595,28 +645,39 @@ The server needs to know where your ReportPortal is and how to authenticate. Set
 
 **For stdio mode (default):**
 
+| Variable | Description                                                                                                                            | Required |
+|----------|----------------------------------------------------------------------------------------------------------------------------------------|----------|
+| `RP_HOST` | The URL of your ReportPortal installation (e.g. https://myreportportal.example.com)                                                    | Yes      |
+| `RP_PROJECT` | Your default project key in ReportPortal (unique project identifier within the ReportPortal instance, e.g. `myorganization_myproject`) | No       |
+| `RP_API_TOKEN` | Your ReportPortal API token (for access)                                                                                               | Yes      |
+
+**Common (both modes):**
+
 | Variable | Description | Required |
 |----------|-------------|----------|
-| `RP_HOST` | The URL of your ReportPortal (e.g. https://myreportportal.example.com) | Yes |
-| `RP_PROJECT` | Your default project name in ReportPortal | Optional |
-| `RP_API_TOKEN` | Your ReportPortal API token (for access) | Yes |
+| `LOG_LEVEL` | Logging level for operational messages on stderr (`debug`, `info`, `warn`, `error`; default: `info`) | No |
+| `RP_INSECURE_TLS` | Skip TLS certificate verification when calling ReportPortal (self-signed or mismatched certs). Mutually exclusive with `RP_TLS_CA_CERT` | No |
+| `RP_TLS_CA_CERT` | Path to a PEM file with additional trusted CA certificate(s) for ReportPortal TLS (appended to the system pool). Mutually exclusive with `RP_INSECURE_TLS` | No |
+| `RP_MCP_ANALYTICS_OFF` | Set to `true` to disable Google Analytics tracking | No |
 
 **For HTTP mode:**
 
 Set `MCP_MODE=http` and configure the following:
 - `RP_HOST`: Required - The URL of your ReportPortal
-- `RP_PROJECT`: Optional - Your default project name
+- `RP_PROJECT`: **Not used** in HTTP mode — ignored even if set. Pass the `X-Project` request header per-request instead.
 - `MCP_SERVER_PORT`: Optional - HTTP server port (default: 8080)
 - `MCP_SERVER_HOST`: Optional - HTTP bind host (default: empty)
 - Authentication tokens must be passed per-request via `Authorization: Bearer <token>` header
 - `RP_API_TOKEN` environment variable is **not used** in HTTP mode
 - `MCP_AUDIT_LOG`: Optional — `true` or `false`. When unset, JSON audit events are written to stdout if OAuth is enabled. See [Audit logging](#audit-logging)
+- `RP_MAX_WORKERS`: Optional — maximum worker goroutines (`0` = auto, CPU×2)
+- `RP_CONNECTION_TIMEOUT`: Optional — outbound connection timeout in seconds (default: `30`)
 
 **Example for stdio mode:**
 
 ```bash
 export RP_HOST="https://your-reportportal-instance.com"
-export RP_PROJECT="YourProjectInReportPortal"
+export RP_PROJECT="YourProjectKeyFromReportPortal"
 export RP_API_TOKEN="your-api-token"
 ./reportportal-mcp-server
 ```
@@ -626,10 +687,11 @@ export RP_API_TOKEN="your-api-token"
 ```bash
 export MCP_MODE=http
 export RP_HOST="https://your-reportportal-instance.com"
-export RP_PROJECT="YourProjectInReportPortal"
 export MCP_SERVER_PORT=8080
 ./reportportal-mcp-server
-# Tokens are passed per-request via HTTP Authorization header
+# Tokens and project key are passed per-request via HTTP headers:
+#   Authorization: Bearer <token>
+#   X-Project: <projectKey>
 ```
 
 ### HTTP API Endpoints
@@ -756,25 +818,19 @@ task lint
 task fmt
 ```
 
+### Project Documentation
+
+For a deeper dive beyond this README, see the docs in [`docs/`](./docs):
+
+- [**Architecture & Limitations**](docs/ARCHITECTURE.md) — process layout, request lifecycle, package map, and known design limitations/gotchas.
+- [**Development & Style Guide**](docs/DEVELOPMENT.md) — environment setup, coding conventions, and the established approaches for configuration, validation, analytics, and testing.
+- [**Release Workflow**](docs/RELEASE.md) — branch model, CI/CD pipelines, and the steps to publish an official release.
+
 ### Extending the Server
 
 #### Adding new Tools
 
-To add a new tool, create a new method in the appropriate resource file and add it to the server in the `NewServer` function:
-
-```go
-// In your resource file (e.g., launches.go)
-func (lr *LaunchResources) toolNewFeature() (tool mcp.Tool, handler server.ToolHandlerFunc) {
-    // Implement your tool
-}
-
-// In server.go
-func NewServer(...) *server.MCPServer {
-    // ...
-    s.AddTool(launches.toolNewFeature())
-    // ...
-}
-```
+To add a new tool, create a `tool…()` method in the appropriate handler file (e.g. `launches.go`, `tms.go`) and register it from `NewServer` in `server.go`. See [Development & Style Guide](docs/DEVELOPMENT.md) for the typed handler pattern (`utils.ToolHandler[In, Out]` and `utils.RegisterTool`).
 
 #### Adding new Prompts
 
@@ -807,7 +863,7 @@ curl -I https://your-reportportal-instance.com
 
 # Test API access with your token
 curl -H "Authorization: Bearer your-api-token" \
-     https://your-reportportal-instance.com/api/v1/YourProject/launch
+     https://your-reportportal-instance.com/api/v1/YourProjectKey/launch
 ```
 
 **Via PowerShell:**
@@ -820,7 +876,7 @@ Invoke-WebRequest -Uri "https://your-reportportal-instance.com" -Method Head
 $headers = @{
     "Authorization" = "Bearer your-api-token"
 }
-Invoke-RestMethod -Uri "https://your-reportportal-instance.com/api/v1/YourProject/launch" -Headers $headers
+Invoke-RestMethod -Uri "https://your-reportportal-instance.com/api/v1/YourProjectKey/launch" -Headers $headers
 ```
 
 **Expected Results:**
@@ -857,7 +913,7 @@ curl http://your-mcp-server-host:port/info
 curl -X POST http://your-mcp-server-host:port/mcp \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer your-api-token" \
-  -H "X-Project: YourProject" \
+  -H "X-Project: YourProjectKey" \
   -d '{
     "jsonrpc": "2.0",
     "method": "tools/list",
@@ -875,7 +931,7 @@ Invoke-RestMethod -Uri "http://your-mcp-server-host:port/health"
 $headers = @{
     "Content-Type" = "application/json"
     "Authorization" = "Bearer your-api-token"
-    "X-Project" = "YourProject"
+    "X-Project" = "YourProjectKey"
 }
 $body = @{
     jsonrpc = "2.0"
@@ -910,7 +966,7 @@ Ask your AI assistant:
 "What ReportPortal tools are available?"
 ```
 
-Expected response: A list of 18 tools including launches, test items, analysis tools, etc.
+Expected response: A list of 37 tools including launches, test items, analysis tools, TMS tools, etc.
 
 **Step 2: Test Basic Query**
 
@@ -958,20 +1014,20 @@ tail -f server.log
 INFO: MCP server started
 INFO: Received request: tools/list
 INFO: Processing tool call: get_launches
-DEBUG: Calling ReportPortal API: /api/v1/project/launch
+DEBUG: Calling ReportPortal API: /api/v1/projectKey/launch
 ```
 
 ### 4. Common Verification Issues
 
-| Issue | Cause | Solution |
-|-------|-------|----------|
-| AI shows no ReportPortal tools | MCP server not connected | Check configuration file syntax, restart AI assistant |
-| "Connection refused" error | Server not running or wrong port | Verify server is running: `docker ps` or check process |
-| "401 Unauthorized" | Invalid API token | Regenerate token in ReportPortal profile |
-| "403 Forbidden" | Token valid but no project access | Check `RP_PROJECT` name, verify user has access |
-| "404 Not Found" | Wrong endpoint URL | Ensure remote URL ends with `/mcp/` |
-| Empty results from queries | No data in ReportPortal | Run some tests first to populate data |
-| Timeout errors | Network issues or slow ReportPortal | Check network connectivity, ReportPortal performance |
+| Issue | Cause | Solution                                                                                            |
+|-------|-------|-----------------------------------------------------------------------------------------------------|
+| AI shows no ReportPortal tools | MCP server not connected | Check configuration file syntax, restart AI assistant                                               |
+| "Connection refused" error | Server not running or wrong port | Verify server is running: `docker ps` or check process                                              |
+| "401 Unauthorized" | Invalid API token | Regenerate token in ReportPortal profile                                                            |
+| "403 Forbidden" | Token valid but no project access | Check `RP_PROJECT` key (must match the `Project KEY`, not the display name), verify user has access |
+| "404 Not Found" | Wrong endpoint URL | Use the MCP path `/mcp` (or `/api/mcp`), not the server root `/`                                 |
+| Empty results from queries | No data in ReportPortal | Run some tests first to populate data                                                               |
+| Timeout errors | Network issues or slow ReportPortal | Check network connectivity, ReportPortal performance                                                |
 
 ## Troubleshooting
 
@@ -1019,7 +1075,7 @@ Solutions:
 
 Solutions:
 1. Verify user has access to the specified project
-2. Check project name matches exactly (case-sensitive)
+2. Check project key (`RP_PROJECT`) matches exactly (case-sensitive, must be the `Project Key`, not the display name)
 3. Verify user role has sufficient permissions
 4. For remote servers, check `X-Project` header is set correctly
 
@@ -1057,7 +1113,7 @@ Solutions:
 1. Verify MCP server is running and accessible
 2. Check server logs for startup errors
 3. Ensure server mode matches client configuration (stdio vs HTTP)
-4. For remote servers, verify URL ends with `/mcp/`
+4. For remote servers, verify the URL is `http(s)://host:port/mcp` (or `/api/mcp`)
 
 ### Performance Issues
 
@@ -1110,3 +1166,5 @@ If you're still experiencing issues:
 ## License
 
 This project is licensed under the [Apache 2.0 License](LICENSE).
+
+

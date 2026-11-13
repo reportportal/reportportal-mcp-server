@@ -102,7 +102,7 @@
       ],
       "body": {
         "mode": "raw",
-        "raw": "{\n  \"id\": 1,\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"arguments\": {\n      \"project\": \"\",\n      \"launch-id\": 9683164\n    },\n    \"name\": \"get_test_items_by_filter\"\n  }\n}"
+        "raw": "{\n  \"id\": 1,\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"arguments\": {\n      \"projectKey\": \"test-project\",\n      \"launch-id\": 9683164\n    },\n    \"name\": \"get_test_items_by_filter\"\n  }\n}"
       },
       "url": {
         "raw": "/mcp",
