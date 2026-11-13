@@ -6,5 +6,12 @@ services:
     environment:
       MCP_MODE: http
       RP_HOST: ${RP_HOST:-https://your-reportportal-instance.com}
+      # OAuth (optional; disabled by default):
+      # MCP_OAUTH_ENABLED: "true"
+      # MCP_PUBLIC_URL: https://mcp.example.com/mcp
+      # MCP_OAUTH_ISSUER: https://login.microsoftonline.com/{tenant-id}/v2.0
+      # MCP_OAUTH_JWKS_URL: https://login.microsoftonline.com/{tenant-id}/discovery/v2.0/keys
+      # MCP_OAUTH_AUDIENCE: "{mcp-app-client-id}"
+      # MCP_OAUTH_SCOPE: api://{app-id}/access_as_user
     ports:
       - 8085:8080

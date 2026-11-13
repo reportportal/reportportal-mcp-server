@@ -42,27 +42,34 @@ const tmsAttachmentMaxDecodedBytes int64 = 50 * 1024 * 1024 // 50 MiB (52 428 80
 // reference this constant.
 const ProjectKeyField = "projectKey"
 
-// ValidateAuthenticatedBaseURL prevents API credentials from being sent over
-// an unencrypted connection.
-func ValidateAuthenticatedBaseURL(baseURL *url.URL, apiKey string) error {
-	if apiKey != "" && (baseURL == nil || !strings.EqualFold(baseURL.Scheme, "https")) {
-		return fmt.Errorf("authenticated ReportPortal requests require an HTTPS base URL")
+// isHTTPSDowngrade reports whether following a redirect to target would switch
+// a chain that already used HTTPS to plain HTTP.
+func isHTTPSDowngrade(target *url.URL, via []*http.Request) bool {
+	if strings.EqualFold(target.Scheme, "https") {
+		return false
 	}
-	return nil
+	for _, prev := range via {
+		if strings.EqualFold(prev.URL.Scheme, "https") {
+			return true
+		}
+	}
+	return false
 }
 
-// SameHostHTTPSRedirectPolicy returns an http.Client CheckRedirect callback that
-// rejects redirects downgrading to plain HTTP or targeting a host other than
-// allowedHostURL, so bearer tokens are never forwarded to an unsafe destination.
-// Same-host HTTPS redirects are permitted.
-func SameHostHTTPSRedirectPolicy(
+// SameHostRedirectPolicy returns an http.Client CheckRedirect callback that
+// rejects redirects targeting a host other than allowedHostURL or downgrading
+// from HTTPS to plain HTTP, so bearer tokens are never forwarded to an unsafe
+// destination. Same-host HTTP redirects are permitted only when allowedHostURL
+// itself uses plain HTTP.
+func SameHostRedirectPolicy(
 	allowedHostURL *url.URL,
 ) func(req *http.Request, via []*http.Request) error {
 	return func(req *http.Request, via []*http.Request) error {
 		if len(via) >= 10 {
 			return fmt.Errorf("stopped after %d redirects", len(via))
 		}
-		if !strings.EqualFold(req.URL.Scheme, "https") {
+		if !strings.EqualFold(req.URL.Scheme, "https") &&
+			(allowedHostURL == nil || !strings.EqualFold(allowedHostURL.Scheme, "http") || isHTTPSDowngrade(req.URL, via)) {
 			return fmt.Errorf("refusing to follow redirect to non-HTTPS URL: %s", req.URL)
 		}
 		if allowedHostURL != nil && !strings.EqualFold(req.URL.Host, allowedHostURL.Host) {
@@ -850,11 +857,12 @@ func UploadTMSAttachment(
 		copyClient.Timeout = defaultAttachmentUploadTimeout
 	}
 	// Go's default redirect handling only strips the Authorization header when the
-	// destination host changes, not on a same-host HTTPS->HTTP downgrade, so enforce
-	// HTTPS explicitly here while still honouring any pre-existing redirect policy.
+	// destination host changes, not on a same-host HTTPS->HTTP downgrade, so reject
+	// HTTPS->HTTP downgrades explicitly here while still honouring any pre-existing
+	// redirect policy.
 	existingCheckRedirect := copyClient.CheckRedirect
 	copyClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-		if !strings.EqualFold(req.URL.Scheme, "https") {
+		if isHTTPSDowngrade(req.URL, via) {
 			return fmt.Errorf("refusing to follow redirect to non-HTTPS URL: %s", req.URL)
 		}
 		if existingCheckRedirect != nil {

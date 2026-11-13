@@ -930,6 +930,7 @@ type UpdateDefectTypeArgs struct {
 	TestItemsIDs      []string `json:"test_items_ids"`
 	DefectTypeID      string   `json:"defect_type_id"`
 	DefectTypeComment string   `json:"defect_type_comment"`
+	IgnoreAnalyzer    *bool    `json:"ignore_analyzer,omitempty"`
 }
 
 // toolUpdateDefectTypeForTestItems creates a tool to update the defect type for a list of specific test items.
@@ -954,6 +955,10 @@ func (lr *TestItemResources) toolUpdateDefectTypeForTestItems() (*mcp.Tool, util
 	properties["defect_type_comment"] = &jsonschema.Schema{
 		Type:        "string",
 		Description: "The defect type comment provides a detailed description of the root cause of the test failure",
+	}
+	properties["ignore_analyzer"] = &jsonschema.Schema{
+		Type:        "boolean",
+		Description: "If true, the test items are excluded from Auto-Analysis, so the manual classification is not overridden in future launches",
 	}
 
 	return &mcp.Tool{
@@ -1005,9 +1010,10 @@ func (lr *TestItemResources) toolUpdateDefectTypeForTestItems() (*mcp.Tool, util
 			issues = append(issues, openapi.ComEpamReportportalBaseModelIssueIssueDefinition{
 				TestItemId: testItemId,
 				Issue: openapi.ComEpamReportportalBaseReportingIssue{
-					IssueType:    args.DefectTypeID,
-					AutoAnalyzed: openapi.PtrBool(false),
-					Comment:      commentPtr,
+					IssueType:      args.DefectTypeID,
+					AutoAnalyzed:   openapi.PtrBool(false),
+					Comment:        commentPtr,
+					IgnoreAnalyzer: args.IgnoreAnalyzer,
 				},
 			})
 		}

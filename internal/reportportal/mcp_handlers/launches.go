@@ -27,6 +27,7 @@ import (
 )
 
 const (
+	automationLaunchTypes   = "AGENTIC,AUTOMATION"
 	importHTTPClientTimeout = 30 * time.Second
 	// importMaxFileSizeBytes is the upper bound on the decoded file payload
 	// accepted by the import tool. The MCP protocol delivers file_content as a
@@ -34,6 +35,10 @@ const (
 	// prevents an abnormally large value from being processed further.
 	importMaxFileSizeBytes = 50 * 1024 * 1024 // 50 MiB
 )
+
+func addAutomationLaunchTypeFilter(values url.Values) {
+	values.Set("filter.in.launchType", automationLaunchTypes)
+}
 
 // RegisterLaunchTools registers all launch-related tools and resources with the MCP server.
 // httpClient is an optional pre-configured HTTP client used for the import-launch multipart
@@ -272,6 +277,8 @@ func (lr *LaunchResources) toolGetLaunches() (*mcp.Tool, utils.ToolHandler[GetLa
 					)
 				}
 
+				addAutomationLaunchTypeFilter(urlValues)
+
 				ctxWithParams := utils.WithQueryParams(ctx, urlValues)
 				// Build API request and apply pagination directly
 				apiRequest := lr.client.LaunchAPI.GetProjectLaunches(ctxWithParams, project)
@@ -413,6 +420,7 @@ func (lr *LaunchResources) toolGetLastLaunchByName() (*mcp.Tool, utils.ToolHandl
 				urlValues := url.Values{
 					"filter.cnt.name": {args.Launch},
 				}
+				addAutomationLaunchTypeFilter(urlValues)
 				ctxWithParams := utils.WithQueryParams(ctx, urlValues)
 				apiRequest := lr.client.LaunchAPI.GetProjectLaunches(ctxWithParams, project)
 				apiRequest = utils.ApplyPaginationOptions(
