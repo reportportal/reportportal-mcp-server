@@ -298,7 +298,7 @@ Ground rules when touching this package or adding a new tool:
    `NewServer`/`initializeTools` when introducing a **brand-new domain file**
    (step 1 above).
 7. Update the README tool table (`## Available Tools (commands)`) — the
-   number "33 tools" quoted in the Verifying-Your-Setup section will need
+   number "37 tools" quoted in the Verifying-Your-Setup section will need
    bumping too if you're adding rather than modifying a tool.
 8. Add unit tests (see §9) and, for anything with non-trivial request/response
    shaping, an integration fixture (see §9.2).
