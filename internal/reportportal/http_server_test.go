@@ -110,9 +110,7 @@ func TestNewHTTPServer_WithoutRPAPIToken(t *testing.T) {
 			expectError:     false,
 		},
 		{
-			// Even with an empty FallbackRPToken, HTTP mode injects real caller
-			// tokens per-request via QueryParamsMiddleware, so HTTP must be rejected.
-			name: "server rejects HTTP HostURL despite empty FallbackRPToken",
+			name: "server accepts HTTP HostURL",
 			config: HTTPServerConfig{
 				Version:               "1.0.0",
 				HostURL:               mustParseURL("http://reportportal.example.com"),
@@ -121,9 +119,8 @@ func TestNewHTTPServer_WithoutRPAPIToken(t *testing.T) {
 				MaxConcurrentRequests: 10,
 				ConnectionTimeout:     30 * time.Second,
 			},
-			expectAnalytics:    false,
-			expectError:        true,
-			expectedErrMessage: "HTTPS",
+			expectAnalytics: false,
+			expectError:     false,
 		},
 	}
 

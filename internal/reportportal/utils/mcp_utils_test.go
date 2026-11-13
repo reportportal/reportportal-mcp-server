@@ -67,43 +67,133 @@ func TestUploadTMSAttachment_RejectsHTTPSToHTTPRedirect(t *testing.T) {
 	require.Equal(t, 1, transport.calls, "the HTTP redirect target must never be dispatched")
 }
 
-func TestSameHostHTTPSRedirectPolicy(t *testing.T) {
-	allowed, err := url.Parse("https://reportportal.example.com")
-	require.NoError(t, err)
-	policy := SameHostHTTPSRedirectPolicy(allowed)
+func requestsFromURLStrings(t *testing.T, urls ...string) []*http.Request {
+	t.Helper()
+	if len(urls) == 0 {
+		return nil
+	}
+	out := make([]*http.Request, 0, len(urls))
+	for _, s := range urls {
+		u, err := url.Parse(s)
+		require.NoError(t, err)
+		out = append(out, &http.Request{URL: u})
+	}
+	return out
+}
 
+func TestSameHostRedirectPolicy(t *testing.T) {
 	tests := []struct {
 		name        string
+		base        string
+		via         []string
 		target      string
 		expectError bool
 	}{
 		{
-			name:        "same host HTTPS redirect is allowed",
-			target:      "https://reportportal.example.com/redirected",
-			expectError: false,
+			name:   "same host HTTPS redirect is allowed",
+			base:   "https://rp.example.com",
+			target: "https://rp.example.com/x",
 		},
 		{
 			name:        "HTTPS to HTTP downgrade is rejected",
-			target:      "http://reportportal.example.com/redirected",
+			base:        "https://rp.example.com",
+			target:      "http://rp.example.com/x",
 			expectError: true,
 		},
 		{
 			name:        "redirect to a different host is rejected",
-			target:      "https://attacker.example.com/redirected",
+			base:        "https://rp.example.com",
+			target:      "https://attacker.example.com/x",
+			expectError: true,
+		},
+		{
+			name:   "same host HTTP redirect is allowed",
+			base:   "http://rp.example.com",
+			target: "http://rp.example.com/x",
+		},
+		{
+			name:   "HTTP base may redirect to HTTPS on same host",
+			base:   "http://rp.example.com",
+			target: "https://rp.example.com/x",
+		},
+		{
+			name:        "HTTP base rejects redirect to different host over HTTP",
+			base:        "http://rp.example.com",
+			target:      "http://attacker.example.com/x",
+			expectError: true,
+		},
+		{
+			name:        "HTTP base rejects downgrade after HTTPS hop in via chain",
+			base:        "http://rp.example.com",
+			via:         []string{"https://rp.example.com/a"},
+			target:      "http://rp.example.com/x",
 			expectError: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			baseURL, err := url.Parse(tt.base)
+			require.NoError(t, err)
+			policy := SameHostRedirectPolicy(baseURL)
+
 			targetURL, parseErr := url.Parse(tt.target)
 			require.NoError(t, parseErr)
-			err := policy(&http.Request{URL: targetURL}, nil)
+			via := requestsFromURLStrings(t, tt.via...)
+			err = policy(&http.Request{URL: targetURL}, via)
 			if tt.expectError {
 				require.Error(t, err)
 			} else {
 				require.NoError(t, err)
 			}
+		})
+	}
+}
+
+func TestIsHTTPSDowngrade(t *testing.T) {
+	mustParse := func(s string) *url.URL {
+		t.Helper()
+		u, err := url.Parse(s)
+		require.NoError(t, err)
+		return u
+	}
+
+	tests := []struct {
+		name   string
+		target string
+		via    []string
+		want   bool
+	}{
+		{
+			name:   "https target never downgrades",
+			target: "https://rp.example.com/x",
+			via:    []string{"https://rp.example.com/a", "http://rp.example.com/b"},
+			want:   false,
+		},
+		{
+			name:   "http target with empty via is not downgrade",
+			target: "http://rp.example.com/x",
+			want:   false,
+		},
+		{
+			name:   "http target with only http via is not downgrade",
+			target: "http://rp.example.com/x",
+			via:    []string{"http://rp.example.com/a"},
+			want:   false,
+		},
+		{
+			name:   "http target after https via is downgrade",
+			target: "http://rp.example.com/x",
+			via:    []string{"https://rp.example.com/a"},
+			want:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			via := requestsFromURLStrings(t, tt.via...)
+			got := isHTTPSDowngrade(mustParse(tt.target), via)
+			require.Equal(t, tt.want, got)
 		})
 	}
 }

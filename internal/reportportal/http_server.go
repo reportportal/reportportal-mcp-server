@@ -37,9 +37,9 @@ import (
 // MaxIdleConns=100, MaxIdleConnsPerHost=10, IdleConnTimeout=90s, HTTP/2 forced.
 // The timeout parameter is the per-request deadline and comes from --connection-timeout.
 // tlsCfg may be nil, in which case the Go default TLS behaviour is used.
-// hostURL restricts followed redirects to that same HTTPS host, since the
-// per-request Authorization header (injected by QueryParamsMiddleware) must
-// never be forwarded to another host or downgraded to plain HTTP.
+// hostURL restricts followed redirects to that same host and rejects downgrades
+// from HTTPS to HTTP, since the per-request Authorization header (injected by
+// QueryParamsMiddleware) must never be forwarded to another host or an unsafe URL.
 func createHTTPClient(timeout time.Duration, tlsCfg *tls.Config, hostURL *url.URL) *http.Client {
 	transport := utils.NewBaseTransport()
 	transport.MaxIdleConns = 100
@@ -52,7 +52,7 @@ func createHTTPClient(timeout time.Duration, tlsCfg *tls.Config, hostURL *url.UR
 	return &http.Client{
 		Transport:     transport,
 		Timeout:       timeout,
-		CheckRedirect: utils.SameHostHTTPSRedirectPolicy(hostURL),
+		CheckRedirect: utils.SameHostRedirectPolicy(hostURL),
 	}
 }
 
@@ -197,13 +197,8 @@ func NewHTTPServer(
 
 // initializeTools sets up all MCP tools
 func (hs *HTTPServer) initializeTools() error {
-	// Create ReportPortal client with empty token in HTTP mode
-	// The actual token will be injected per-request via QueryParamsMiddleware from HTTP headers,
-	// so HTTPS is required unconditionally here, regardless of FallbackRPToken.
-	if hs.config.HostURL == nil || !strings.EqualFold(hs.config.HostURL.Scheme, "https") {
-		return fmt.Errorf("authenticated ReportPortal requests require an HTTPS base URL")
-	}
-
+	// Create ReportPortal client with empty token in HTTP mode.
+	// The actual token will be injected per-request via QueryParamsMiddleware from HTTP headers.
 	rpClient := gorp.NewClient(
 		hs.config.HostURL,
 		gorp.WithApiKeyAuth(context.Background(), hs.config.FallbackRPToken),

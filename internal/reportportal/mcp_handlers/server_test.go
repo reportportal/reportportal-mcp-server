@@ -87,14 +87,41 @@ func TestNewServer_BearerTokenSentWithTLSConfig(t *testing.T) {
 	assert.Contains(t, auth, token)
 }
 
-func TestNewServer_RejectsAuthenticatedHTTPURL(t *testing.T) {
+// TestNewServer_BearerTokenSentWithoutTLS is the nil-tlsCfg counterpart of
+// TestNewServer_BearerTokenSentWithTLSConfig and covers the most common
+// production configuration. This test would have caught the original regression
+// (plain HTTPClient overwrite) had it existed before the bug was introduced.
+func TestNewServer_BearerTokenSentWithoutTLS(t *testing.T) {
 	const token = "test-api-token"
+	const project = "test-project"
 
-	rpURL, err := url.Parse("http://reportportal.example.com")
+	var capturedAuth atomic.Value
+	fakeRP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedAuth.Store(r.Header.Get("Authorization"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(emptyLaunchPageJSON(t))
+	}))
+	defer fakeRP.Close()
+
+	rpURL, err := url.Parse(fakeRP.URL)
 	require.NoError(t, err)
 
-	_, _, err = NewServer("test", rpURL, token, "", "test-project", "", false, nil)
-	require.EqualError(t, err, "authenticated ReportPortal requests require an HTTPS base URL")
+	mcpSrv, _, err := NewServer("test", rpURL, token, "", project, "", false, nil)
+	require.NoError(t, err)
+
+	cs := connectInProcess(t, mcpSrv)
+	defer func() { require.NoError(t, cs.Close()) }()
+
+	_, err = cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "get_launches",
+		Arguments: map[string]any{"projectKey": project},
+	})
+	require.NoError(t, err, "CallTool returned protocol error")
+
+	auth, _ := capturedAuth.Load().(string)
+	assert.True(t, strings.HasPrefix(auth, "Bearer "),
+		"expected Authorization header to start with 'Bearer ', got: %q", auth)
+	assert.Contains(t, auth, token)
 }
 
 func TestBuildHTTPClient_RejectsUnsafeRedirects(t *testing.T) {

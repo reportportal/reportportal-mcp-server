@@ -35,10 +35,6 @@ func NewServer(
 	analyticsOn bool,
 	tlsCfg *tls.Config,
 ) (*mcp.Server, *analytics.Analytics, error) {
-	if err := utils.ValidateAuthenticatedBaseURL(hostUrl, token); err != nil {
-		return nil, nil, err
-	}
-
 	s := mcp.NewServer(
 		&mcp.Implementation{
 			Name:    "reportportal-mcp-server",
@@ -138,12 +134,12 @@ func ReadPrompts(files embed.FS, dir string) ([]promptreader.PromptHandlerPair, 
 // When tlsCfg is nil the default transport is used unchanged, preserving
 // HTTP_PROXY and other default behaviours. When non-nil the default transport
 // is cloned and its TLSClientConfig replaced so proxy/dial settings are still
-// inherited. CheckRedirect rejects redirects that downgrade to HTTP or leave
-// hostUrl, so the bearer token is never forwarded elsewhere.
+// inherited. CheckRedirect restricts redirects to the same host and rejects
+// downgrades from HTTPS to HTTP, so the bearer token is never forwarded elsewhere.
 func buildHTTPClient(tlsCfg *tls.Config, hostUrl *url.URL) *http.Client {
 	client := &http.Client{
 		Timeout:       30 * time.Second,
-		CheckRedirect: utils.SameHostHTTPSRedirectPolicy(hostUrl),
+		CheckRedirect: utils.SameHostRedirectPolicy(hostUrl),
 	}
 	if tlsCfg != nil {
 		t := utils.NewBaseTransport()
