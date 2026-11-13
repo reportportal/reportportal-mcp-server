@@ -1,6 +1,8 @@
 package mcpreportportal
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"testing"
 	"time"
@@ -9,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/reportportal/reportportal-mcp-server/internal/reportportal/analytics"
+	"github.com/reportportal/reportportal-mcp-server/internal/reportportal/audit"
 )
 
 func TestNewHTTPServer_WithoutRPAPIToken(t *testing.T) {
@@ -367,6 +370,62 @@ func TestGetHTTPServerInfo(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSkipAccessLog(t *testing.T) {
+	logged := 0
+	logger := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			logged++
+			next.ServeHTTP(w, r)
+		})
+	}
+
+	const body = "ok"
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTeapot)
+		_, err := w.Write([]byte(body))
+		require.NoError(t, err)
+	})
+	handler := skipAccessLog(logger, "/health")(inner)
+
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	assert.Equal(t, 0, logged)
+	assert.Equal(t, http.StatusTeapot, rec.Code)
+	assert.Equal(t, body, rec.Body.String())
+
+	for _, path := range []string{"/mcp", "/health/extra"} {
+		before := logged
+		req = httptest.NewRequest(http.MethodGet, path, nil)
+		rec = httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+
+		assert.Equal(t, before+1, logged, path)
+		assert.Equal(t, http.StatusTeapot, rec.Code)
+		assert.Equal(t, body, rec.Body.String())
+	}
+}
+
+func TestNewHTTPServer_AuditLogTransport(t *testing.T) {
+	base := HTTPServerConfig{
+		Version:               "1.5.0",
+		HostURL:               mustParseURL("https://reportportal.example.com"),
+		AnalyticsOn:           false,
+		MaxConcurrentRequests: 2,
+		ConnectionTimeout:     time.Second,
+	}
+	off, err := NewHTTPServer(base)
+	require.NoError(t, err)
+	assert.False(t, audit.IsRecordingTransport(off.httpClient.Transport))
+
+	base.AuditLog = true
+	on, err := NewHTTPServer(base)
+	require.NoError(t, err)
+	assert.True(t, audit.IsRecordingTransport(on.httpClient.Transport))
+	assert.NotNil(t, on.config.OAuth.Audit)
 }
 
 // mustParseURL is a helper function to parse URLs for tests

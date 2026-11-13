@@ -189,6 +189,74 @@ Do not set `Authorization` in the client config; VS Code obtains a bearer token 
 Other MCP clients need a pre-registered public client in Entra with loopback redirect URIs and
 must request the scope from `MCP_OAUTH_SCOPE`.
 
+#### Audit logging
+
+HTTP mode writes one JSON audit event per MCP `tools/call`, `resources/read`, and `prompts/get`,
+and one event when a bearer token is rejected. Events go to **stdout** as one JSON object per line
+(`slog`, message `audit`) so a log pipeline or SIEM can collect them. Operational logs go to
+stderr, but the HTTP access log also goes to stdout as plain text, so select audit events by
+parsing each line as JSON and keeping only `"msg": "audit"`.
+
+| Variable / flag | Description |
+|-----------------|-------------|
+| `MCP_AUDIT_LOG` / `--audit-log` | `true` or `false`. When unset, audit logging is **on** if OAuth is enabled and **off** otherwise. |
+
+Stdio mode does not emit audit events. The flag is HTTP-only.
+
+An operation event looks like this (one JSON object per line):
+
+```json
+{
+  "time": "2026-10-26T18:00:00Z",
+  "level": "INFO",
+  "msg": "audit",
+  "event": "mcp.tool_call",
+  "client_app_id": "aebc6443-996d-45c2-90f0-388ff96faa56",
+  "client_name": "Visual Studio Code",
+  "client_version": "1.107.0",
+  "user_oid": "0f1e…",
+  "user_name": "jane@corp.com",
+  "auth_method": "oauth",
+  "server_name": "reportportal-mcp-server",
+  "server_version": "1.5.0",
+  "server_instance": "mcp-5bff…",
+  "session_id": "XroiJS…",
+  "method": "tools/call",
+  "tool": "get_launches",
+  "scopes": ["access_as_user"],
+  "project": "superadmin_personal",
+  "resource_ids": {"launch_id": "123"},
+  "outcome": "success",
+  "rp_status": 200,
+  "result_size": 5321,
+  "duration_ms": 142
+}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `event` | `mcp.tool_call` for an operation |
+| `client_app_id` | JWT `azp`, or `appid` when `azp` is absent |
+| `client_name`, `client_version` | Client name and version from MCP initialize (self-reported) |
+| `user_oid` | JWT `oid` (`sub` when `oid` is absent). With OAuth enabled, an API key gives a hash of the key, never the key itself. With OAuth disabled, API keys are not verified by the MCP server and this field is empty |
+| `user_name` | JWT `preferred_username` |
+| `auth_method` | `oauth` when the token has claims, otherwise `api_key` |
+| `server_name`, `server_version`, `server_instance` | Server name (`reportportal-mcp-server`), build version (version, commit, and date), and pod hostname |
+| `session_id` | MCP session id |
+| `method` | `tools/call`, `resources/read`, or `prompts/get` |
+| `tool` | Tool name, resource URI, or prompt name |
+| `scopes` | Scopes from the verified token |
+| `project` | Tool argument `project`, the project in a `reportportal://` resource URI, or the `X-Project` header |
+| `resource_ids` | Allow-listed identifier arguments only: `launch_id`, `launch-id`, `test_item_id`, `test_items_ids`, `defect_type_id`, `parent-item-id`, `attachment-content-id`, `filter-eq-parentId`, `filter-eq-launchId` |
+| `outcome` | `success`, `tool_error` (tool returned an error result), or `error` (the call failed) |
+| `rp_status` | HTTP status of the ReportPortal response for this call (`0` when the call did not reach ReportPortal). When a tool makes several API calls, the first error status (`4xx`/`5xx`) is kept; without errors, the last status is kept |
+| `result_size` | Byte length of the text returned to the client |
+| `duration_ms` | Handler time in milliseconds |
+
+A rejected bearer token produces one `mcp.auth_rejected` event with `reason` (for example `invalid signature`, `missing required scope`, `expired`), `remote_ip`, and `path`. That event has no user, claim, or token fields.
+
+Tokens, raw claims, tool results, and free-text arguments (comments, file content, filters) are never written.
+
 ## AI Tool Setup
 
 Choose your favourite AI Tool to connect.
@@ -542,6 +610,7 @@ Set `MCP_MODE=http` and configure the following:
 - `MCP_SERVER_HOST`: Optional - HTTP bind host (default: empty)
 - Authentication tokens must be passed per-request via `Authorization: Bearer <token>` header
 - `RP_API_TOKEN` environment variable is **not used** in HTTP mode
+- `MCP_AUDIT_LOG`: Optional — `true` or `false`. When unset, JSON audit events are written to stdout if OAuth is enabled. See [Audit logging](#audit-logging)
 
 **Example for stdio mode:**
 

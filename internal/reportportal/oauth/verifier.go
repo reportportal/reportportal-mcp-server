@@ -15,6 +15,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/auth"
 
 	"github.com/reportportal/reportportal-mcp-server/internal/reportportal/analytics"
+	"github.com/reportportal/reportportal-mcp-server/internal/reportportal/audit"
 	"github.com/reportportal/reportportal-mcp-server/internal/reportportal/utils"
 )
 
@@ -29,14 +30,16 @@ func NewTokenVerifier(ctx context.Context, cfg Config) (auth.TokenVerifier, erro
 	keySet := oidc.NewRemoteKeySet(oidcCtx, cfg.JWKSURL)
 	verifier := oidc.NewVerifier(cfg.Issuer, keySet, &oidc.Config{ClientID: cfg.Audience})
 
-	return func(ctx context.Context, token string, _ *http.Request) (*auth.TokenInfo, error) {
+	return func(ctx context.Context, token string, req *http.Request) (*auth.TokenInfo, error) {
 		token = strings.TrimSpace(token)
 		if token == "" {
+			rejectAuth(cfg, req, audit.ReasonEmptyToken)
 			return nil, fmt.Errorf("%w: empty token", auth.ErrInvalidToken)
 		}
 
 		if !isJWT(token) {
 			if !utils.ValidateRPToken(token) {
+				rejectAuth(cfg, req, audit.ReasonInvalidAPIKey)
 				return nil, fmt.Errorf("%w: invalid API key", auth.ErrInvalidToken)
 			}
 			return &auth.TokenInfo{
@@ -48,12 +51,14 @@ func NewTokenVerifier(ctx context.Context, cfg Config) (auth.TokenVerifier, erro
 		idToken, err := verifier.Verify(ctx, token)
 		if err != nil {
 			slog.Warn("OAuth JWT verification failed", "reason", err.Error())
+			rejectAuth(cfg, req, audit.VerifyReason(err))
 			return nil, fmt.Errorf("%w: %v", auth.ErrInvalidToken, err)
 		}
 
 		var claims map[string]interface{}
 		if err := idToken.Claims(&claims); err != nil {
 			slog.Warn("OAuth JWT claims parse failed", "reason", err.Error())
+			rejectAuth(cfg, req, audit.ReasonInvalidToken)
 			return nil, fmt.Errorf("%w: %v", auth.ErrInvalidToken, err)
 		}
 
@@ -61,6 +66,7 @@ func NewTokenVerifier(ctx context.Context, cfg Config) (auth.TokenVerifier, erro
 		if !slices.Contains(strings.Fields(scp), cfg.ExpectedScope) {
 			oid, sub := userIDFromClaims(claims)
 			slog.Warn("OAuth JWT scope rejected", "oid", oid, "sub", sub)
+			rejectAuth(cfg, req, audit.ReasonMissingScope)
 			return nil, fmt.Errorf("%w: missing required scope", auth.ErrInvalidToken)
 		}
 
@@ -70,6 +76,7 @@ func NewTokenVerifier(ctx context.Context, cfg Config) (auth.TokenVerifier, erro
 		}
 		if userID == "" {
 			slog.Warn("OAuth JWT missing subject")
+			rejectAuth(cfg, req, audit.ReasonMissingSubject)
 			return nil, fmt.Errorf("%w: missing oid or sub", auth.ErrInvalidToken)
 		}
 
@@ -82,6 +89,13 @@ func NewTokenVerifier(ctx context.Context, cfg Config) (auth.TokenVerifier, erro
 			},
 		}, nil
 	}, nil
+}
+
+func rejectAuth(cfg Config, r *http.Request, reason string) {
+	if cfg.Audit == nil {
+		return
+	}
+	cfg.Audit(r, reason)
 }
 
 func isJWT(token string) bool {

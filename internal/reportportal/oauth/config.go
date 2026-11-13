@@ -2,6 +2,7 @@ package oauth
 
 import (
 	"fmt"
+	"net/http"
 	"net/url"
 	"strings"
 )
@@ -17,6 +18,9 @@ type Config struct {
 	ExpectedScope       string
 	ResourceMetadataURL string
 	PublicURLPath       string
+	// Audit, when set, is called for each rejected bearer token.
+	// The callback is not given the token or token claims.
+	Audit func(r *http.Request, reason string)
 }
 
 // BuildConfig validates OAuth settings when enabled and derives metadata URLs and scope names.

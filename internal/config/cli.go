@@ -40,6 +40,11 @@ AUTHENTICATION:
                your IdP (e.g. Microsoft Entra ID); the server validates JWTs and still accepts
                ReportPortal API keys. Set MCP_PUBLIC_URL and related MCP_OAUTH_* variables — see README.
 
+AUDIT LOG (HTTP mode only; ignored in stdio mode):
+   MCP_AUDIT_LOG     Emit one JSON audit event per MCP operation and per rejected bearer
+                     token, on stdout (boolean). When unset, defaults to true if OAuth is
+                     enabled and false otherwise. Equivalent to --audit-log.
+
 ANALYTICS:
    stdio mode: RP_API_TOKEN is required for analytics (used for secure user identification)
    http mode:  Analytics uses RP_USER_ID env var for identification
@@ -165,6 +170,13 @@ func GetHTTPFlags() []cli.Flag {
 			Required: false,
 			Sources:  cli.EnvVars("MCP_OAUTH_SCOPE"),
 			Usage:    "[HTTP-ONLY] OAuth scope advertised to clients (e.g. api://<app-id>/access_as_user)",
+		},
+		&cli.BoolFlag{
+			Name:     "audit-log",
+			Required: false,
+			Sources:  cli.EnvVars("MCP_AUDIT_LOG"),
+			Usage:    "[HTTP-ONLY] Emit JSON audit events on stdout (default: true when OAuth is enabled)",
+			Value:    false,
 		},
 	}
 }

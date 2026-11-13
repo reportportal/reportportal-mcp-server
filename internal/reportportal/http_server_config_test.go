@@ -35,6 +35,7 @@ func TestBuildHTTPServerConfig_OAuthOff(t *testing.T) {
 	cfg, err := buildHTTPServerConfig(cmd)
 	require.NoError(t, err)
 	assert.False(t, cfg.OAuth.Enabled)
+	assert.False(t, cfg.AuditLog)
 }
 
 func TestBuildHTTPServerConfig_OAuthValid(t *testing.T) {
@@ -50,6 +51,7 @@ func TestBuildHTTPServerConfig_OAuthValid(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, cfg.OAuth.Enabled)
 	assert.Equal(t, "access_as_user", cfg.OAuth.ExpectedScope)
+	assert.True(t, cfg.AuditLog)
 }
 
 func TestBuildHTTPServerConfig_OAuthMissingPublicURL(t *testing.T) {
@@ -63,4 +65,45 @@ func TestBuildHTTPServerConfig_OAuthMissingPublicURL(t *testing.T) {
 	_, err := buildHTTPServerConfig(cmd)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "public-url")
+}
+
+func TestBuildHTTPServerConfig_AuditLogExplicit(t *testing.T) {
+	t.Run("oauth on can disable", func(t *testing.T) {
+		cmd := parseHTTPCLI(t, []string{
+			"--oauth-enabled",
+			"--public-url", "https://mcp.example.com/mcp",
+			"--oauth-issuer", "https://login.microsoftonline.com/tenant/v2.0",
+			"--oauth-jwks-url", "https://login.microsoftonline.com/tenant/discovery/v2.0/keys",
+			"--oauth-audience", "aud",
+			"--oauth-scope", "api://app/access_as_user",
+			"--audit-log=false",
+		})
+		cfg, err := buildHTTPServerConfig(cmd)
+		require.NoError(t, err)
+		assert.True(t, cfg.OAuth.Enabled)
+		assert.False(t, cfg.AuditLog)
+	})
+
+	t.Run("oauth off can enable", func(t *testing.T) {
+		cmd := parseHTTPCLI(t, []string{"--audit-log"})
+		cfg, err := buildHTTPServerConfig(cmd)
+		require.NoError(t, err)
+		assert.False(t, cfg.OAuth.Enabled)
+		assert.True(t, cfg.AuditLog)
+	})
+
+	t.Run("env overrides oauth default", func(t *testing.T) {
+		t.Setenv("MCP_AUDIT_LOG", "false")
+		cmd := parseHTTPCLI(t, []string{
+			"--oauth-enabled",
+			"--public-url", "https://mcp.example.com/mcp",
+			"--oauth-issuer", "https://login.microsoftonline.com/tenant/v2.0",
+			"--oauth-jwks-url", "https://login.microsoftonline.com/tenant/discovery/v2.0/keys",
+			"--oauth-audience", "aud",
+			"--oauth-scope", "api://app/access_as_user",
+		})
+		cfg, err := buildHTTPServerConfig(cmd)
+		require.NoError(t, err)
+		assert.False(t, cfg.AuditLog)
+	})
 }
