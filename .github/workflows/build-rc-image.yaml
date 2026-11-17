@@ -5,6 +5,9 @@ on:
     branches:
       - "rc/*"
       - "hotfix/*"
+    paths-ignore:
+      - README.md
+      - docs
 
 jobs:
   variables-setup:

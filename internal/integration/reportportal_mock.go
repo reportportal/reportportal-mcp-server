@@ -1,6 +1,8 @@
 package integration
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"io"
 	"log/slog"
 	"net/http"
@@ -40,7 +42,7 @@ func NewReportPortalMockServer(
 		requestLog:   make([]MockRequestLog, 0),
 	}
 
-	mock.server = httptest.NewServer(http.HandlerFunc(mock.handleRequest))
+	mock.server = httptest.NewTLSServer(http.HandlerFunc(mock.handleRequest))
 
 	return mock
 }
@@ -48,6 +50,16 @@ func NewReportPortalMockServer(
 // URL returns the base URL of the mock server
 func (m *ReportPortalMockServer) URL() string {
 	return m.server.URL
+}
+
+// TLSConfig returns a TLS config that trusts the mock server's certificate,
+// for use by clients that need to connect to this HTTPS mock server.
+func (m *ReportPortalMockServer) TLSConfig() *tls.Config {
+	pool := x509.NewCertPool()
+	pool.AddCert(m.server.Certificate())
+	return &tls.Config{
+		RootCAs: pool,
+	}
 }
 
 // Close shuts down the mock server

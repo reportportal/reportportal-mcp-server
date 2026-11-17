@@ -17,9 +17,9 @@ This directory contains **test fixture files only**:
 All JSON fixtures must use **generic placeholders** instead of real values:
 
 - ✅ **Authorization**: `Bearer test-token-1234567` (not your real token, min 16 chars)
-- ✅ **X-Project**: `test-project` (not your real project name)
+- ✅ **X-Project**: `test-project` (not your real projectKey)
 - ✅ **Test Item IDs**: Use real IDs that exist in your ReportPortal instance (e.g., `5273849853`)
-- ✅ **URLs in reportPortalMock**: Use `test-project` as project name
+- ✅ **URLs in reportPortalMock**: Use `test-project` as projectKey
 
 **Why?** The verification tool (`task verify:testdata`) automatically substitutes:
 - `test-token-1234567` → `$RP_API_TOKEN` (from environment)
@@ -58,7 +58,7 @@ This keeps fixtures portable and safe to commit while allowing validation agains
    - Re-run `task verify:testdata` to confirm the fix.
 
 4. **Keep secrets out of Git**
-   - Never commit real tokens, project names, or other private values.
+   - Never commit real tokens, projectKeys, or other private values.
    - Always use `test-token-1234567` and `test-project` placeholders in JSON files.
    - The verification tool injects real values at runtime from environment variables.
 

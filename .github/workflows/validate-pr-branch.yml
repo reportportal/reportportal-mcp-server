@@ -18,8 +18,8 @@ jobs:
           echo "Source branch: $SOURCE_BRANCH"
           echo "Target branch: $TARGET_BRANCH"
           
-          if [[ "$TARGET_BRANCH" == "main" && "$SOURCE_BRANCH" != "develop" && "$SOURCE_BRANCH" != hotfix/* ]]; then
-            echo "❌ Error: Pull requests to 'main' branch are only allowed from 'develop' or 'hotfix/*' branches"
+          if [[ "$TARGET_BRANCH" == "main" && "$SOURCE_BRANCH" != rc/* && "$SOURCE_BRANCH" != hotfix/* ]]; then
+            echo "❌ Error: Pull requests to 'main' branch are only allowed from 'rc/*' or 'hotfix/*' branches"
             echo "Current source branch: $SOURCE_BRANCH"
             exit 1
           fi

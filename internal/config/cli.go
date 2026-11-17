@@ -30,6 +30,14 @@ ENVIRONMENT VARIABLES:
                      Equivalent to --tls-ca-cert flag; appended to the system cert pool
                      Mutually exclusive with RP_INSECURE_TLS / --insecure (cannot set both)
                      Example: RP_TLS_CA_CERT=/etc/ssl/certs/my-ca.pem
+   RP_PROJECT        Default project key for all MCP tool calls (optional).
+                     This is the URL-safe project identifier — the segment shown after '#' in
+                     the ReportPortal UI: https://your-rp-instance.com/ui/#<PROJECT_KEY>/…
+                     It is NOT the display name; use the value exactly as it appears in the URL.
+                     The value is passed to the ReportPortal API as-is (only whitespace is trimmed).
+                     The per-call 'projectKey' argument is only used as a fallback when no
+                     project is available from the context (env variable or HTTP header).
+                     Example: RP_PROJECT=my_project
 
 AUTHENTICATION:
    stdio mode: RP_API_TOKEN is REQUIRED (must be set via environment variable or --token flag)
@@ -64,7 +72,7 @@ func GetCommonFlags() []cli.Flag {
 			Required: false,
 			Sources:  cli.EnvVars("RP_PROJECT"),
 			Value:    "",
-			Usage:    "ReportPortal project name",
+			Usage:    "Default project key (unique project identifier within the ReportPortal instance). stdio mode only: takes top priority over the per-call 'projectKey' tool argument, which is used as fallback. Ignored in HTTP mode (use X-Project request header instead).",
 		},
 		&cli.StringFlag{
 			Name:     "log-level",

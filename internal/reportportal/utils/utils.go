@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mime"
 	"net"
 	"net/http"
 	"strconv"
@@ -147,6 +148,12 @@ func parseTimestampToEpoch(timestampStr string) (int64, error) {
 	return 0, fmt.Errorf("unable to parse timestamp: %s", timestampStr)
 }
 
+// ParseTimestampMillis parses a timestamp string (RFC3339 format or Unix epoch seconds/milliseconds)
+// and returns the time as Unix milliseconds. Accepts the same formats as other timestamp filters.
+func ParseTimestampMillis(timestampStr string) (int64, error) {
+	return parseTimestampToEpoch(timestampStr)
+}
+
 // processStartTimeFilter processes start time interval filter and returns the formatted filter string
 func ProcessStartTimeFilter(filterStartTimeFrom, filterStartTimeTo string) (string, error) {
 	// Process start time interval filter
@@ -226,6 +233,21 @@ func IsTextContent(mediaType string) bool {
 	return false
 }
 
+// ImageMediaType returns the bare media type (without parameters) of a raster image
+// that MCP clients commonly display: PNG, JPEG, GIF or WebP.
+// Other types, including SVG, are reported as not supported.
+func ImageMediaType(contentType string) (string, bool) {
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		return "", false
+	}
+	switch mediaType {
+	case "image/png", "image/jpeg", "image/gif", "image/webp":
+		return mediaType, true
+	}
+	return "", false
+}
+
 // isAlreadyClosedError checks if the error indicates that the response body is already closed.
 // This helps avoid unnecessary error logging when closing an already-closed body.
 func isAlreadyClosedError(err error) bool {
@@ -295,6 +317,23 @@ func ReadResponseBody(response *http.Response) (*mcp.CallToolResult, any, error)
 	}, nil, nil
 }
 
+// ReadAPIResponse turns an OpenAPI client Execute() result into an MCP tool result.
+//
+// MCP tools discard the typed decoded model and only need the raw JSON body. When the
+// HTTP call succeeded (2xx) but the generated client failed to decode a polymorphic
+// oneOf (for example ComEpamReportportalBaseCoreTmsDtoTmsTestCaseRSManualScenario for
+// a minimal TEXT manual scenario), this helper still returns the raw response body
+// instead of surfacing a false client-side failure.
+func ReadAPIResponse(response *http.Response, err error) (*mcp.CallToolResult, any, error) {
+	if err == nil {
+		return ReadResponseBody(response)
+	}
+	if response != nil && response.StatusCode > 0 && response.StatusCode < 300 {
+		return ReadResponseBody(response)
+	}
+	return nil, nil, fmt.Errorf("%s: %w", ExtractResponseError(err, response), err)
+}
+
 // ParseReportPortalURI parses a ReportPortal URI of the form "reportportal://{part0}/{expectedSegment}/{part2}"
 // and extracts the first and third path segments, validating the structure.
 //
@@ -303,7 +342,7 @@ func ReadResponseBody(response *http.Response) (*mcp.CallToolResult, any, error)
 //   - expectedSegment: The expected middle segment (e.g., "testitem", "launch")
 //
 // Returns:
-//   - part0: The first path segment (typically the project name)
+//   - part0: The first path segment (typically the projectKey)
 //   - part2: The third path segment (typically an ID)
 //   - err: Error if the URI format is invalid
 func ParseReportPortalURI(uri, expectedSegment string) (part0, part2 string, err error) {

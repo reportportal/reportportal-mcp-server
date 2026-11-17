@@ -48,7 +48,7 @@ func NewServer(
 	// Build an HTTP client for analytics and import operations.
 	// Bearer token injection is not needed here; the oauth2 transport handles
 	// that separately for the ReportPortal API client.
-	httpClient := buildHTTPClient(tlsCfg)
+	httpClient := buildHTTPClient(tlsCfg, hostUrl)
 
 	// Always thread httpClient into the oauth2 context so the oauth2 transport
 	// uses it for every outbound RP call — this preserves both Bearer token
@@ -85,6 +85,9 @@ func NewServer(
 
 	// Register all test item-related tools and resources
 	RegisterTestItemTools(s, rpClient, project, analyticsInstance)
+
+	// Register all TMS-related tools
+	RegisterTMSTools(s, rpClient, project, analyticsInstance)
 
 	prompts, err := ReadPrompts(PromptFiles, "prompts")
 	if err != nil {
@@ -131,9 +134,13 @@ func ReadPrompts(files embed.FS, dir string) ([]promptreader.PromptHandlerPair, 
 // When tlsCfg is nil the default transport is used unchanged, preserving
 // HTTP_PROXY and other default behaviours. When non-nil the default transport
 // is cloned and its TLSClientConfig replaced so proxy/dial settings are still
-// inherited.
-func buildHTTPClient(tlsCfg *tls.Config) *http.Client {
-	client := &http.Client{Timeout: 30 * time.Second}
+// inherited. CheckRedirect restricts redirects to the same host and rejects
+// downgrades from HTTPS to HTTP, so the bearer token is never forwarded elsewhere.
+func buildHTTPClient(tlsCfg *tls.Config, hostUrl *url.URL) *http.Client {
+	client := &http.Client{
+		Timeout:       30 * time.Second,
+		CheckRedirect: utils.SameHostRedirectPolicy(hostUrl),
+	}
 	if tlsCfg != nil {
 		t := utils.NewBaseTransport()
 		t.TLSClientConfig = tlsCfg
@@ -147,7 +154,7 @@ func newMCPServer(cmd *cli.Command) (*mcp.Server, *analytics.Analytics, error) {
 	token := cmd.String("token")                     // API token
 	host := cmd.String("rp-host")                    // ReportPortal host URL
 	userID := cmd.String("user-id")                  // Unified user ID for analytics
-	project := cmd.String("project")                 // ReportPortal project name
+	project := cmd.String("project")                 // ReportPortal project key
 	analyticsAPISecret := analytics.GetAnalyticArg() // Analytics API secret
 	analyticsOff := cmd.Bool("analytics-off")        // Disable analytics flag
 
@@ -205,7 +212,7 @@ func RunStdioServer(ctx context.Context, cmd *cli.Command) error {
 
 	rpProject := cmd.String("project")
 	if rpProject != "" {
-		// Add project to request context default project name from Environment variable
+		// Store the default project key in context; used as fallback when a tool call omits projectKey.
 		ctx = utils.WithProjectInContext(ctx, rpProject)
 	}
 	mcpServer, analyticsInstance, err := newMCPServer(cmd)

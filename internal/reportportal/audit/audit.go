@@ -54,15 +54,28 @@ const (
 // allowedResourceIDs are argument names safe to record. Anything else,
 // including comments, file content, and free-text filters, is dropped.
 var allowedResourceIDs = map[string]struct{}{
-	"launch_id":             {},
-	"launch-id":             {},
-	"test_item_id":          {},
-	"test_items_ids":        {},
-	"defect_type_id":        {},
-	"parent-item-id":        {},
-	"attachment-content-id": {},
-	"filter-eq-parentId":    {},
-	"filter-eq-launchId":    {},
+	"launch_id":              {},
+	"launch-id":              {},
+	"launchId":               {},
+	"test_item_id":           {},
+	"test_items_ids":         {},
+	"defect_type_id":         {},
+	"parent-item-id":         {},
+	"attachment-content-id":  {},
+	"filter-eq-parentId":     {},
+	"filter-eq-launchId":     {},
+	"testCaseId":             {},
+	"testCaseExecutionId":    {},
+	"folderId":               {},
+	"test-plan-id":           {},
+	"test-case-ids":          {},
+	"milestone-id":           {},
+	"parent-test-folder-id":  {},
+	"test-folder-id":         {},
+	"id":                     {},
+	"filter-eq-id":           {},
+	"filter-eq-testFolderId": {},
+	"filter-eq-testPlanId":   {},
 }
 
 var errCallPanicked = errors.New("mcp handler panicked")
@@ -343,7 +356,7 @@ func fromRawArgs(raw json.RawMessage) (string, map[string]any) {
 	if err := json.Unmarshal(raw, &args); err != nil {
 		return "", ids
 	}
-	project := stringArg(args, "project")
+	project := projectFromToolArgsRaw(args)
 	for key, val := range args {
 		if _, ok := allowedResourceIDs[key]; !ok {
 			continue
@@ -362,14 +375,13 @@ func fromStringArgs(args map[string]string) (string, map[string]any) {
 	if len(args) == 0 {
 		return "", ids
 	}
-	var project string
+	project := projectFromToolArgsString(args)
 	for key, val := range args {
 		val = strings.TrimSpace(val)
 		if val == "" {
 			continue
 		}
-		if key == "project" {
-			project = val
+		if key == "projectKey" {
 			continue
 		}
 		if _, ok := allowedResourceIDs[key]; !ok {
@@ -378,6 +390,14 @@ func fromStringArgs(args map[string]string) (string, map[string]any) {
 		ids[key] = val
 	}
 	return project, ids
+}
+
+func projectFromToolArgsRaw(args map[string]json.RawMessage) string {
+	return stringArg(args, "projectKey")
+}
+
+func projectFromToolArgsString(args map[string]string) string {
+	return strings.TrimSpace(args["projectKey"])
 }
 
 func stringArg(args map[string]json.RawMessage, key string) string {

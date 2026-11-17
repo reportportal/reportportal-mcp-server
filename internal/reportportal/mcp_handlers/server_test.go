@@ -77,7 +77,7 @@ func TestNewServer_BearerTokenSentWithTLSConfig(t *testing.T) {
 	// We discard the tool result; the assertion is on the auth header captured above.
 	_, err = cs.CallTool(context.Background(), &mcp.CallToolParams{
 		Name:      "get_launches",
-		Arguments: map[string]any{"project": project},
+		Arguments: map[string]any{"projectKey": project},
 	})
 	require.NoError(t, err, "CallTool returned protocol error")
 
@@ -114,7 +114,7 @@ func TestNewServer_BearerTokenSentWithoutTLS(t *testing.T) {
 
 	_, err = cs.CallTool(context.Background(), &mcp.CallToolParams{
 		Name:      "get_launches",
-		Arguments: map[string]any{"project": project},
+		Arguments: map[string]any{"projectKey": project},
 	})
 	require.NoError(t, err, "CallTool returned protocol error")
 
@@ -122,4 +122,46 @@ func TestNewServer_BearerTokenSentWithoutTLS(t *testing.T) {
 	assert.True(t, strings.HasPrefix(auth, "Bearer "),
 		"expected Authorization header to start with 'Bearer ', got: %q", auth)
 	assert.Contains(t, auth, token)
+}
+
+func TestBuildHTTPClient_RejectsUnsafeRedirects(t *testing.T) {
+	hostURL, err := url.Parse("https://reportportal.example.com")
+	require.NoError(t, err)
+
+	client := buildHTTPClient(nil, hostURL)
+	require.NotNil(t, client.CheckRedirect)
+
+	tests := []struct {
+		name        string
+		target      string
+		expectError bool
+	}{
+		{
+			name:   "same host HTTPS redirect is allowed",
+			target: "https://reportportal.example.com/redirected",
+		},
+		{
+			name:        "HTTPS to HTTP downgrade is rejected",
+			target:      "http://reportportal.example.com/redirected",
+			expectError: true,
+		},
+		{
+			name:        "redirect to a different host is rejected",
+			target:      "https://attacker.example.com/redirected",
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			targetURL, parseErr := url.Parse(tt.target)
+			require.NoError(t, parseErr)
+			err := client.CheckRedirect(&http.Request{URL: targetURL}, nil)
+			if tt.expectError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
 }

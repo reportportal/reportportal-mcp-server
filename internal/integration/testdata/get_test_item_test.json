@@ -52,7 +52,7 @@
       ],
       "body": {
         "mode": "raw",
-        "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"tools/call\",\n  \"id\": 1,\n  \"params\": {\n    \"name\": \"get_test_item_by_id\",\n    \"arguments\": {\n      \"project\": \"\",\n      \"test_item_id\": \"5273849853\"\n    }\n  }\n}"
+        "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"method\": \"tools/call\",\n  \"id\": 1,\n  \"params\": {\n    \"name\": \"get_test_item_by_id\",\n    \"arguments\": {\n      \"projectKey\": \"test-project\",\n      \"test_item_id\": \"5273849853\"\n    }\n  }\n}"
       },
       "url": {
         "raw": "/mcp",

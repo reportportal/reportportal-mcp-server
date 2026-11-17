@@ -8,12 +8,10 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"mime"
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
 	"net/url"
-	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -29,6 +27,7 @@ import (
 )
 
 const (
+	automationLaunchTypes   = "AGENTIC,AUTOMATION"
 	importHTTPClientTimeout = 30 * time.Second
 	// importMaxFileSizeBytes is the upper bound on the decoded file payload
 	// accepted by the import tool. The MCP protocol delivers file_content as a
@@ -37,40 +36,8 @@ const (
 	importMaxFileSizeBytes = 50 * 1024 * 1024 // 50 MiB
 )
 
-// ToolHandler is a function type for MCP tool handlers with typed input and output.
-type ToolHandler[In, Out any] func(ctx context.Context, req *mcp.CallToolRequest, args In) (*mcp.CallToolResult, Out, error)
-
-// registerTool is a helper to register a tool that returns both tool definition and handler
-func registerTool[In, Out any](s *mcp.Server, getTool func() (*mcp.Tool, ToolHandler[In, Out])) {
-	tool, handler := getTool()
-	mcp.AddTool(s, tool, mcp.ToolHandlerFor[In, Out](handler))
-}
-
-// registerResourceTemplate is a helper to register a resource template with its handler
-func registerResourceTemplate(
-	s *mcp.Server,
-	getResourceTemplate func() (*mcp.ResourceTemplate, mcp.ResourceHandler),
-) {
-	template, handler := getResourceTemplate()
-	s.AddResourceTemplate(template, handler)
-}
-
-// mustMarshalJSON marshals a value to JSON or panics on error.
-//
-// This function intentionally panics on marshal failure because it is only used with
-// known-safe, compile-time literals and simple slices (e.g., during tool registration/init)
-// where json.Marshal cannot fail. Examples include string literals, boolean values, and
-// simple string slices used as schema defaults.
-//
-// WARNING: Do NOT use this function with user-supplied data or runtime values that could
-// cause json.Marshal to fail, as this will result in unintended panics. For such cases,
-// handle json.Marshal errors explicitly instead.
-func mustMarshalJSON(v any) json.RawMessage {
-	b, err := json.Marshal(v)
-	if err != nil {
-		panic(fmt.Sprintf("failed to marshal JSON: %v", err))
-	}
-	return b
+func addAutomationLaunchTypeFilter(values url.Values) {
+	values.Set("filter.in.launchType", automationLaunchTypes)
 }
 
 // RegisterLaunchTools registers all launch-related tools and resources with the MCP server.
@@ -79,24 +46,24 @@ func mustMarshalJSON(v any) json.RawMessage {
 func RegisterLaunchTools(
 	s *mcp.Server,
 	rpClient *gorp.Client,
-	defaultProject string,
+	defaultProjectKey string,
 	analyticsClient *analytics.Analytics,
 	httpClient *http.Client,
 ) {
-	launches := NewLaunchResources(rpClient, analyticsClient, defaultProject, httpClient)
+	launches := NewLaunchResources(rpClient, analyticsClient, defaultProjectKey, httpClient)
 
-	registerTool(s, launches.toolGetLaunches)
-	registerTool(s, launches.toolGetLastLaunchByName)
-	registerTool(s, launches.toolGetLaunchById)
-	registerTool(s, launches.toolUpdateLaunch)
-	registerTool(s, launches.toolForceFinishLaunch)
-	registerTool(s, launches.toolDeleteLaunch)
-	registerTool(s, launches.toolRunAutoAnalysis)
-	registerTool(s, launches.toolUniqueErrorAnalysis)
-	registerTool(s, launches.toolRunQualityGate)
-	registerTool(s, launches.toolImportLaunchFromFile)
+	utils.RegisterTool(s, launches.toolGetLaunches)
+	utils.RegisterTool(s, launches.toolGetLastLaunchByName)
+	utils.RegisterTool(s, launches.toolGetLaunchById)
+	utils.RegisterTool(s, launches.toolUpdateLaunch)
+	utils.RegisterTool(s, launches.toolForceFinishLaunch)
+	utils.RegisterTool(s, launches.toolDeleteLaunch)
+	utils.RegisterTool(s, launches.toolRunAutoAnalysis)
+	utils.RegisterTool(s, launches.toolUniqueErrorAnalysis)
+	utils.RegisterTool(s, launches.toolRunQualityGate)
+	utils.RegisterTool(s, launches.toolImportLaunchFromFile)
 
-	registerResourceTemplate(s, launches.resourceLaunch)
+	utils.RegisterResourceTemplate(s, launches.resourceLaunch)
 }
 
 // importPluginInfo holds metadata for a single IMPORT-type plugin.
@@ -104,97 +71,6 @@ type importPluginInfo struct {
 	Name             string   // canonical plugin name as returned by the API
 	MimeTypes        []string // details.acceptFileMimeTypes (empty → use upload defaults)
 	MaxFileSizeBytes int64    // from details.maxFileSize, or importMaxFileSizeBytes
-}
-
-func parseAcceptFileMimeTypes(v any) []string {
-	switch x := v.(type) {
-	case []interface{}:
-		out := make([]string, 0, len(x))
-		for _, e := range x {
-			if s, ok := e.(string); ok && s != "" {
-				out = append(out, s)
-			}
-		}
-		return out
-	case []string:
-		out := make([]string, 0, len(x))
-		for _, s := range x {
-			if s != "" {
-				out = append(out, s)
-			}
-		}
-		return out
-	default:
-		return nil
-	}
-}
-
-func normalizeMediaType(s string) string {
-	s = strings.TrimSpace(s)
-	if i := strings.Index(s, ";"); i >= 0 {
-		s = s[:i]
-	}
-	return strings.ToLower(s)
-}
-
-// pickImportContentType chooses the multipart part Content-Type using optional
-// explicit caller input, else by matching fileName's extension to plugin MimeTypes.
-func pickImportContentType(mimeTypes []string, fileName, explicit string) (string, error) {
-	explicit = strings.TrimSpace(explicit)
-	if explicit != "" {
-		if len(mimeTypes) > 0 {
-			want := normalizeMediaType(explicit)
-			for _, m := range mimeTypes {
-				if normalizeMediaType(m) == want {
-					return m, nil
-				}
-			}
-			return "", fmt.Errorf(
-				"content_type %q is not in this plugin's acceptFileMimeTypes [%s]",
-				explicit,
-				strings.Join(mimeTypes, ", "),
-			)
-		}
-		return explicit, nil
-	}
-	if len(mimeTypes) == 0 {
-		return "application/octet-stream", nil
-	}
-	if len(mimeTypes) == 1 {
-		return mimeTypes[0], nil
-	}
-	ext := strings.ToLower(path.Ext(fileName))
-	if ext == "" {
-		return "", fmt.Errorf(
-			"file_name must include a file extension or set content_type to one of: %s",
-			strings.Join(mimeTypes, ", "),
-		)
-	}
-	for _, m := range mimeTypes {
-		base := strings.TrimSpace(m)
-		if i := strings.Index(base, ";"); i >= 0 {
-			base = base[:i]
-		}
-		exts, _ := mime.ExtensionsByType(base)
-		for _, e := range exts {
-			if strings.ToLower(e) == ext {
-				return m, nil
-			}
-		}
-	}
-	if t := mime.TypeByExtension(ext); t != "" {
-		tNorm := normalizeMediaType(t)
-		for _, m := range mimeTypes {
-			if normalizeMediaType(m) == tNorm {
-				return m, nil
-			}
-		}
-	}
-	return "", fmt.Errorf(
-		"could not map file extension %q to an accepted MIME type; set content_type to one of: %s",
-		ext,
-		strings.Join(mimeTypes, ", "),
-	)
 }
 
 // importPluginCache holds a thread-safe snapshot of available IMPORT-type plugins.
@@ -238,27 +114,27 @@ func (c *importPluginCache) list() []string {
 
 // LaunchResources is a struct that encapsulates the ReportPortal client.
 type LaunchResources struct {
-	client         *gorp.Client // Client to interact with the ReportPortal API
-	defaultProject string       // Default project name
-	analytics      *analytics.Analytics
-	importPlugins  importPluginCache
-	httpClient     *http.Client // HTTP client for import multipart upload
+	client            *gorp.Client // Client to interact with the ReportPortal API
+	defaultProjectKey string       // Default project key
+	analytics         *analytics.Analytics
+	importPlugins     importPluginCache
+	httpClient        *http.Client // HTTP client for import multipart upload
 }
 
 func NewLaunchResources(
 	client *gorp.Client,
 	analyticsClient *analytics.Analytics,
-	project string,
+	projectKey string,
 	httpClient *http.Client,
 ) *LaunchResources {
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: importHTTPClientTimeout}
 	}
 	return &LaunchResources{
-		client:         client,
-		defaultProject: project,
-		analytics:      analyticsClient,
-		httpClient:     httpClient,
+		client:            client,
+		defaultProjectKey: projectKey,
+		analytics:         analyticsClient,
+		httpClient:        httpClient,
 	}
 }
 
@@ -278,7 +154,7 @@ func (lr *LaunchResources) fetchAndCacheImportPlugins(ctx context.Context) error
 			}
 			details := p.GetDetails()
 			if mimes, ok := details["acceptFileMimeTypes"]; ok {
-				info.MimeTypes = parseAcceptFileMimeTypes(mimes)
+				info.MimeTypes = utils.ParseAcceptFileMimeTypes(mimes)
 			}
 			if maxSize, ok := details["maxFileSize"]; ok {
 				if f, ok := maxSize.(float64); ok && f > 0 {
@@ -296,18 +172,9 @@ func (lr *LaunchResources) fetchAndCacheImportPlugins(ctx context.Context) error
 	return nil
 }
 
-// projectSchema returns a JSON schema for the project parameter
-func (lr *LaunchResources) projectSchema() *jsonschema.Schema {
-	return &jsonschema.Schema{
-		Type:        "string",
-		Description: "Project name",
-		Default:     mustMarshalJSON(lr.defaultProject),
-	}
-}
-
 // GetLaunchesArgs holds all filter and pagination params for get_launches.
 type GetLaunchesArgs struct {
-	Project                     string `json:"project"`
+	ProjectKey                  string `json:"projectKey"`
 	Page                        uint   `json:"page"`
 	PageSize                    uint   `json:"page-size"`
 	PageSort                    string `json:"page-sort"`
@@ -322,10 +189,14 @@ type GetLaunchesArgs struct {
 }
 
 // toolGetLaunches creates a tool to retrieve a paginated list of launches from ReportPortal.
-func (lr *LaunchResources) toolGetLaunches() (*mcp.Tool, ToolHandler[GetLaunchesArgs, any]) {
+func (lr *LaunchResources) toolGetLaunches() (*mcp.Tool, utils.ToolHandler[GetLaunchesArgs, any]) {
 	// Build JSON Schema for input parameters
 	properties := utils.SetPaginationProperties(utils.DefaultSortingForLaunches)
-	properties["project"] = lr.projectSchema()
+	pkSchema, err := utils.ProjectKeySchema(lr.defaultProjectKey)
+	if err != nil {
+		slog.Error("failed to build project key schema", "error", err)
+	}
+	properties[utils.ProjectKeyField] = pkSchema
 	properties["filter-cnt-name"] = &jsonschema.Schema{
 		Type:        "string",
 		Description: "Launches name should contain this substring",
@@ -365,13 +236,14 @@ func (lr *LaunchResources) toolGetLaunches() (*mcp.Tool, ToolHandler[GetLaunches
 			InputSchema: &jsonschema.Schema{
 				Type:       "object",
 				Properties: properties,
+				Required:   nil,
 			},
 		},
 		utils.WithAnalytics(
 			lr.analytics,
 			"get_launches",
 			func(ctx context.Context, req *mcp.CallToolRequest, args GetLaunchesArgs) (*mcp.CallToolResult, any, error) {
-				project, err := utils.ExtractProject(ctx, args.Project)
+				project, err := utils.ExtractProject(ctx, args.ProjectKey)
 				if err != nil {
 					return nil, nil, err
 				}
@@ -404,6 +276,8 @@ func (lr *LaunchResources) toolGetLaunches() (*mcp.Tool, ToolHandler[GetLaunches
 						strconv.FormatUint(uint64(args.FilterGteNumber), 10),
 					)
 				}
+
+				addAutomationLaunchTypeFilter(urlValues)
 
 				ctxWithParams := utils.WithQueryParams(ctx, urlValues)
 				// Build API request and apply pagination directly
@@ -441,20 +315,24 @@ func (lr *LaunchResources) toolGetLaunches() (*mcp.Tool, ToolHandler[GetLaunches
 		)
 }
 
-// LaunchIDArgs is shared by tools that only need a project and launch ID.
+// LaunchIDArgs is shared by tools that only need a projectKey and launch ID.
 type LaunchIDArgs struct {
-	Project  string `json:"project"`
-	LaunchID uint32 `json:"launch_id"`
+	ProjectKey string `json:"projectKey"`
+	LaunchID   uint32 `json:"launch_id"`
 }
 
-func (lr *LaunchResources) toolRunQualityGate() (*mcp.Tool, ToolHandler[LaunchIDArgs, any]) {
+func (lr *LaunchResources) toolRunQualityGate() (*mcp.Tool, utils.ToolHandler[LaunchIDArgs, any]) {
+	pkSchema, err := utils.ProjectKeySchema(lr.defaultProjectKey)
+	if err != nil {
+		slog.Error("failed to build project key schema", "error", err)
+	}
 	return &mcp.Tool{
 			Name:        "run_quality_gate",
 			Description: "Run quality gate on ReportPortal launches",
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
-					"project": lr.projectSchema(),
+					utils.ProjectKeyField: pkSchema,
 					"launch_id": {
 						Type:        "integer",
 						Description: "Launch ID",
@@ -467,7 +345,7 @@ func (lr *LaunchResources) toolRunQualityGate() (*mcp.Tool, ToolHandler[LaunchID
 			lr.analytics,
 			"run_quality_gate",
 			func(ctx context.Context, req *mcp.CallToolRequest, args LaunchIDArgs) (*mcp.CallToolResult, any, error) {
-				project, err := utils.ExtractProject(ctx, args.Project)
+				project, err := utils.ExtractProject(ctx, args.ProjectKey)
 				if err != nil {
 					return nil, nil, err
 				}
@@ -497,17 +375,21 @@ func (lr *LaunchResources) toolRunQualityGate() (*mcp.Tool, ToolHandler[LaunchID
 
 // GetLastLaunchByNameArgs holds params for get_last_launch_by_name.
 type GetLastLaunchByNameArgs struct {
-	Project  string `json:"project"`
-	Launch   string `json:"launch"`
-	Page     uint   `json:"page"`
-	PageSize uint   `json:"page-size"`
-	PageSort string `json:"page-sort"`
+	ProjectKey string `json:"projectKey"`
+	Launch     string `json:"launch"`
+	Page       uint   `json:"page"`
+	PageSize   uint   `json:"page-size"`
+	PageSort   string `json:"page-sort"`
 }
 
 // toolGetLastLaunchByName creates a tool to retrieve the last launch by its name.
-func (lr *LaunchResources) toolGetLastLaunchByName() (*mcp.Tool, ToolHandler[GetLastLaunchByNameArgs, any]) {
+func (lr *LaunchResources) toolGetLastLaunchByName() (*mcp.Tool, utils.ToolHandler[GetLastLaunchByNameArgs, any]) {
 	properties := utils.SetPaginationProperties(utils.DefaultSortingForLaunches)
-	properties["project"] = lr.projectSchema()
+	pkSchema, err := utils.ProjectKeySchema(lr.defaultProjectKey)
+	if err != nil {
+		slog.Error("failed to build project key schema", "error", err)
+	}
+	properties[utils.ProjectKeyField] = pkSchema
 	properties["launch"] = &jsonschema.Schema{
 		Type:        "string",
 		Description: "Launch name",
@@ -526,7 +408,7 @@ func (lr *LaunchResources) toolGetLastLaunchByName() (*mcp.Tool, ToolHandler[Get
 			lr.analytics,
 			"get_last_launch_by_name",
 			func(ctx context.Context, req *mcp.CallToolRequest, args GetLastLaunchByNameArgs) (*mcp.CallToolResult, any, error) {
-				project, err := utils.ExtractProject(ctx, args.Project)
+				project, err := utils.ExtractProject(ctx, args.ProjectKey)
 				if err != nil {
 					return nil, nil, err
 				}
@@ -538,6 +420,7 @@ func (lr *LaunchResources) toolGetLastLaunchByName() (*mcp.Tool, ToolHandler[Get
 				urlValues := url.Values{
 					"filter.cnt.name": {args.Launch},
 				}
+				addAutomationLaunchTypeFilter(urlValues)
 				ctxWithParams := utils.WithQueryParams(ctx, urlValues)
 				apiRequest := lr.client.LaunchAPI.GetProjectLaunches(ctxWithParams, project)
 				apiRequest = utils.ApplyPaginationOptions(
@@ -570,14 +453,18 @@ func (lr *LaunchResources) toolGetLastLaunchByName() (*mcp.Tool, ToolHandler[Get
 }
 
 // toolGetLaunchById creates a tool to retrieve a specific launch by its ID directly.
-func (lr *LaunchResources) toolGetLaunchById() (*mcp.Tool, ToolHandler[LaunchIDArgs, any]) {
+func (lr *LaunchResources) toolGetLaunchById() (*mcp.Tool, utils.ToolHandler[LaunchIDArgs, any]) {
+	pkSchema, err := utils.ProjectKeySchema(lr.defaultProjectKey)
+	if err != nil {
+		slog.Error("failed to build project key schema", "error", err)
+	}
 	return &mcp.Tool{
 			Name:        "get_launch_by_id",
 			Description: "Get a specific launch by its ID directly",
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
-					"project": lr.projectSchema(),
+					utils.ProjectKeyField: pkSchema,
 					"launch_id": {
 						Type:        "integer",
 						Description: "Launch ID",
@@ -590,7 +477,7 @@ func (lr *LaunchResources) toolGetLaunchById() (*mcp.Tool, ToolHandler[LaunchIDA
 			lr.analytics,
 			"get_launch_by_id",
 			func(ctx context.Context, req *mcp.CallToolRequest, args LaunchIDArgs) (*mcp.CallToolResult, any, error) {
-				project, err := utils.ExtractProject(ctx, args.Project)
+				project, err := utils.ExtractProject(ctx, args.ProjectKey)
 				if err != nil {
 					return nil, nil, err
 				}
@@ -621,14 +508,18 @@ func (lr *LaunchResources) toolGetLaunchById() (*mcp.Tool, ToolHandler[LaunchIDA
 		)
 }
 
-func (lr *LaunchResources) toolDeleteLaunch() (*mcp.Tool, ToolHandler[LaunchIDArgs, any]) {
+func (lr *LaunchResources) toolDeleteLaunch() (*mcp.Tool, utils.ToolHandler[LaunchIDArgs, any]) {
+	pkSchema, err := utils.ProjectKeySchema(lr.defaultProjectKey)
+	if err != nil {
+		slog.Error("failed to build project key schema", "error", err)
+	}
 	return &mcp.Tool{
 			Name:        "launch_delete",
 			Description: "Delete ReportPortal launch",
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
-					"project": lr.projectSchema(),
+					utils.ProjectKeyField: pkSchema,
 					"launch_id": {
 						Type:        "integer",
 						Description: "Launch ID",
@@ -641,7 +532,7 @@ func (lr *LaunchResources) toolDeleteLaunch() (*mcp.Tool, ToolHandler[LaunchIDAr
 			lr.analytics,
 			"launch_delete",
 			func(ctx context.Context, req *mcp.CallToolRequest, args LaunchIDArgs) (*mcp.CallToolResult, any, error) {
-				project, err := utils.ExtractProject(ctx, args.Project)
+				project, err := utils.ExtractProject(ctx, args.ProjectKey)
 				if err != nil {
 					return nil, nil, err
 				}
@@ -669,21 +560,25 @@ func (lr *LaunchResources) toolDeleteLaunch() (*mcp.Tool, ToolHandler[LaunchIDAr
 
 // RunAutoAnalysisArgs holds params for run_auto_analysis.
 type RunAutoAnalysisArgs struct {
-	Project           string   `json:"project"`
+	ProjectKey        string   `json:"projectKey"`
 	LaunchID          uint32   `json:"launch_id"`
 	AnalyzerMode      string   `json:"analyzer_mode"`
 	AnalyzerType      string   `json:"analyzer_type"`
 	AnalyzerItemModes []string `json:"analyzer_item_modes"`
 }
 
-func (lr *LaunchResources) toolRunAutoAnalysis() (*mcp.Tool, ToolHandler[RunAutoAnalysisArgs, any]) {
+func (lr *LaunchResources) toolRunAutoAnalysis() (*mcp.Tool, utils.ToolHandler[RunAutoAnalysisArgs, any]) {
+	pkSchema, err := utils.ProjectKeySchema(lr.defaultProjectKey)
+	if err != nil {
+		slog.Error("failed to build project key schema", "error", err)
+	}
 	return &mcp.Tool{
 			Name:        "run_auto_analysis",
 			Description: "Run auto analysis on ReportPortal launch",
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
-					"project": lr.projectSchema(),
+					utils.ProjectKeyField: pkSchema,
 					"launch_id": {
 						Type:        "integer",
 						Description: "Launch ID",
@@ -698,13 +593,13 @@ func (lr *LaunchResources) toolRunAutoAnalysis() (*mcp.Tool, ToolHandler[RunAuto
 							"previous_launch",
 							"current_and_the_same_name",
 						},
-						Default: mustMarshalJSON("current_launch"),
+						Default: utils.MustMarshalJSON("current_launch"),
 					},
 					"analyzer_type": {
 						Type:        "string",
 						Description: "Analyzer type, only one of the values is allowed",
 						Enum:        []any{"autoAnalyzer", "patternAnalyzer"},
-						Default:     mustMarshalJSON("autoAnalyzer"),
+						Default:     utils.MustMarshalJSON("autoAnalyzer"),
 					},
 					"analyzer_item_modes": {
 						Type:        "array",
@@ -713,7 +608,7 @@ func (lr *LaunchResources) toolRunAutoAnalysis() (*mcp.Tool, ToolHandler[RunAuto
 							Type: "string",
 							Enum: []any{"to_investigate", "auto_analyzed", "manually_analyzed"},
 						},
-						Default: mustMarshalJSON([]string{"to_investigate"}),
+						Default: utils.MustMarshalJSON([]string{"to_investigate"}),
 					},
 				},
 				Required: []string{
@@ -728,7 +623,7 @@ func (lr *LaunchResources) toolRunAutoAnalysis() (*mcp.Tool, ToolHandler[RunAuto
 			lr.analytics,
 			"run_auto_analysis",
 			func(ctx context.Context, req *mcp.CallToolRequest, args RunAutoAnalysisArgs) (*mcp.CallToolResult, any, error) {
-				project, err := utils.ExtractProject(ctx, args.Project)
+				project, err := utils.ExtractProject(ctx, args.ProjectKey)
 				if err != nil {
 					return nil, nil, err
 				}
@@ -744,7 +639,7 @@ func (lr *LaunchResources) toolRunAutoAnalysis() (*mcp.Tool, ToolHandler[RunAuto
 
 				rs, response, err := lr.client.LaunchAPI.
 					StartLaunchAnalyzer(ctx, project).
-					AnalyzeLaunchRQ(openapi.AnalyzeLaunchRQ{
+					ComEpamReportportalBaseModelLaunchAnalyzeLaunchRQ(openapi.ComEpamReportportalBaseModelLaunchAnalyzeLaunchRQ{
 						LaunchId:         int64(args.LaunchID),
 						AnalyzerMode:     strings.ToUpper(args.AnalyzerMode),
 						AnalyzerTypeName: strings.ToUpper(args.AnalyzerType),
@@ -768,19 +663,23 @@ func (lr *LaunchResources) toolRunAutoAnalysis() (*mcp.Tool, ToolHandler[RunAuto
 
 // UniqueErrorAnalysisArgs holds params for run_unique_error_analysis.
 type UniqueErrorAnalysisArgs struct {
-	Project       string `json:"project"`
+	ProjectKey    string `json:"projectKey"`
 	LaunchID      uint32 `json:"launch_id"`
 	RemoveNumbers bool   `json:"remove_numbers"`
 }
 
-func (lr *LaunchResources) toolUniqueErrorAnalysis() (*mcp.Tool, ToolHandler[UniqueErrorAnalysisArgs, any]) {
+func (lr *LaunchResources) toolUniqueErrorAnalysis() (*mcp.Tool, utils.ToolHandler[UniqueErrorAnalysisArgs, any]) {
+	pkSchema, err := utils.ProjectKeySchema(lr.defaultProjectKey)
+	if err != nil {
+		slog.Error("failed to build project key schema", "error", err)
+	}
 	return &mcp.Tool{
 			Name:        "run_unique_error_analysis",
 			Description: "Run unique error analysis on ReportPortal launch",
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
-					"project": lr.projectSchema(),
+					utils.ProjectKeyField: pkSchema,
 					"launch_id": {
 						Type:        "integer",
 						Description: "Launch ID",
@@ -788,7 +687,7 @@ func (lr *LaunchResources) toolUniqueErrorAnalysis() (*mcp.Tool, ToolHandler[Uni
 					"remove_numbers": {
 						Type:        "boolean",
 						Description: "Remove numbers from analyzed logs",
-						Default:     mustMarshalJSON(false),
+						Default:     utils.MustMarshalJSON(false),
 					},
 				},
 				Required: []string{"launch_id"},
@@ -798,7 +697,7 @@ func (lr *LaunchResources) toolUniqueErrorAnalysis() (*mcp.Tool, ToolHandler[Uni
 			lr.analytics,
 			"run_unique_error_analysis",
 			func(ctx context.Context, req *mcp.CallToolRequest, args UniqueErrorAnalysisArgs) (*mcp.CallToolResult, any, error) {
-				project, err := utils.ExtractProject(ctx, args.Project)
+				project, err := utils.ExtractProject(ctx, args.ProjectKey)
 				if err != nil {
 					return nil, nil, err
 				}
@@ -809,7 +708,7 @@ func (lr *LaunchResources) toolUniqueErrorAnalysis() (*mcp.Tool, ToolHandler[Uni
 
 				rs, response, err := lr.client.LaunchAPI.
 					CreateClusters(ctx, project).
-					CreateClustersRQ(openapi.CreateClustersRQ{
+					ComEpamReportportalBaseModelLaunchClusterCreateClustersRQ(openapi.ComEpamReportportalBaseModelLaunchClusterCreateClustersRQ{
 						LaunchId:      int64(args.LaunchID),
 						RemoveNumbers: openapi.PtrBool(args.RemoveNumbers),
 					}).
@@ -837,20 +736,24 @@ type UpdateLaunchAttribute struct {
 
 // UpdateLaunchArgs holds params for update_launch.
 type UpdateLaunchArgs struct {
-	Project     string                  `json:"project"`
+	ProjectKey  string                  `json:"projectKey"`
 	LaunchID    uint32                  `json:"launch_id"`
 	Description *string                 `json:"description,omitempty"`
 	Attributes  []UpdateLaunchAttribute `json:"attributes,omitempty"`
 }
 
-func (lr *LaunchResources) toolUpdateLaunch() (*mcp.Tool, ToolHandler[UpdateLaunchArgs, any]) {
+func (lr *LaunchResources) toolUpdateLaunch() (*mcp.Tool, utils.ToolHandler[UpdateLaunchArgs, any]) {
+	pkSchema, err := utils.ProjectKeySchema(lr.defaultProjectKey)
+	if err != nil {
+		slog.Error("failed to build project key schema", "error", err)
+	}
 	return &mcp.Tool{
 			Name:        "update_launch",
 			Description: "Update launch attributes and description in ReportPortal",
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
-					"project": lr.projectSchema(),
+					utils.ProjectKeyField: pkSchema,
 					"launch_id": {
 						Type:        "integer",
 						Description: "Launch ID",
@@ -885,7 +788,7 @@ func (lr *LaunchResources) toolUpdateLaunch() (*mcp.Tool, ToolHandler[UpdateLaun
 			lr.analytics,
 			"update_launch",
 			func(ctx context.Context, req *mcp.CallToolRequest, args UpdateLaunchArgs) (*mcp.CallToolResult, any, error) {
-				project, err := utils.ExtractProject(ctx, args.Project)
+				project, err := utils.ExtractProject(ctx, args.ProjectKey)
 				if err != nil {
 					return nil, nil, err
 				}
@@ -900,12 +803,16 @@ func (lr *LaunchResources) toolUpdateLaunch() (*mcp.Tool, ToolHandler[UpdateLaun
 					)
 				}
 
-				updateRQ := openapi.UpdateLaunchRQ{}
+				updateRQ := openapi.ComEpamReportportalBaseModelLaunchUpdateLaunchRQ{}
 				if args.Description != nil {
 					updateRQ.SetDescription(*args.Description)
 				}
 				if args.Attributes != nil {
-					attrs := make([]openapi.ItemAttributeResource, 0, len(args.Attributes))
+					attrs := make(
+						[]openapi.ComEpamReportportalBaseReportingAttributeResource,
+						0,
+						len(args.Attributes),
+					)
 					for i, a := range args.Attributes {
 						if strings.TrimSpace(a.Value) == "" {
 							if trimmedKey := strings.TrimSpace(a.Key); trimmedKey != "" {
@@ -917,7 +824,9 @@ func (lr *LaunchResources) toolUpdateLaunch() (*mcp.Tool, ToolHandler[UpdateLaun
 							}
 							return nil, nil, fmt.Errorf("attribute[%d] has empty value", i)
 						}
-						attr := openapi.ItemAttributeResource{Value: a.Value}
+						attr := openapi.ComEpamReportportalBaseReportingAttributeResource{
+							Value: a.Value,
+						}
 						if trimmedKey := strings.TrimSpace(a.Key); trimmedKey != "" {
 							attr.SetKey(trimmedKey)
 						}
@@ -928,7 +837,7 @@ func (lr *LaunchResources) toolUpdateLaunch() (*mcp.Tool, ToolHandler[UpdateLaun
 
 				rs, response, err := lr.client.LaunchAPI.
 					UpdateLaunch(ctx, int64(args.LaunchID), project).
-					UpdateLaunchRQ(updateRQ).
+					ComEpamReportportalBaseModelLaunchUpdateLaunchRQ(updateRQ).
 					Execute()
 				if err != nil {
 					return nil, nil, fmt.Errorf(
@@ -945,14 +854,18 @@ func (lr *LaunchResources) toolUpdateLaunch() (*mcp.Tool, ToolHandler[UpdateLaun
 		)
 }
 
-func (lr *LaunchResources) toolForceFinishLaunch() (*mcp.Tool, ToolHandler[LaunchIDArgs, any]) {
+func (lr *LaunchResources) toolForceFinishLaunch() (*mcp.Tool, utils.ToolHandler[LaunchIDArgs, any]) {
+	pkSchema, err := utils.ProjectKeySchema(lr.defaultProjectKey)
+	if err != nil {
+		slog.Error("failed to build project key schema", "error", err)
+	}
 	return &mcp.Tool{
 			Name:        "launch_force_finish",
 			Description: "Force finish launch",
 			InputSchema: &jsonschema.Schema{
 				Type: "object",
 				Properties: map[string]*jsonschema.Schema{
-					"project": lr.projectSchema(),
+					utils.ProjectKeyField: pkSchema,
 					"launch_id": {
 						Type:        "integer",
 						Description: "Launch ID",
@@ -965,7 +878,7 @@ func (lr *LaunchResources) toolForceFinishLaunch() (*mcp.Tool, ToolHandler[Launc
 			lr.analytics,
 			"launch_force_finish",
 			func(ctx context.Context, req *mcp.CallToolRequest, args LaunchIDArgs) (*mcp.CallToolResult, any, error) {
-				project, err := utils.ExtractProject(ctx, args.Project)
+				project, err := utils.ExtractProject(ctx, args.ProjectKey)
 				if err != nil {
 					return nil, nil, err
 				}
@@ -1000,7 +913,7 @@ func (lr *LaunchResources) toolForceFinishLaunch() (*mcp.Tool, ToolHandler[Launc
 
 // ImportLaunchFromFileArgs holds parameters for importing a launch from a file.
 type ImportLaunchFromFileArgs struct {
-	Project         string `json:"project"`
+	ProjectKey      string `json:"projectKey"`
 	PluginName      string `json:"plugin_name"`
 	FileName        string `json:"file_name"`
 	FileContent     string `json:"file_content"`
@@ -1009,9 +922,13 @@ type ImportLaunchFromFileArgs struct {
 }
 
 // toolImportLaunchFromFile creates a tool to import a launch into ReportPortal from a file passed inline.
-func (lr *LaunchResources) toolImportLaunchFromFile() (*mcp.Tool, ToolHandler[ImportLaunchFromFileArgs, any]) {
+func (lr *LaunchResources) toolImportLaunchFromFile() (*mcp.Tool, utils.ToolHandler[ImportLaunchFromFileArgs, any]) {
+	pkSchema, err := utils.ProjectKeySchema(lr.defaultProjectKey)
+	if err != nil {
+		slog.Error("failed to build project key schema", "error", err)
+	}
 	properties := map[string]*jsonschema.Schema{
-		"project": lr.projectSchema(),
+		utils.ProjectKeyField: pkSchema,
 		"plugin_name": {
 			Type: "string",
 			Description: "Name of the import plugin to use (e.g. 'junit'). " +
@@ -1031,7 +948,7 @@ func (lr *LaunchResources) toolImportLaunchFromFile() (*mcp.Tool, ToolHandler[Im
 			Type:        "string",
 			Description: "Encoding of file_content. Omit or set to \"none\" for plain text files (e.g. XML). Set to \"base64\" for binary files (e.g. ZIP archives).",
 			Enum:        []any{"none", "base64"},
-			Default:     mustMarshalJSON("none"),
+			Default:     utils.MustMarshalJSON("none"),
 		},
 		"content_type": {
 			Type: "string",
@@ -1057,7 +974,7 @@ func (lr *LaunchResources) toolImportLaunchFromFile() (*mcp.Tool, ToolHandler[Im
 			lr.analytics,
 			"import_launch_from_file",
 			func(ctx context.Context, req *mcp.CallToolRequest, args ImportLaunchFromFileArgs) (*mcp.CallToolResult, any, error) {
-				project, err := utils.ExtractProject(ctx, args.Project)
+				project, err := utils.ExtractProject(ctx, args.ProjectKey)
 				if err != nil {
 					return nil, nil, err
 				}
@@ -1137,7 +1054,7 @@ func (lr *LaunchResources) toolImportLaunchFromFile() (*mcp.Tool, ToolHandler[Im
 				var body bytes.Buffer
 				mw := multipart.NewWriter(&body)
 
-				mimeType, mimeErr := pickImportContentType(
+				mimeType, mimeErr := utils.PickImportContentType(
 					pluginInfo.MimeTypes,
 					args.FileName,
 					args.ContentType,
@@ -1226,6 +1143,7 @@ func (lr *LaunchResources) toolImportLaunchFromFile() (*mcp.Tool, ToolHandler[Im
 				if err != nil {
 					return nil, nil, fmt.Errorf("failed to read import response: %w", err)
 				}
+				resp.Body = io.NopCloser(bytes.NewBuffer(respBody))
 				if localResponseMw != nil {
 					if mwErr := localResponseMw(resp, respBody); mwErr != nil {
 						return nil, nil, fmt.Errorf("import response middleware error: %w", mwErr)
@@ -1250,52 +1168,52 @@ func (lr *LaunchResources) toolImportLaunchFromFile() (*mcp.Tool, ToolHandler[Im
 // resourceLaunch creates a resource template for accessing launches by URI.
 func (lr *LaunchResources) resourceLaunch() (*mcp.ResourceTemplate, mcp.ResourceHandler) {
 	return &mcp.ResourceTemplate{
-			Name:        "reportportal-launch-by-id",
-			Description: "Access ReportPortal launches by URI (reportportal://{project}/launch/{launchId})",
-			MIMEType:    "application/json",
-			URITemplate: "reportportal://{project}/launch/{launchId}",
-		}, func(ctx context.Context, request *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
-			// Parse the URI to extract parameters
+		Name:        "reportportal-launch-by-id",
+		Description: "Access ReportPortal launches by URI (reportportal://{projectKey}/launch/{launchId})",
+		MIMEType:    "application/json",
+		URITemplate: "reportportal://{projectKey}/launch/{launchId}",
+	}, func(ctx context.Context, request *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+		// Parse the URI to extract parameters
 
-			uri := request.Params.URI
-			project, launchIdStr, err := utils.ParseReportPortalURI(uri, "launch")
-			if err != nil {
-				return nil, err
-			}
-
-			// Convert launchId to integer
-			launchId, err := strconv.ParseUint(launchIdStr, 10, 64)
-			if err != nil {
-				return nil, fmt.Errorf("invalid launchId: %w", err)
-			}
-
-			// Fetch the launch from ReportPortal
-			launchPage, _, err := lr.client.LaunchAPI.GetProjectLaunches(ctx, project).
-				FilterEqId(int32(launchId)). //nolint:gosec
-				Execute()
-			if err != nil {
-				return nil, fmt.Errorf("failed to get launch page: %w", err)
-			}
-
-			if len(launchPage.Content) < 1 {
-				return nil, fmt.Errorf("launch not found: %d", launchId)
-			}
-
-			// Marshal the launch to JSON
-			launchPayload, err := json.Marshal(launchPage.Content[0])
-			if err != nil {
-				return nil, fmt.Errorf("failed to marshal response: %w", err)
-			}
-
-			// Return the resource contents
-			return &mcp.ReadResourceResult{
-				Contents: []*mcp.ResourceContents{
-					{
-						URI:      uri,
-						MIMEType: "application/json",
-						Text:     string(launchPayload),
-					},
-				},
-			}, nil
+		uri := request.Params.URI
+		project, launchIdStr, err := utils.ParseReportPortalURI(uri, "launch")
+		if err != nil {
+			return nil, err
 		}
+
+		// Convert launchId to integer
+		launchId, err := strconv.ParseUint(launchIdStr, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid launchId: %w", err)
+		}
+
+		// Fetch the launch from ReportPortal
+		launchPage, _, err := lr.client.LaunchAPI.GetProjectLaunches(ctx, project).
+			FilterEqId(int32(launchId)). //nolint:gosec
+			Execute()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get launch page: %w", err)
+		}
+
+		if len(launchPage.Content) < 1 {
+			return nil, fmt.Errorf("launch not found: %d", launchId)
+		}
+
+		// Marshal the launch to JSON
+		launchPayload, err := json.Marshal(launchPage.Content[0])
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal response: %w", err)
+		}
+
+		// Return the resource contents
+		return &mcp.ReadResourceResult{
+			Contents: []*mcp.ResourceContents{
+				{
+					URI:      uri,
+					MIMEType: "application/json",
+					Text:     string(launchPayload),
+				},
+			},
+		}, nil
+	}
 }

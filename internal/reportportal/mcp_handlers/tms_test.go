@@ -1,0 +1,3566 @@
+package mcphandlers
+
+import (
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"io"
+	"math"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strconv"
+	"strings"
+	"sync/atomic"
+	"testing"
+
+	"github.com/google/jsonschema-go/jsonschema"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/reportportal/goRP/v5/pkg/gorp"
+	"github.com/stretchr/testify/require"
+
+	"github.com/reportportal/reportportal-mcp-server/internal/reportportal/utils"
+)
+
+func newTMSResources(t *testing.T) *TMSResources {
+	t.Helper()
+	serverURL, err := url.Parse("http://localhost:8080")
+	require.NoError(t, err)
+	return NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+}
+
+// newTMSResourcesWithCounter creates a TMSResources backed by an httptest.Server
+// and returns both the resources and an atomic counter incremented on every
+// inbound HTTP request. Tests that expect validation to short-circuit before
+// any network call can assert that the counter remains zero.
+func newTMSResourcesWithCounter(t *testing.T) (*TMSResources, *atomic.Int64) {
+	t.Helper()
+	var requestCount atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requestCount.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	return NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	), &requestCount
+}
+
+// TestAddTestCasesToTestPlanTool_ArraySchema mirrors TestUpdateDefectTypeForTestItemsTool
+// (items_test.go) and guards against the VS Code / GitHub Copilot regression where
+// array parameters without an "items" sub-schema are silently mishandled.
+func TestAddTestCasesToTestPlanTool_ArraySchema(t *testing.T) {
+	tool, _ := newTMSResources(t).toolAddTestCasesToTestPlan()
+
+	schema, ok := tool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok, "InputSchema should be a *jsonschema.Schema")
+
+	prop, ok := schema.Properties["test-case-ids"]
+	require.True(t, ok, "test-case-ids property should exist")
+	require.Equal(t, "array", prop.Type, "test-case-ids should be an array type")
+	require.NotNil(t, prop.Items, "test-case-ids must have items property (VS Code compatibility)")
+	require.Equal(t, "integer", prop.Items.Type, "items should be of type integer")
+	require.NotNil(t, prop.Items.Minimum, "items should have a minimum constraint")
+	require.Equal(t, float64(1), *prop.Items.Minimum, "items minimum should be 1")
+}
+
+// TestCreateMilestoneTool_TypeEnum verifies that the type field carries the correct
+// enum values so that MCP clients and IDE completions can validate without an API call.
+func TestCreateMilestoneTool_TypeEnum(t *testing.T) {
+	tool, _ := newTMSResources(t).toolCreateMilestone()
+
+	schema, ok := tool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok, "InputSchema should be a *jsonschema.Schema")
+
+	typeProp, ok := schema.Properties["type"]
+	require.True(t, ok, "type property should exist")
+	require.ElementsMatch(t,
+		[]any{"RELEASE", "SPRINT", "PLAN", "FEATURE", "OTHER"},
+		typeProp.Enum,
+		"type enum should contain RELEASE, SPRINT, PLAN, FEATURE, OTHER",
+	)
+}
+
+// TestCreateMilestoneTool_StatusEnum verifies the optional status field enum.
+func TestCreateMilestoneTool_StatusEnum(t *testing.T) {
+	tool, _ := newTMSResources(t).toolCreateMilestone()
+
+	schema, ok := tool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok, "InputSchema should be a *jsonschema.Schema")
+
+	statusProp, ok := schema.Properties["status"]
+	require.True(t, ok, "status property should exist")
+	require.ElementsMatch(t,
+		[]any{"SCHEDULED", "TESTING", "COMPLETED"},
+		statusProp.Enum,
+		"status enum should contain SCHEDULED, TESTING, COMPLETED",
+	)
+}
+
+// TestCreateMilestoneTool_RequiredFields verifies the required fields list.
+func TestCreateMilestoneTool_RequiredFields(t *testing.T) {
+	tool, _ := newTMSResources(t).toolCreateMilestone()
+
+	schema, ok := tool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok, "InputSchema should be a *jsonschema.Schema")
+
+	require.ElementsMatch(t,
+		[]string{"name", "type", "start-date", "end-date"},
+		schema.Required,
+	)
+}
+
+// TestCreateTestCaseTool_PriorityEnum verifies the priority enum on create_test_case.
+func TestCreateTestCaseTool_PriorityEnum(t *testing.T) {
+	tool, _ := newTMSResources(t).toolCreateTestCase()
+
+	schema, ok := tool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok, "InputSchema should be a *jsonschema.Schema")
+
+	priorityProp, ok := schema.Properties["priority"]
+	require.True(t, ok, "priority property should exist")
+	require.ElementsMatch(t,
+		[]any{"LOW", "MEDIUM", "HIGH", "CRITICAL", "BLOCKER", "UNSPECIFIED"},
+		priorityProp.Enum,
+		"priority enum should match update_test_case and filter-in-priority values",
+	)
+}
+
+// ---------------------------------------------------------------------------
+// Runtime validation tests — handler-level guard assertions (no HTTP calls).
+// ---------------------------------------------------------------------------
+//
+// Skipped findings (handler has no guard, constraint is schema-only):
+//   • toolCreateTestCase  invalid priority  — handler passes *string directly to
+//     the API without validating enum membership; only the JSON-schema enum
+//     constrains this on the client side.
+//   • toolAddTestCasesToTestPlan non-integer IDs — the Go type []int64 prevents
+//     non-integers at the struct level; no runtime path to test.
+//   • toolAddTestCasesToTestPlan IDs < 1 — handler only checks for an empty
+//     slice; the minimum:1 constraint is enforced by the schema alone.
+
+// TestCreateMilestoneTool_InvalidWhitespaceName verifies that a name consisting
+// entirely of whitespace is rejected before any API call is made.
+func TestCreateMilestoneTool_InvalidWhitespaceName(t *testing.T) {
+	ctx := context.Background()
+	_, handler := newTMSResources(t).toolCreateMilestone()
+
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, CreateMilestoneArgs{
+		ProjectKey: "test-project",
+		Name:       "   ",
+		Type:       "SPRINT",
+		StartDate:  "2026-01-01T00:00:00Z",
+		EndDate:    "2026-12-31T00:00:00Z",
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "empty or whitespace")
+}
+
+// TestCreateMilestoneTool_InvalidStartDateFormat verifies that a start-date
+// that is not RFC3339 is rejected with a descriptive error.
+func TestCreateMilestoneTool_InvalidStartDateFormat(t *testing.T) {
+	ctx := context.Background()
+	_, handler := newTMSResources(t).toolCreateMilestone()
+
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, CreateMilestoneArgs{
+		ProjectKey: "test-project",
+		Name:       "Sprint 1",
+		Type:       "SPRINT",
+		StartDate:  "2026/01/01",
+		EndDate:    "2026-12-31T00:00:00Z",
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid start-date format")
+}
+
+// TestCreateMilestoneTool_InvalidEndDateFormat verifies that a valid start-date
+// paired with a malformed end-date is rejected.
+func TestCreateMilestoneTool_InvalidEndDateFormat(t *testing.T) {
+	ctx := context.Background()
+	_, handler := newTMSResources(t).toolCreateMilestone()
+
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, CreateMilestoneArgs{
+		ProjectKey: "test-project",
+		Name:       "Sprint 1",
+		Type:       "SPRINT",
+		StartDate:  "2026-01-01T00:00:00Z",
+		EndDate:    "31-12-2026",
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid end-date format")
+}
+
+// TestCreateMilestoneTool_InvalidEndDateBeforeStartDate verifies that an
+// end-date earlier than start-date is rejected even when both are valid RFC3339.
+func TestCreateMilestoneTool_InvalidEndDateBeforeStartDate(t *testing.T) {
+	ctx := context.Background()
+	_, handler := newTMSResources(t).toolCreateMilestone()
+
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, CreateMilestoneArgs{
+		ProjectKey: "test-project",
+		Name:       "Sprint 1",
+		Type:       "SPRINT",
+		StartDate:  "2026-06-01T00:00:00Z",
+		EndDate:    "2026-01-01T00:00:00Z",
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "must not be before")
+}
+
+// TestCreateTestCaseTool_InvalidWhitespaceName verifies that a whitespace-only
+// name is rejected before any API call is made.
+func TestCreateTestCaseTool_InvalidWhitespaceName(t *testing.T) {
+	ctx := context.Background()
+	_, handler := newTMSResources(t).toolCreateTestCase()
+
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, CreateTestCaseArgs{
+		ProjectKey: "test-project",
+		Name:       "\t  \n",
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "empty or whitespace")
+}
+
+// TestAddTestCasesToTestPlanTool_InvalidEmptyArray verifies that an empty
+// test-case-ids slice is rejected with a clear error before any API call.
+func TestAddTestCasesToTestPlanTool_InvalidEmptyArray(t *testing.T) {
+	ctx := context.Background()
+	_, handler := newTMSResources(t).toolAddTestCasesToTestPlan()
+
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, AddTestCasesToTestPlanArgs{
+		ProjectKey:  "test-project",
+		TestPlanID:  42,
+		TestCaseIDs: []int64{},
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "must not be empty")
+}
+
+// TestCreateTestPlanTool_WhitespaceName verifies that a name consisting entirely
+// of whitespace is rejected before any API call is made.
+func TestCreateTestPlanTool_WhitespaceName(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolCreateTestPlan()
+
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, CreateTestPlanArgs{
+		ProjectKey:  "test-project",
+		Name:        "   ",
+		MilestoneID: 1,
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "empty or whitespace")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestCreateTestPlanTool_ZeroMilestoneID verifies that a milestone-id of 0 is
+// rejected before any API call is made.
+func TestCreateTestPlanTool_ZeroMilestoneID(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolCreateTestPlan()
+
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, CreateTestPlanArgs{
+		ProjectKey:  "test-project",
+		Name:        "My Plan",
+		MilestoneID: 0,
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "milestone-id must be a positive integer")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestAddTestCasesToTestPlanTool_ZeroTestPlanID verifies that a test-plan-id of 0
+// is rejected before any API call is made.
+func TestAddTestCasesToTestPlanTool_ZeroTestPlanID(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolAddTestCasesToTestPlan()
+
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, AddTestCasesToTestPlanArgs{
+		ProjectKey:  "test-project",
+		TestPlanID:  0,
+		TestCaseIDs: []int64{1},
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "test-plan-id must be a positive integer")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestDeleteTestCasesFromTestPlanTool_ArraySchema verifies that the test-case-ids
+// property is an array with an items sub-schema (VS Code / GitHub Copilot compatibility).
+func TestDeleteTestCasesFromTestPlanTool_ArraySchema(t *testing.T) {
+	tool, _ := newTMSResources(t).toolDeleteTestCasesFromTestPlan()
+
+	schema, ok := tool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok, "InputSchema should be a *jsonschema.Schema")
+
+	prop, ok := schema.Properties["test-case-ids"]
+	require.True(t, ok, "test-case-ids property should exist")
+	require.Equal(t, "array", prop.Type, "test-case-ids should be an array type")
+	require.NotNil(t, prop.Items, "test-case-ids must have items property (VS Code compatibility)")
+	require.Equal(t, "integer", prop.Items.Type, "items should be of type integer")
+	require.NotNil(t, prop.Items.Minimum, "items should have a minimum constraint")
+	require.Equal(t, float64(1), *prop.Items.Minimum, "items minimum should be 1")
+}
+
+// TestDeleteTestCasesFromTestPlanTool_InvalidEmptyArray verifies that an empty
+// test-case-ids slice is rejected with a clear error before any API call is made.
+func TestDeleteTestCasesFromTestPlanTool_InvalidEmptyArray(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolDeleteTestCasesFromTestPlan()
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, DeleteTestCasesFromTestPlanArgs{
+		ProjectKey:  "test-project",
+		TestPlanID:  42,
+		TestCaseIDs: []int64{},
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "must not be empty")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestDeleteTestCasesFromTestPlanTool_ZeroTestPlanID verifies that a test-plan-id of 0
+// is rejected before any API call is made.
+func TestDeleteTestCasesFromTestPlanTool_ZeroTestPlanID(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolDeleteTestCasesFromTestPlan()
+
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, DeleteTestCasesFromTestPlanArgs{
+		ProjectKey:  "test-project",
+		TestPlanID:  0,
+		TestCaseIDs: []int64{1},
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "test-plan-id must be a positive integer")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestDeleteTestCasesFromTestPlanTool_ZeroTestCaseID verifies that a test case ID of 0
+// within the list is rejected before any API call is made.
+func TestDeleteTestCasesFromTestPlanTool_ZeroTestCaseID(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolDeleteTestCasesFromTestPlan()
+
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, DeleteTestCasesFromTestPlanArgs{
+		ProjectKey:  "test-project",
+		TestPlanID:  42,
+		TestCaseIDs: []int64{1, 0, 3},
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "must be a positive integer")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestGetTestFoldersByFilterTool_IntegerFilterBounds verifies that the JSON schema
+// for filter-eq-id and filter-eq-parentId carries minimum:1 and no upper bound,
+// so that int64 IDs above MaxInt32 are accepted.
+func TestGetTestFoldersByFilterTool_IntegerFilterBounds(t *testing.T) {
+	tool, _ := newTMSResources(t).toolGetTestFoldersByFilter()
+
+	schema, ok := tool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok, "InputSchema should be a *jsonschema.Schema")
+
+	for _, field := range []string{"filter-eq-id", "filter-eq-parentId"} {
+		prop, ok := schema.Properties[field]
+		require.True(t, ok, "%s property should exist", field)
+		require.Equal(t, "integer", prop.Type, "%s should be integer type", field)
+		require.NotNil(t, prop.Minimum, "%s should have a minimum constraint", field)
+		require.Equal(t, float64(1), *prop.Minimum, "%s minimum should be 1", field)
+		require.Nil(t, prop.Maximum, "%s should have no maximum constraint", field)
+	}
+}
+
+// TestGetTestFoldersByFilterTool_CntNameSchema verifies filter-cnt-name is exposed
+// in the schema and maps to API filter.cnt.name.
+func TestGetTestFoldersByFilterTool_CntNameSchema(t *testing.T) {
+	tool, _ := newTMSResources(t).toolGetTestFoldersByFilter()
+
+	schema, ok := tool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok, "InputSchema should be a *jsonschema.Schema")
+
+	prop, ok := schema.Properties["filter-cnt-name"]
+	require.True(t, ok, "filter-cnt-name property should exist")
+	require.Equal(t, "string", prop.Type)
+}
+
+// TestGetTestFoldersByFilterTool_CntNameReachesHTTP verifies filter.cnt.name is forwarded.
+func TestGetTestFoldersByFilterTool_CntNameReachesHTTP(t *testing.T) {
+	ctx := context.Background()
+
+	var capturedQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedQuery = r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"content":[],"page":{"totalElements":0}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolGetTestFoldersByFilter()
+
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, GetTestFoldersByFilterArgs{
+		ProjectKey:    "test-project",
+		FilterCntName: "smoke",
+	})
+
+	require.NoError(t, callErr)
+	require.NotNil(t, capturedQuery, "HTTP request should reach the server")
+	require.Equal(t, "smoke", capturedQuery.Get("filter.cnt.name"))
+}
+
+// TestGetTestFoldersByFilterTool_LargeIDReachesHTTP verifies that a filter-eq-id
+// greater than math.MaxInt32 is accepted and forwarded as a query parameter to
+// the HTTP layer, allowing int64 IDs from typical ReportPortal deployments.
+func TestGetTestFoldersByFilterTool_LargeIDReachesHTTP(t *testing.T) {
+	ctx := context.Background()
+
+	var capturedQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedQuery = r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"content":[],"page":{"totalElements":0}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolGetTestFoldersByFilter()
+
+	largeID := int64(math.MaxInt32) + 1
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, GetTestFoldersByFilterArgs{
+		ProjectKey: "test-project",
+		FilterEqID: &largeID,
+	})
+
+	require.NoError(t, callErr, "large int64 ID should be accepted and forwarded")
+	require.NotNil(t, capturedQuery, "HTTP request should reach the server")
+	require.Equal(t, strconv.FormatInt(largeID, 10), capturedQuery.Get("filter.eq.id"))
+}
+
+// TestGetTestFoldersByFilterTool_ZeroID verifies that a filter-eq-id of 0
+// (non-positive) is rejected before any API call is made.
+func TestGetTestFoldersByFilterTool_ZeroID(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolGetTestFoldersByFilter()
+
+	zero := int64(0)
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, GetTestFoldersByFilterArgs{
+		ProjectKey: "test-project",
+		FilterEqID: &zero,
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "filter-eq-id out of range")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestGetTestFoldersByFilterTool_NegativeParentID verifies that a negative
+// filter-eq-parentId is rejected before any API call is made.
+func TestGetTestFoldersByFilterTool_NegativeParentID(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolGetTestFoldersByFilter()
+
+	negative := int64(-1)
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, GetTestFoldersByFilterArgs{
+		ProjectKey:       "test-project",
+		FilterEqParentID: &negative,
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "filter-eq-parentId out of range")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestDeleteFolderTool_ZeroID verifies that folderId of 0 is rejected before
+// any API call is made.
+func TestDeleteFolderTool_ZeroID(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolDeleteTestFolder()
+
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, DeleteFolderArgs{
+		ProjectKey: "test-project",
+		FolderID:   0,
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "folderId out of range")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestDeleteFolderTool_RequiredFields verifies that folderId is required.
+func TestDeleteFolderTool_RequiredFields(t *testing.T) {
+	tool, _ := newTMSResources(t).toolDeleteTestFolder()
+
+	schema, ok := tool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok, "InputSchema should be a *jsonschema.Schema")
+
+	require.ElementsMatch(t, []string{"folderId"}, schema.Required)
+}
+
+// TestDeleteFolderTool_IDMinimumConstraint verifies the folderId schema has minimum:1.
+func TestDeleteFolderTool_IDMinimumConstraint(t *testing.T) {
+	tool, _ := newTMSResources(t).toolDeleteTestFolder()
+
+	schema, ok := tool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok, "InputSchema should be a *jsonschema.Schema")
+
+	prop, ok := schema.Properties["folderId"]
+	require.True(t, ok, "folderId property should exist")
+	require.Equal(t, "integer", prop.Type)
+	require.NotNil(t, prop.Minimum)
+	require.Equal(t, float64(1), *prop.Minimum)
+}
+
+// TestDeleteFolderTool_SuccessReachesHTTP verifies that a valid folderId causes
+// an HTTP DELETE request to the correct path.
+func TestDeleteFolderTool_SuccessReachesHTTP(t *testing.T) {
+	ctx := context.Background()
+
+	type httpReq struct{ method, path string }
+	reqCh := make(chan httpReq, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reqCh <- httpReq{method: r.Method, path: r.URL.Path}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolDeleteTestFolder()
+
+	result, _, callErr := handler(ctx, &mcp.CallToolRequest{}, DeleteFolderArgs{
+		ProjectKey: "test-project",
+		FolderID:   42,
+	})
+
+	captured := <-reqCh
+	require.NoError(t, callErr)
+	require.Equal(t, http.MethodDelete, captured.method)
+	require.Contains(t, captured.path, "/tms/folder/42")
+	require.NotNil(t, result)
+	require.False(t, result.IsError)
+}
+
+// TestDeleteTestCaseTool_RequiredFields verifies that testCaseId is required.
+func TestDeleteTestCaseTool_RequiredFields(t *testing.T) {
+	tool, _ := newTMSResources(t).toolDeleteTestCase()
+
+	schema, ok := tool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok, "InputSchema should be a *jsonschema.Schema")
+
+	require.ElementsMatch(t, []string{"testCaseId"}, schema.Required)
+}
+
+// TestDeleteTestCaseTool_IDMinimumConstraint verifies the testCaseId schema has minimum:1.
+func TestDeleteTestCaseTool_IDMinimumConstraint(t *testing.T) {
+	tool, _ := newTMSResources(t).toolDeleteTestCase()
+
+	schema, ok := tool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok, "InputSchema should be a *jsonschema.Schema")
+
+	prop, ok := schema.Properties["testCaseId"]
+	require.True(t, ok, "testCaseId property should exist")
+	require.Equal(t, "integer", prop.Type)
+	require.NotNil(t, prop.Minimum)
+	require.Equal(t, float64(1), *prop.Minimum)
+}
+
+// TestDeleteTestCaseTool_ZeroID verifies that testCaseId of 0 is rejected before
+// any API call is made.
+func TestDeleteTestCaseTool_ZeroID(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolDeleteTestCase()
+
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, DeleteTestCaseArgs{
+		ProjectKey: "test-project",
+		TestCaseID: 0,
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "testCaseId out of range")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestDeleteTestCaseTool_SuccessReachesHTTP verifies that a valid testCaseId causes
+// an HTTP DELETE request to the correct path.
+func TestDeleteTestCaseTool_SuccessReachesHTTP(t *testing.T) {
+	ctx := context.Background()
+
+	type httpReq struct{ method, path string }
+	reqCh := make(chan httpReq, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reqCh <- httpReq{method: r.Method, path: r.URL.Path}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolDeleteTestCase()
+
+	result, _, callErr := handler(ctx, &mcp.CallToolRequest{}, DeleteTestCaseArgs{
+		ProjectKey: "test-project",
+		TestCaseID: 99,
+	})
+
+	captured := <-reqCh
+	require.NoError(t, callErr)
+	require.Equal(t, http.MethodDelete, captured.method)
+	require.Contains(t, captured.path, "/tms/test-case/99")
+	require.NotNil(t, result)
+	require.False(t, result.IsError)
+}
+
+// TestUpdateTestCaseTool_RequiredFields verifies that testCaseId is required.
+func TestUpdateTestCaseTool_RequiredFields(t *testing.T) {
+	tool, _ := newTMSResources(t).toolUpdateTestCase()
+
+	schema, ok := tool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok, "InputSchema should be a *jsonschema.Schema")
+
+	require.ElementsMatch(t, []string{"testCaseId"}, schema.Required)
+}
+
+// TestUpdateTestCaseTool_PriorityEnum verifies the priority enum on update_test_case.
+func TestUpdateTestCaseTool_PriorityEnum(t *testing.T) {
+	tool, _ := newTMSResources(t).toolUpdateTestCase()
+
+	schema, ok := tool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok, "InputSchema should be a *jsonschema.Schema")
+
+	priorityProp, ok := schema.Properties["priority"]
+	require.True(t, ok, "priority property should exist")
+	require.ElementsMatch(t,
+		[]any{"LOW", "MEDIUM", "HIGH", "CRITICAL", "BLOCKER", "UNSPECIFIED"},
+		priorityProp.Enum,
+		"priority enum should match get_test_cases_by_filter filter-in-priority values",
+	)
+}
+
+// TestUpdateTestCaseTool_ZeroID verifies that testCaseId of 0 is rejected before
+// any API call is made.
+func TestUpdateTestCaseTool_ZeroID(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolUpdateTestCase()
+
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, UpdateTestCaseArgs{
+		ProjectKey: "test-project",
+		TestCaseID: 0,
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "testCaseId out of range")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestUpdateTestCaseTool_SuccessReachesHTTP verifies that a valid testCaseId causes
+// an HTTP PATCH request to the correct path.
+func TestUpdateTestCaseTool_SuccessReachesHTTP(t *testing.T) {
+	ctx := context.Background()
+
+	type httpReq struct{ method, path string }
+	reqCh := make(chan httpReq, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reqCh <- httpReq{method: r.Method, path: r.URL.Path}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":55,"name":"Updated TC"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolUpdateTestCase()
+
+	name := "Updated TC"
+	result, _, callErr := handler(ctx, &mcp.CallToolRequest{}, UpdateTestCaseArgs{
+		ProjectKey: "test-project",
+		TestCaseID: 55,
+		Name:       &name,
+	})
+
+	captured := <-reqCh
+	require.NoError(t, callErr)
+	require.Equal(t, http.MethodPatch, captured.method)
+	require.Contains(t, captured.path, "/tms/test-case/55")
+	require.NotNil(t, result)
+	require.False(t, result.IsError)
+}
+
+// TestUpdateTestCaseTool_PartialScenarioAllowed verifies that instructions and
+// expected-result can each be supplied independently for the "text" type.
+func TestUpdateTestCaseTool_PartialScenarioAllowed(t *testing.T) {
+	ctx := context.Background()
+	type httpReq struct {
+		method string
+		path   string
+		body   string
+	}
+	makeServer := func(t *testing.T) (*httptest.Server, chan httpReq) {
+		t.Helper()
+		ch := make(chan httpReq, 1)
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			rawBody, _ := io.ReadAll(r.Body)
+			ch <- httpReq{method: r.Method, path: r.URL.Path, body: string(rawBody)}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"id":1,"name":"TC"}`))
+		}))
+		t.Cleanup(srv.Close)
+		return srv, ch
+	}
+	makeHandler := func(t *testing.T, srv *httptest.Server) func(context.Context, *mcp.CallToolRequest, UpdateTestCaseArgs) (*mcp.CallToolResult, any, error) {
+		t.Helper()
+		serverURL, err := url.Parse(srv.URL)
+		require.NoError(t, err)
+		res := NewTMSResources(
+			gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+			nil,
+			"",
+		)
+		_, h := res.toolUpdateTestCase()
+		return h
+	}
+
+	descriptionType := "text"
+
+	t.Run("instructions only", func(t *testing.T) {
+		srv, reqCh := makeServer(t)
+		handler := makeHandler(t, srv)
+		instructions := "step 1"
+		result, _, callErr := handler(ctx, &mcp.CallToolRequest{}, UpdateTestCaseArgs{
+			ProjectKey:   "test-project",
+			TestCaseID:   1,
+			TestCaseType: &descriptionType,
+			Instructions: &instructions,
+		})
+		require.NoError(t, callErr)
+		require.NotNil(t, result)
+		require.False(t, result.IsError)
+		require.Len(t, reqCh, 1)
+		captured := <-reqCh
+		require.Equal(t, http.MethodPatch, captured.method)
+		var payload map[string]any
+		require.NoError(t, json.Unmarshal([]byte(captured.body), &payload))
+		manual, ok := payload["manualScenario"].(map[string]any)
+		require.True(t, ok, "manualScenario should be present")
+		require.Equal(t, "TEXT", manual["manualScenarioType"])
+		require.Equal(t, "step 1", manual["instructions"])
+		require.NotContains(t, manual, "expectedResult")
+	})
+
+	t.Run("expected-result only", func(t *testing.T) {
+		srv, reqCh := makeServer(t)
+		handler := makeHandler(t, srv)
+		expected := "pass"
+		result, _, callErr := handler(ctx, &mcp.CallToolRequest{}, UpdateTestCaseArgs{
+			ProjectKey:     "test-project",
+			TestCaseID:     1,
+			TestCaseType:   &descriptionType,
+			ExpectedResult: &expected,
+		})
+		require.NoError(t, callErr)
+		require.NotNil(t, result)
+		require.False(t, result.IsError)
+		require.Len(t, reqCh, 1)
+		captured := <-reqCh
+		require.Equal(t, http.MethodPatch, captured.method)
+		var payload map[string]any
+		require.NoError(t, json.Unmarshal([]byte(captured.body), &payload))
+		manual, ok := payload["manualScenario"].(map[string]any)
+		require.True(t, ok, "manualScenario should be present")
+		require.Equal(t, "TEXT", manual["manualScenarioType"])
+		require.Equal(t, "pass", manual["expectedResult"])
+		require.NotContains(t, manual, "instructions")
+	})
+}
+
+// TestUpdateTestCaseTool_ScenarioFieldsRequireType verifies that supplying manual
+// scenario fields without an explicit test-case-type is rejected, preventing a
+// silent overwrite/downgrade of the existing scenario.
+func TestUpdateTestCaseTool_ScenarioFieldsRequireType(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolUpdateTestCase()
+
+	preconditions := "service is running"
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, UpdateTestCaseArgs{
+		ProjectKey:    "test-project",
+		TestCaseID:    1,
+		Preconditions: &preconditions,
+		// TestCaseType intentionally omitted
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "test-case-type must be specified")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestUpdateTestCaseTool_BothScenarioFieldsSendsSinglePatch verifies that when
+// both instructions and expected-result are provided a single PATCH is issued
+// (no prior GET).
+func TestUpdateTestCaseTool_BothScenarioFieldsSendsSinglePatch(t *testing.T) {
+	ctx := context.Background()
+	type httpReq struct {
+		method string
+		path   string
+		body   string
+	}
+	reqCh := make(chan httpReq, 2)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rawBody, _ := io.ReadAll(r.Body)
+		reqCh <- httpReq{method: r.Method, path: r.URL.Path, body: string(rawBody)}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":7,"name":"TC"}`))
+	}))
+	t.Cleanup(srv.Close)
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolUpdateTestCase()
+	descriptionType := "text"
+	instructions := "step 1"
+	expected := "pass"
+	result, _, callErr := handler(ctx, &mcp.CallToolRequest{}, UpdateTestCaseArgs{
+		ProjectKey:     "test-project",
+		TestCaseID:     7,
+		TestCaseType:   &descriptionType,
+		Instructions:   &instructions,
+		ExpectedResult: &expected,
+	})
+	require.NoError(t, callErr)
+	require.NotNil(t, result)
+	require.False(t, result.IsError)
+	// Exactly one request must have been made and it must be a PATCH (no GET).
+	require.Len(t, reqCh, 1)
+	captured := <-reqCh
+	require.Equal(t, http.MethodPatch, captured.method)
+	require.Contains(t, captured.path, "/tms/test-case/7")
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal([]byte(captured.body), &payload))
+	manual, ok := payload["manualScenario"].(map[string]any)
+	require.True(t, ok, "manualScenario should be present in PATCH payload")
+	require.Equal(t, "TEXT", manual["manualScenarioType"])
+	require.Equal(t, "step 1", manual["instructions"])
+	require.Equal(t, "pass", manual["expectedResult"])
+}
+
+// TestCreateTestCaseTool_PreconditionsAndRequirementsReachHTTP verifies that the
+// preconditions and requirements fields are forwarded into the manual scenario of
+// the create_test_case POST payload.
+func TestCreateTestCaseTool_PreconditionsAndRequirementsReachHTTP(t *testing.T) {
+	ctx := context.Background()
+	type httpReq struct {
+		method string
+		path   string
+		body   string
+	}
+	reqCh := make(chan httpReq, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rawBody, _ := io.ReadAll(r.Body)
+		reqCh <- httpReq{method: r.Method, path: r.URL.Path, body: string(rawBody)}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":1,"name":"TC"}`))
+	}))
+	t.Cleanup(srv.Close)
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolCreateTestCase()
+
+	preconditions := "logged in as admin"
+	result, _, callErr := handler(ctx, &mcp.CallToolRequest{}, CreateTestCaseArgs{
+		ProjectKey:    "test-project",
+		Name:          "TC",
+		TestFolderID:  1,
+		Preconditions: &preconditions,
+		Requirements:  &[]string{"must do X", "must do Y"},
+	})
+
+	require.NoError(t, callErr)
+	require.NotNil(t, result)
+	require.False(t, result.IsError)
+	captured := <-reqCh
+	require.Equal(t, http.MethodPost, captured.method)
+
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal([]byte(captured.body), &payload))
+	manual, ok := payload["manualScenario"].(map[string]any)
+	require.True(t, ok, "manualScenario should be present in POST payload")
+
+	precond, ok := manual["preconditions"].(map[string]any)
+	require.True(t, ok, "preconditions should be present in manual scenario")
+	require.Equal(t, "logged in as admin", precond["value"])
+
+	reqs, ok := manual["requirements"].([]any)
+	require.True(t, ok, "requirements should be present in manual scenario")
+	require.Len(t, reqs, 2)
+	first, ok := reqs[0].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "must do X", first["value"])
+	firstID, ok := first["id"].(string)
+	require.True(t, ok, "requirement id should be generated as a string")
+	require.Regexp(t, `^_[a-z0-9]{9}$`, firstID, "generated id should match the _xxxxxxxxx format")
+	second, ok := reqs[1].(map[string]any)
+	require.True(t, ok)
+	secondID, ok := second["id"].(string)
+	require.True(t, ok)
+	require.NotEqual(t, firstID, secondID, "generated requirement ids should be unique")
+}
+
+// TestCreateTestCaseTool_MinimalTextScenarioResponseSucceeds verifies that a
+// successful create response with a minimal TEXT manualScenario (no
+// instructions/expectedResult) is returned to the caller. The goRP oneOf
+// decoder matches both TEXT and STEPS schemas for that payload; ReadAPIResponse
+// must recover the raw body instead of surfacing a false decode failure.
+func TestCreateTestCaseTool_MinimalTextScenarioResponseSucceeds(t *testing.T) {
+	ctx := context.Background()
+	const responseBody = `{"id":1800,"name":"My test new","priority":"BLOCKER","displayId":"TC109","createdAt":1783441058217,"updatedAt":1783441058217,"testFolder":{"id":8},"manualScenario":{"manualScenarioType":"TEXT","id":1798,"requirements":[]}}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodPost, r.Method)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(responseBody))
+	}))
+	t.Cleanup(srv.Close)
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolCreateTestCase()
+
+	priority := "BLOCKER"
+	result, _, callErr := handler(ctx, &mcp.CallToolRequest{}, CreateTestCaseArgs{
+		ProjectKey:   "test-project",
+		Name:         "My test new",
+		Priority:     &priority,
+		TestFolderID: 8,
+	})
+
+	require.NoError(t, callErr)
+	require.NotNil(t, result)
+	require.False(t, result.IsError)
+	require.Len(t, result.Content, 1)
+	text, ok := result.Content[0].(*mcp.TextContent)
+	require.True(t, ok)
+	require.JSONEq(t, responseBody, text.Text)
+}
+
+// TestUpdateTestCaseTool_PreconditionsOnlySendsScenario verifies that preconditions
+// can be set independently of instructions/expected-result on update_test_case.
+func TestUpdateTestCaseTool_PreconditionsOnlySendsScenario(t *testing.T) {
+	ctx := context.Background()
+	type httpReq struct {
+		method string
+		path   string
+		body   string
+	}
+	reqCh := make(chan httpReq, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rawBody, _ := io.ReadAll(r.Body)
+		reqCh <- httpReq{method: r.Method, path: r.URL.Path, body: string(rawBody)}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":7,"name":"TC"}`))
+	}))
+	t.Cleanup(srv.Close)
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolUpdateTestCase()
+
+	descriptionType := "text"
+	preconditions := "service is running"
+	result, _, callErr := handler(ctx, &mcp.CallToolRequest{}, UpdateTestCaseArgs{
+		ProjectKey:    "test-project",
+		TestCaseID:    7,
+		TestCaseType:  &descriptionType,
+		Preconditions: &preconditions,
+	})
+
+	require.NoError(t, callErr)
+	require.NotNil(t, result)
+	require.False(t, result.IsError)
+	captured := <-reqCh
+	require.Equal(t, http.MethodPatch, captured.method)
+
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal([]byte(captured.body), &payload))
+	manual, ok := payload["manualScenario"].(map[string]any)
+	require.True(t, ok, "manualScenario should be present in PATCH payload")
+	require.Equal(t, "TEXT", manual["manualScenarioType"])
+	precond, ok := manual["preconditions"].(map[string]any)
+	require.True(t, ok, "preconditions should be present in manual scenario")
+	require.Equal(t, "service is running", precond["value"])
+}
+
+// TestUpdateTestCaseTool_EmptyRequirementsClears verifies that providing an
+// explicit empty requirements array sends "requirements": [] in the PATCH
+// payload so the backend clears existing requirements.
+func TestUpdateTestCaseTool_EmptyRequirementsClears(t *testing.T) {
+	ctx := context.Background()
+	type httpReq struct {
+		method string
+		body   string
+	}
+	reqCh := make(chan httpReq, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rawBody, _ := io.ReadAll(r.Body)
+		reqCh <- httpReq{method: r.Method, body: string(rawBody)}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":7,"name":"TC"}`))
+	}))
+	t.Cleanup(srv.Close)
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolUpdateTestCase()
+
+	descriptionType := "text"
+	result, _, callErr := handler(ctx, &mcp.CallToolRequest{}, UpdateTestCaseArgs{
+		ProjectKey:   "test-project",
+		TestCaseID:   7,
+		TestCaseType: &descriptionType,
+		Requirements: &[]string{},
+	})
+
+	require.NoError(t, callErr)
+	require.NotNil(t, result)
+	require.False(t, result.IsError)
+	captured := <-reqCh
+	require.Equal(t, http.MethodPatch, captured.method)
+
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal([]byte(captured.body), &payload))
+	manual, ok := payload["manualScenario"].(map[string]any)
+	require.True(t, ok, "manualScenario should be present in PATCH payload")
+	reqs, ok := manual["requirements"].([]any)
+	require.True(t, ok, "requirements should be present (as an empty array) in manual scenario")
+	require.Empty(t, reqs, "requirements should be an explicit empty array to clear them")
+}
+
+// TestTestCaseTools_RequirementsSchema verifies the requirements array schema on
+// both create_test_case and update_test_case tools.
+func TestTestCaseTools_RequirementsSchema(t *testing.T) {
+	tr := newTMSResources(t)
+	for name, toolFn := range map[string]func() (*mcp.Tool, utils.ToolHandler[CreateTestCaseArgs, any]){
+		"create_test_case": tr.toolCreateTestCase,
+	} {
+		tool, _ := toolFn()
+		schema, ok := tool.InputSchema.(*jsonschema.Schema)
+		require.True(t, ok, "%s InputSchema should be a *jsonschema.Schema", name)
+
+		_, ok = schema.Properties["preconditions"]
+		require.True(t, ok, "%s should expose preconditions property", name)
+
+		reqProp, ok := schema.Properties["requirements"]
+		require.True(t, ok, "%s should expose requirements property", name)
+		require.Equal(t, "array", reqProp.Type)
+		require.NotNil(t, reqProp.Items)
+		require.Equal(t, "string", reqProp.Items.Type)
+	}
+
+	updTool, _ := tr.toolUpdateTestCase()
+	updSchema, ok := updTool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok, "update_test_case InputSchema should be a *jsonschema.Schema")
+	_, ok = updSchema.Properties["preconditions"]
+	require.True(t, ok, "update_test_case should expose preconditions property")
+	updReqProp, ok := updSchema.Properties["requirements"]
+	require.True(t, ok, "update_test_case should expose requirements property")
+	require.Equal(t, "array", updReqProp.Type)
+	require.NotNil(t, updReqProp.Items)
+	require.Equal(t, "string", updReqProp.Items.Type)
+}
+
+// TestTestCaseTools_TypeAndStepsSchema verifies the test-case-type enum and steps
+// array schema on both create_test_case and update_test_case tools.
+func TestTestCaseTools_TypeAndStepsSchema(t *testing.T) {
+	tr := newTMSResources(t)
+	createTool, _ := tr.toolCreateTestCase()
+	updTool, _ := tr.toolUpdateTestCase()
+	for name, tool := range map[string]*mcp.Tool{
+		"create_test_case": createTool,
+		"update_test_case": updTool,
+	} {
+		schema, ok := tool.InputSchema.(*jsonschema.Schema)
+		require.True(t, ok, "%s InputSchema should be a *jsonschema.Schema", name)
+
+		typeProp, ok := schema.Properties["test-case-type"]
+		require.True(t, ok, "%s should expose test-case-type property", name)
+		require.Equal(t, "string", typeProp.Type)
+		require.ElementsMatch(t,
+			[]any{"text", "steps"},
+			typeProp.Enum,
+			"%s test-case-type enum should match expected values", name,
+		)
+
+		stepsProp, ok := schema.Properties["steps"]
+		require.True(t, ok, "%s should expose steps property", name)
+		require.Equal(t, "array", stepsProp.Type)
+		require.NotNil(t, stepsProp.Items)
+		require.Equal(t, "object", stepsProp.Items.Type)
+		require.ElementsMatch(t, []string{"instructions"}, stepsProp.Items.Required)
+		_, ok = stepsProp.Items.Properties["instructions"]
+		require.True(t, ok, "%s step item should expose instructions", name)
+		_, ok = stepsProp.Items.Properties["expected-result"]
+		require.True(t, ok, "%s step item should expose expected-result", name)
+	}
+}
+
+// TestCreateTestCaseTool_StepsReachHTTP verifies that test-case-type "test case
+// with steps" produces a STEPS manual scenario carrying the provided steps.
+func TestCreateTestCaseTool_StepsReachHTTP(t *testing.T) {
+	ctx := context.Background()
+	type httpReq struct {
+		method string
+		body   string
+	}
+	reqCh := make(chan httpReq, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rawBody, _ := io.ReadAll(r.Body)
+		reqCh <- httpReq{method: r.Method, body: string(rawBody)}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":1,"name":"TC"}`))
+	}))
+	t.Cleanup(srv.Close)
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolCreateTestCase()
+
+	tcType := "steps"
+	expected := "page loads"
+	result, _, callErr := handler(ctx, &mcp.CallToolRequest{}, CreateTestCaseArgs{
+		ProjectKey:   "test-project",
+		Name:         "TC",
+		TestFolderID: 1,
+		TestCaseType: &tcType,
+		Steps: &[]utils.StepArg{
+			{Instructions: "open the page", ExpectedResult: &expected},
+			{Instructions: "click submit"},
+		},
+	})
+
+	require.NoError(t, callErr)
+	require.NotNil(t, result)
+	require.False(t, result.IsError)
+	captured := <-reqCh
+	require.Equal(t, http.MethodPost, captured.method)
+
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal([]byte(captured.body), &payload))
+	manual, ok := payload["manualScenario"].(map[string]any)
+	require.True(t, ok, "manualScenario should be present in POST payload")
+	require.Equal(t, "STEPS", manual["manualScenarioType"])
+	steps, ok := manual["steps"].([]any)
+	require.True(t, ok, "steps should be present in manual scenario")
+	require.Len(t, steps, 2)
+	first, ok := steps[0].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "open the page", first["instructions"])
+	require.Equal(t, "page loads", first["expectedResult"])
+}
+
+// TestCreateTestCaseTool_StepsRequiredForStepsType verifies that selecting the
+// steps type without supplying steps is rejected before any API call.
+func TestCreateTestCaseTool_StepsRequiredForStepsType(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolCreateTestCase()
+
+	tcType := "steps"
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, CreateTestCaseArgs{
+		ProjectKey:   "test-project",
+		Name:         "TC",
+		TestFolderID: 1,
+		TestCaseType: &tcType,
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "steps must not be empty")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestCreateTestCaseTool_StepsRejectedForDescriptionType verifies that supplying
+// steps with the default "text" type is rejected.
+func TestCreateTestCaseTool_StepsRejectedForDescriptionType(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolCreateTestCase()
+
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, CreateTestCaseArgs{
+		ProjectKey:   "test-project",
+		Name:         "TC",
+		TestFolderID: 1,
+		Steps:        &[]utils.StepArg{{Instructions: "do thing"}},
+	})
+
+	require.Error(t, err)
+	require.Contains(
+		t,
+		err.Error(),
+		`steps are only valid when test-case-type is "steps"`,
+	)
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestCreateTestCaseTool_PartialAttachmentUploadFailureRetainsIDs verifies that
+// when one inline attachment uploads successfully but a later one fails, the
+// returned error still surfaces the successfully uploaded attachment's id so
+// the caller can reuse it (via the "id" field) instead of re-uploading, and
+// that create_test_case never reaches the HTTP call for creating the test case.
+func TestCreateTestCaseTool_PartialAttachmentUploadFailureRetainsIDs(t *testing.T) {
+	ctx := context.Background()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Contains(
+			t,
+			r.URL.Path,
+			"/tms/attachment/upload",
+			"only attachment uploads should be attempted",
+		)
+		r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
+		parseErr := r.ParseMultipartForm(10 << 20) //nolint:gosec // capped by MaxBytesReader
+		require.NoError(t, parseErr)
+		_, header, err := r.FormFile("file")
+		require.NoError(t, err)
+		switch header.Filename {
+		case "good.png":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(
+				[]byte(`{"id":501,"fileName":"good.png","fileType":"image/png","fileSize":4}`),
+			)
+		case "bad.png":
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`upload failed`))
+		default:
+			t.Fatalf("unexpected file upload: %s", header.Filename)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolCreateTestCase()
+
+	tcType := "steps"
+	goodContent := base64.StdEncoding.EncodeToString([]byte("good"))
+	badContent := base64.StdEncoding.EncodeToString([]byte("bad!"))
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, CreateTestCaseArgs{
+		ProjectKey:   "test-project",
+		Name:         "TC",
+		TestFolderID: 1,
+		TestCaseType: &tcType,
+		Steps: &[]utils.StepArg{
+			{
+				Instructions: "step one",
+				Attachments: []utils.ExecutionAttachmentArg{
+					{FileName: "good.png", FileType: "image/png", Content: goodContent},
+				},
+			},
+			{
+				Instructions: "step two",
+				Attachments: []utils.ExecutionAttachmentArg{
+					{FileName: "bad.png", FileType: "image/png", Content: badContent},
+				},
+			},
+		},
+	})
+
+	require.Error(t, callErr)
+	require.Contains(t, callErr.Error(), "steps[1].attachments")
+	require.Contains(
+		t,
+		callErr.Error(),
+		"uploaded attachment IDs (use via 'id' field to avoid re-uploading): 501",
+	)
+}
+
+// TestUpdateTestCaseTool_StepsReachHTTP verifies the steps type works on update.
+func TestUpdateTestCaseTool_StepsReachHTTP(t *testing.T) {
+	ctx := context.Background()
+	type httpReq struct {
+		method string
+		body   string
+	}
+	reqCh := make(chan httpReq, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rawBody, _ := io.ReadAll(r.Body)
+		reqCh <- httpReq{method: r.Method, body: string(rawBody)}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":7,"name":"TC"}`))
+	}))
+	t.Cleanup(srv.Close)
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolUpdateTestCase()
+
+	tcType := "steps"
+	result, _, callErr := handler(ctx, &mcp.CallToolRequest{}, UpdateTestCaseArgs{
+		ProjectKey:   "test-project",
+		TestCaseID:   7,
+		TestCaseType: &tcType,
+		Steps:        &[]utils.StepArg{{Instructions: "step one"}},
+	})
+
+	require.NoError(t, callErr)
+	require.NotNil(t, result)
+	require.False(t, result.IsError)
+	captured := <-reqCh
+	require.Equal(t, http.MethodPatch, captured.method)
+
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal([]byte(captured.body), &payload))
+	manual, ok := payload["manualScenario"].(map[string]any)
+	require.True(t, ok, "manualScenario should be present in PATCH payload")
+	require.Equal(t, "STEPS", manual["manualScenarioType"])
+	steps, ok := manual["steps"].([]any)
+	require.True(t, ok)
+	require.Len(t, steps, 1)
+}
+
+// TestUpdateTestCaseTool_StepsTypeWithoutStepsUpdatesRequirements verifies that
+// when test-case-type is "steps" but no steps are supplied, the
+// update is accepted and only the provided scenario fields (e.g. requirements)
+// are included in the PATCH payload without a "steps" key.
+func TestUpdateTestCaseTool_StepsTypeWithoutStepsUpdatesRequirements(t *testing.T) {
+	ctx := context.Background()
+	type httpReq struct {
+		method string
+		body   string
+	}
+	reqCh := make(chan httpReq, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rawBody, _ := io.ReadAll(r.Body)
+		reqCh <- httpReq{method: r.Method, body: string(rawBody)}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":374,"name":"TC"}`))
+	}))
+	t.Cleanup(srv.Close)
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolUpdateTestCase()
+
+	tcType := "steps"
+	reqs := []string{"https://www.google.com"}
+	result, _, callErr := handler(ctx, &mcp.CallToolRequest{}, UpdateTestCaseArgs{
+		ProjectKey:   "test-project",
+		TestCaseID:   374,
+		TestCaseType: &tcType,
+		Requirements: &reqs,
+	})
+
+	require.NoError(t, callErr)
+	require.NotNil(t, result)
+	require.False(t, result.IsError)
+
+	captured := <-reqCh
+	require.Equal(t, http.MethodPatch, captured.method)
+
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal([]byte(captured.body), &payload))
+	manual, ok := payload["manualScenario"].(map[string]any)
+	require.True(t, ok, "manualScenario should be present in PATCH payload")
+	require.Equal(t, "STEPS", manual["manualScenarioType"])
+	_, hasSteps := manual["steps"]
+	require.False(t, hasSteps, "steps key must be absent when no steps were provided")
+	requirements, ok := manual["requirements"].([]any)
+	require.True(t, ok, "requirements should be present in the scenario")
+	require.Len(t, requirements, 1)
+	first, ok := requirements[0].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "https://www.google.com", first["value"])
+}
+
+// TestUpdateTestCaseTool_EmptyStepsRejected verifies that passing an explicit
+// empty steps slice (steps: []) on update is rejected with a validation error.
+// Steps must contain at least one entry whether on create or update; omit the
+// field entirely to leave existing steps unchanged.
+func TestUpdateTestCaseTool_EmptyStepsRejected(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolUpdateTestCase()
+
+	tcType := "steps"
+	emptySteps := []utils.StepArg{}
+	result, _, callErr := handler(ctx, &mcp.CallToolRequest{}, UpdateTestCaseArgs{
+		ProjectKey:   "test-project",
+		TestCaseID:   8,
+		TestCaseType: &tcType,
+		Steps:        &emptySteps,
+	})
+
+	require.Error(t, callErr)
+	require.Nil(t, result)
+	require.Contains(t, callErr.Error(), "steps must not be empty")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestUpdateTestCaseTool_InstructionsRejectedForStepsType verifies that
+// instructions/expected-result are rejected when the steps type is selected.
+func TestUpdateTestCaseTool_InstructionsRejectedForStepsType(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolUpdateTestCase()
+
+	tcType := "steps"
+	instructions := "do thing"
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, UpdateTestCaseArgs{
+		ProjectKey:   "test-project",
+		TestCaseID:   1,
+		TestCaseType: &tcType,
+		Instructions: &instructions,
+		Steps:        &[]utils.StepArg{{Instructions: "step one"}},
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), `not valid for "steps"`)
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestGetTestCasesByFilterTool_PriorityItemsSchema verifies that filter-in-priority
+// is an array with the correct enum on its items sub-schema.
+func TestGetTestCasesByFilterTool_PriorityItemsSchema(t *testing.T) {
+	tool, _ := newTMSResources(t).toolGetTestCasesByFilter()
+
+	schema, ok := tool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok, "InputSchema should be a *jsonschema.Schema")
+
+	prop, ok := schema.Properties["filter-in-priority"]
+	require.True(t, ok, "filter-in-priority property should exist")
+	require.Equal(t, "array", prop.Type, "filter-in-priority should be an array type")
+	require.NotNil(t, prop.Items, "filter-in-priority must have items sub-schema")
+	require.Equal(t, "string", prop.Items.Type, "items should be of type string")
+	require.ElementsMatch(t,
+		[]any{"BLOCKER", "CRITICAL", "MEDIUM", "HIGH", "LOW", "UNSPECIFIED"},
+		prop.Items.Enum,
+		"items enum should contain all priority values",
+	)
+}
+
+// TestGetTestCasesByFilterTool_AttributeKeySchema verifies that filter-has-attributeKey
+// is a string property in the schema.
+func TestGetTestCasesByFilterTool_AttributeKeySchema(t *testing.T) {
+	tool, _ := newTMSResources(t).toolGetTestCasesByFilter()
+
+	schema, ok := tool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok, "InputSchema should be a *jsonschema.Schema")
+
+	prop, ok := schema.Properties["filter-has-attributeKey"]
+	require.True(t, ok, "filter-has-attributeKey property should exist")
+	require.Equal(t, "string", prop.Type)
+}
+
+// TestGetTestCasesByFilterTool_CntNameSchema verifies that filter-cnt-name
+// is a string property in the schema (contains match, not exact).
+func TestGetTestCasesByFilterTool_CntNameSchema(t *testing.T) {
+	tool, _ := newTMSResources(t).toolGetTestCasesByFilter()
+
+	schema, ok := tool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok, "InputSchema should be a *jsonschema.Schema")
+
+	prop, ok := schema.Properties["filter-cnt-name"]
+	require.True(t, ok, "filter-cnt-name property should exist")
+	require.Equal(t, "string", prop.Type)
+
+	_, eqNameExists := schema.Properties["filter-eq-name"]
+	require.False(
+		t,
+		eqNameExists,
+		"filter-eq-name should no longer exist (replaced by filter-cnt-name)",
+	)
+}
+
+// TestGetTestCasesByFilterTool_FiltersReachHTTP verifies that filter-has-attributeKey,
+// filter-in-priority, and filter-cnt-name are forwarded as the correct query params.
+func TestGetTestCasesByFilterTool_FiltersReachHTTP(t *testing.T) {
+	ctx := context.Background()
+
+	var capturedQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedQuery = r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"content":[],"page":{"totalElements":0}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolGetTestCasesByFilter()
+
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, GetTestCasesByFilterArgs{
+		ProjectKey:            "test-project",
+		FilterHasAttributeKey: "smoke",
+		FilterInPriority:      []string{"CRITICAL", "HIGH"},
+		FilterCntName:         "login",
+	})
+
+	require.NoError(t, callErr)
+	require.NotNil(t, capturedQuery, "HTTP request should reach the server")
+	require.Equal(t, "smoke", capturedQuery.Get("filter.has.attributeKey"))
+	require.Equal(t, "CRITICAL,HIGH", capturedQuery.Get("filter.in.priority"))
+	require.Equal(t, "login", capturedQuery.Get("filter.cnt.name"))
+	require.Empty(t, capturedQuery.Get("filter.eq.name"), "filter.eq.name should not be set")
+}
+
+// TestCreateTestCaseTool_DuplicateAttributeKeyRejected verifies that two attribute
+// entries whose keys are identical after whitespace trimming are rejected before
+// any HTTP call is made.
+func TestCreateTestCaseTool_DuplicateAttributeKeyRejected(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolCreateTestCase()
+
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, CreateTestCaseArgs{
+		ProjectKey:   "test-project",
+		Name:         "TC",
+		TestFolderID: 1,
+		Attributes: []utils.AttributeArg{
+			{Key: "env"},
+			{Key: " env "},
+		},
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "duplicate key")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestResolveTestCaseAttributes_ConflictOnCreateRetriesLookup verifies the TOCTOU
+// race window where two concurrent callers both issue a GET (miss) then a POST for
+// the same attribute (tag key). The losing caller receives 409 Conflict on POST.
+// The implementation must then retry the GET, obtain the id created by the winner,
+// and succeed rather than surfacing a spurious duplicate-attribute error.
+func TestResolveTestCaseAttributes_ConflictOnCreateRetriesLookup(t *testing.T) {
+	ctx := context.Background()
+
+	var callCount atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := callCount.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		switch n {
+		case 1:
+			// Initial GET – attribute not found yet (both concurrent callers see this).
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"content":[],"page":{"totalElements":0}}`))
+		case 2:
+			// POST – race loser: the attribute was already created by the concurrent winner.
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write([]byte(`{"message":"attribute already exists"}`))
+		case 3:
+			// Retry GET – attribute now exists with id 42.
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(
+				[]byte(
+					`{"content":[{"id":42,"key":"env","value":"staging"}],"page":{"totalElements":1}}`,
+				),
+			)
+		case 4:
+			// Final POST to create the test case itself.
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"id":99,"name":"TC"}`))
+		default:
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolCreateTestCase()
+
+	result, _, callErr := handler(ctx, &mcp.CallToolRequest{}, CreateTestCaseArgs{
+		ProjectKey:   "test-project",
+		Name:         "TC",
+		TestFolderID: 1,
+		Attributes:   []utils.AttributeArg{{Key: "env"}},
+	})
+
+	require.NoError(t, callErr)
+	require.NotNil(t, result)
+	require.False(t, result.IsError, "expected success after 409 retry, got: %v", result)
+	require.Equal(t, int64(4), callCount.Load(),
+		"expected exactly 4 HTTP calls: GET (miss), POST (409), retry GET (hit), POST test-case")
+}
+
+// TestUpdateTestCaseTool_OmittedAttributesLeavesFieldAbsent verifies that when
+// Attributes is nil (field omitted) the PATCH payload does not contain an
+// "attributes" key, so existing server-side attributes are left unchanged.
+func TestUpdateTestCaseTool_OmittedAttributesLeavesFieldAbsent(t *testing.T) {
+	ctx := context.Background()
+
+	var capturedBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		capturedBody = string(raw)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":7,"name":"TC"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolUpdateTestCase()
+
+	name := "TC"
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, UpdateTestCaseArgs{
+		ProjectKey: "test-project",
+		TestCaseID: 7,
+		Name:       &name,
+		// Attributes intentionally omitted (nil pointer)
+	})
+
+	require.NoError(t, callErr)
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal([]byte(capturedBody), &payload))
+	_, present := payload["attributes"]
+	require.False(t, present, "omitted Attributes must not appear in PATCH payload")
+}
+
+// TestUpdateTestCaseTool_EmptyAttributesClears verifies that passing an explicit
+// empty Attributes slice sends "attributes":[] in the PATCH body so the server
+// clears all existing attributes on the test case.
+func TestUpdateTestCaseTool_EmptyAttributesClears(t *testing.T) {
+	ctx := context.Background()
+
+	var capturedBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		capturedBody = string(raw)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":7,"name":"TC"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolUpdateTestCase()
+
+	name := "TC"
+	emptyAttrs := []utils.AttributeArg{}
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, UpdateTestCaseArgs{
+		ProjectKey: "test-project",
+		TestCaseID: 7,
+		Name:       &name,
+		Attributes: &emptyAttrs,
+	})
+
+	require.NoError(t, callErr)
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal([]byte(capturedBody), &payload))
+	attrs, present := payload["attributes"]
+	require.True(t, present, "explicit empty Attributes must appear in PATCH payload to clear them")
+	attrSlice, ok := attrs.([]any)
+	require.True(t, ok, "attributes value should be a JSON array")
+	require.Empty(t, attrSlice, "attributes array should be empty to clear existing attributes")
+}
+
+// TestGetTestFoldersByFilterTool_LargeParentIDReachesHTTP verifies that a
+// filter-eq-parentId greater than math.MaxInt32 is accepted and forwarded as a
+// query parameter to the HTTP layer.
+func TestGetTestFoldersByFilterTool_LargeParentIDReachesHTTP(t *testing.T) {
+	ctx := context.Background()
+
+	var capturedQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedQuery = r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"content":[],"page":{"totalElements":0}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolGetTestFoldersByFilter()
+
+	largeParentID := int64(math.MaxInt32) + 1
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, GetTestFoldersByFilterArgs{
+		ProjectKey:       "test-project",
+		FilterEqParentID: &largeParentID,
+	})
+
+	require.NoError(t, callErr, "large int64 parent ID should be accepted and forwarded")
+	require.NotNil(t, capturedQuery, "HTTP request should reach the server")
+	require.Equal(t, strconv.FormatInt(largeParentID, 10), capturedQuery.Get("filter.eq.parentId"))
+}
+
+// TestGetManualLaunchesTool_Schema verifies that all expected properties are present in the schema.
+func TestGetManualLaunchesTool_Schema(t *testing.T) {
+	tool, _ := newTMSResources(t).toolGetManualLaunches()
+
+	schema, ok := tool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok, "InputSchema should be a *jsonschema.Schema")
+
+	expectedProps := []string{
+		"projectKey",
+		"limit",
+		"offset",
+		"filter-cnt-name",
+		"filter-in-itemStatus",
+		"filter-eq-completion",
+		"filter-gt-startTime",
+		"filter-lt-endTime",
+		"filter-eq-testPlanId",
+		"filter-has-compositeAttribute",
+	}
+	for _, prop := range expectedProps {
+		_, exists := schema.Properties[prop]
+		require.True(t, exists, "property %q should exist in schema", prop)
+	}
+	require.Nil(t, schema.Required, "no properties should be required")
+}
+
+// TestGetManualLaunchesTool_ItemStatusEnum verifies the filter-in-itemStatus array schema.
+func TestGetManualLaunchesTool_ItemStatusEnum(t *testing.T) {
+	tool, _ := newTMSResources(t).toolGetManualLaunches()
+
+	schema, ok := tool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok)
+
+	prop, ok := schema.Properties["filter-in-itemStatus"]
+	require.True(t, ok, "filter-in-itemStatus should exist")
+	require.Equal(t, "array", prop.Type)
+	require.NotNil(t, prop.Items, "filter-in-itemStatus must have items sub-schema")
+	require.Equal(t, "string", prop.Items.Type)
+	require.ElementsMatch(t,
+		[]any{"PASSED", "FAILED", "SKIPPED", "IN_PROGRESS"},
+		prop.Items.Enum,
+	)
+}
+
+// TestGetManualLaunchesTool_CompletionEnum verifies the filter-eq-completion enum values.
+func TestGetManualLaunchesTool_CompletionEnum(t *testing.T) {
+	tool, _ := newTMSResources(t).toolGetManualLaunches()
+
+	schema, ok := tool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok)
+
+	prop, ok := schema.Properties["filter-eq-completion"]
+	require.True(t, ok, "filter-eq-completion should exist")
+	require.Equal(t, "string", prop.Type)
+	require.ElementsMatch(t,
+		[]any{"has_not_executed", "done"},
+		prop.Enum,
+	)
+}
+
+// TestGetManualLaunchesTool_FiltersReachHTTP verifies that all supported filter params
+// and pagination are forwarded correctly as HTTP query parameters.
+func TestGetManualLaunchesTool_FiltersReachHTTP(t *testing.T) {
+	ctx := context.Background()
+
+	var capturedQuery url.Values
+	var capturedPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedQuery = r.URL.Query()
+		capturedPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"content":[],"page":{"totalElements":0}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolGetManualLaunches()
+
+	testPlanID := int64(42)
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, GetManualLaunchesArgs{
+		ProjectKey:                  "my-project",
+		Limit:                       25,
+		Offset:                      50,
+		FilterCntName:               "smoke",
+		FilterInItemStatus:          []string{"PASSED", "FAILED"},
+		FilterEqCompletion:          "done",
+		FilterGtStartTime:           "2024-01-01T00:00:00Z",
+		FilterLtEndTime:             "2024-12-31T23:59:59Z",
+		FilterEqTestPlanID:          &testPlanID,
+		FilterHasCompositeAttribute: "env:prod,team:backend",
+	})
+
+	require.NoError(t, callErr)
+	require.NotNil(t, capturedQuery, "HTTP request should reach the server")
+	require.Contains(t, capturedPath, "/launch/manual")
+	require.Equal(t, "25", capturedQuery.Get("limit"))
+	require.Equal(t, "50", capturedQuery.Get("offset"))
+	require.Equal(t, "smoke", capturedQuery.Get("filter.cnt.name"))
+	require.Equal(t, "PASSED,FAILED", capturedQuery.Get("filter.in.itemStatus"))
+	require.Equal(t, "done", capturedQuery.Get("filter.eq.completion"))
+	require.NotEmpty(
+		t,
+		capturedQuery.Get("filter.gt.startTime"),
+		"filter.gt.startTime should be forwarded",
+	)
+	require.NotEmpty(
+		t,
+		capturedQuery.Get("filter.lt.endTime"),
+		"filter.lt.endTime should be forwarded",
+	)
+	require.Equal(t, "42", capturedQuery.Get("filter.eq.testPlanId"))
+	require.Equal(t, "env:prod,team:backend", capturedQuery.Get("filter.has.compositeAttribute"))
+}
+
+// TestGetManualLaunchesTool_ZeroTestPlanIDRejected verifies that a filter-eq-testPlanId
+// of 0 is rejected before any HTTP call is made.
+func TestGetManualLaunchesTool_ZeroTestPlanIDRejected(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolGetManualLaunches()
+
+	zero := int64(0)
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, GetManualLaunchesArgs{
+		ProjectKey:         "test-project",
+		FilterEqTestPlanID: &zero,
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "filter-eq-testPlanId out of range")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestGetManualLaunchesTool_TimestampConvertedToEpoch verifies that RFC3339 timestamps
+// are converted to epoch milliseconds before forwarding to the API.
+func TestGetManualLaunchesTool_TimestampConvertedToEpoch(t *testing.T) {
+	ctx := context.Background()
+
+	var capturedQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedQuery = r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"content":[]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolGetManualLaunches()
+
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, GetManualLaunchesArgs{
+		ProjectKey:        "test-project",
+		FilterGtStartTime: "2024-06-01T00:00:00Z",
+		FilterLtEndTime:   "2024-06-30T23:59:59Z",
+	})
+
+	require.NoError(t, callErr)
+	require.NotNil(t, capturedQuery)
+
+	startMs, parseErr := strconv.ParseInt(capturedQuery.Get("filter.gt.startTime"), 10, 64)
+	require.NoError(t, parseErr, "filter.gt.startTime should be a valid integer (epoch ms)")
+	require.Greater(t, startMs, int64(0))
+
+	endMs, parseErr := strconv.ParseInt(capturedQuery.Get("filter.lt.endTime"), 10, 64)
+	require.NoError(t, parseErr, "filter.lt.endTime should be a valid integer (epoch ms)")
+	require.Greater(t, endMs, startMs, "end time should be after start time")
+}
+
+// TestGetManualLaunchesTool_InvalidTimestampRejected verifies that an unparseable
+// timestamp string returns an error before any HTTP call.
+func TestGetManualLaunchesTool_InvalidTimestampRejected(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolGetManualLaunches()
+
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, GetManualLaunchesArgs{
+		ProjectKey:        "test-project",
+		FilterGtStartTime: "not-a-timestamp",
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid filter-gt-startTime")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestGetManualLaunchesTool_NoFiltersReachesAPI verifies that calling with only
+// a project key (no filters, no pagination) results in a valid HTTP request.
+func TestGetManualLaunchesTool_NoFiltersReachesAPI(t *testing.T) {
+	ctx := context.Background()
+
+	var capturedQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedQuery = r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"content":[],"page":{"totalElements":0}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolGetManualLaunches()
+
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, GetManualLaunchesArgs{
+		ProjectKey: "test-project",
+	})
+
+	require.NoError(t, callErr)
+	require.NotNil(t, capturedQuery, "HTTP request should reach the server")
+	require.Empty(t, capturedQuery.Get("filter.cnt.name"))
+	require.Empty(t, capturedQuery.Get("filter.in.itemStatus"))
+	require.Empty(t, capturedQuery.Get("filter.eq.completion"))
+	require.Empty(t, capturedQuery.Get("limit"))
+	require.Empty(t, capturedQuery.Get("offset"))
+}
+
+// TestGetManualLaunchExecutionsTool_Schema verifies that all expected properties are present
+// in the schema and that launchId is required.
+func TestGetManualLaunchExecutionsTool_Schema(t *testing.T) {
+	tool, _ := newTMSResources(t).toolGetManualLaunchExecutions()
+
+	schema, ok := tool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok, "InputSchema should be a *jsonschema.Schema")
+
+	expectedProps := []string{
+		"projectKey",
+		"launchId",
+		"limit",
+		"offset",
+		"filter-cnt-name",
+		"filter-in-priority",
+		"filter-in-attributeKey",
+	}
+	for _, prop := range expectedProps {
+		_, exists := schema.Properties[prop]
+		require.True(t, exists, "property %q should exist in schema", prop)
+	}
+	require.Equal(t, []string{"launchId"}, schema.Required, "launchId should be required")
+}
+
+// TestGetManualLaunchExecutionsTool_PriorityEnum verifies the filter-in-priority array schema.
+func TestGetManualLaunchExecutionsTool_PriorityEnum(t *testing.T) {
+	tool, _ := newTMSResources(t).toolGetManualLaunchExecutions()
+
+	schema, ok := tool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok)
+
+	prop, ok := schema.Properties["filter-in-priority"]
+	require.True(t, ok, "filter-in-priority should exist")
+	require.Equal(t, "array", prop.Type)
+	require.NotNil(t, prop.Items, "filter-in-priority must have items sub-schema")
+	require.Equal(t, "string", prop.Items.Type)
+	require.ElementsMatch(t,
+		[]any{"BLOCKER", "CRITICAL", "HIGH", "LOW", "MEDIUM", "UNSPECIFIED"},
+		prop.Items.Enum,
+	)
+}
+
+// TestGetManualLaunchExecutionsTool_FiltersReachHTTP verifies that all filter params
+// and pagination are forwarded correctly as HTTP query parameters.
+func TestGetManualLaunchExecutionsTool_FiltersReachHTTP(t *testing.T) {
+	ctx := context.Background()
+
+	var capturedQuery url.Values
+	var capturedPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedQuery = r.URL.Query()
+		capturedPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"content":[],"page":{"totalElements":0}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolGetManualLaunchExecutions()
+
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, GetManualLaunchExecutionsArgs{
+		ProjectKey:           "my-project",
+		LaunchID:             99,
+		Limit:                10,
+		Offset:               20,
+		FilterCntName:        "login",
+		FilterInPriority:     []string{"HIGH", "CRITICAL"},
+		FilterInAttributeKey: "smoke,regression",
+	})
+
+	require.NoError(t, callErr)
+	require.NotNil(t, capturedQuery, "HTTP request should reach the server")
+	require.Contains(t, capturedPath, "/launch/manual/99/test-case/execution")
+	require.Equal(t, "10", capturedQuery.Get("limit"))
+	require.Equal(t, "20", capturedQuery.Get("offset"))
+	require.Equal(t, "login", capturedQuery.Get("filter.cnt.name"))
+	require.Equal(t, "HIGH,CRITICAL", capturedQuery.Get("filter.in.priority"))
+	require.Equal(t, "smoke,regression", capturedQuery.Get("filter.in.attributeKey"))
+}
+
+// TestGetManualLaunchExecutionsTool_ZeroLaunchIDRejected verifies that a launchId
+// of 0 is rejected before any HTTP call is made.
+func TestGetManualLaunchExecutionsTool_ZeroLaunchIDRejected(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolGetManualLaunchExecutions()
+
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, GetManualLaunchExecutionsArgs{
+		ProjectKey: "test-project",
+		LaunchID:   0,
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "launchId out of range")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestGetManualLaunchExecutionsTool_NoFiltersReachesAPI verifies that calling with only
+// a project key and launch ID (no filters, no pagination) results in a valid HTTP request.
+func TestGetManualLaunchExecutionsTool_NoFiltersReachesAPI(t *testing.T) {
+	ctx := context.Background()
+
+	var capturedQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedQuery = r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"content":[],"page":{"totalElements":0}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolGetManualLaunchExecutions()
+
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, GetManualLaunchExecutionsArgs{
+		ProjectKey: "test-project",
+		LaunchID:   5,
+	})
+
+	require.NoError(t, callErr)
+	require.NotNil(t, capturedQuery, "HTTP request should reach the server")
+	require.Empty(t, capturedQuery.Get("filter.cnt.name"))
+	require.Empty(t, capturedQuery.Get("filter.in.priority"))
+	require.Empty(t, capturedQuery.Get("filter.in.attributeKey"))
+	require.Empty(t, capturedQuery.Get("limit"))
+	require.Empty(t, capturedQuery.Get("offset"))
+}
+
+// TestGetMilestonesByFilterTool_CntNameReachesHTTP verifies that filter-cnt-name is
+// forwarded as filter.cnt.name (not filter.eq.name) to the API.
+func TestGetMilestonesByFilterTool_CntNameReachesHTTP(t *testing.T) {
+	ctx := context.Background()
+
+	var capturedQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedQuery = r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"content":[],"page":{"totalElements":0}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolGetMilestonesByFilter()
+
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, GetMilestonesByFilterArgs{
+		ProjectKey:    "test-project",
+		FilterCntName: "sprint",
+	})
+
+	require.NoError(t, callErr)
+	require.NotNil(t, capturedQuery, "HTTP request should reach the server")
+	require.Equal(t, "sprint", capturedQuery.Get("filter.cnt.name"))
+	require.Empty(t, capturedQuery.Get("filter.eq.name"), "filter.eq.name must not be set")
+}
+
+// TestGetMilestonesByFilterTool_DefaultLimitApplied verifies that when no limit is provided,
+// the default of 50 is sent to the API.
+func TestGetMilestonesByFilterTool_DefaultLimitApplied(t *testing.T) {
+	ctx := context.Background()
+
+	var capturedQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedQuery = r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"content":[],"page":{"totalElements":0}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolGetMilestonesByFilter()
+
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, GetMilestonesByFilterArgs{
+		ProjectKey: "test-project",
+	})
+
+	require.NoError(t, callErr)
+	require.NotNil(t, capturedQuery, "HTTP request should reach the server")
+	require.Equal(t, "50", capturedQuery.Get("limit"), "default limit should be 50")
+	require.Equal(t, "0", capturedQuery.Get("offset"), "default offset should be 0")
+}
+
+// TestGetMilestonesByFilterTool_PaginationReachesHTTP verifies that explicit limit and offset
+// are forwarded as HTTP query parameters.
+func TestGetMilestonesByFilterTool_PaginationReachesHTTP(t *testing.T) {
+	ctx := context.Background()
+
+	var capturedQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedQuery = r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"content":[],"page":{"totalElements":0}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolGetMilestonesByFilter()
+
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, GetMilestonesByFilterArgs{
+		ProjectKey: "test-project",
+		Limit:      25,
+		Offset:     100,
+	})
+
+	require.NoError(t, callErr)
+	require.NotNil(t, capturedQuery, "HTTP request should reach the server")
+	require.Equal(t, "25", capturedQuery.Get("limit"))
+	require.Equal(t, "100", capturedQuery.Get("offset"))
+}
+
+// TestGetTestCasesForTestPlanTool_DefaultLimitApplied verifies that when no limit is provided,
+// the default of 50 is sent to the API.
+func TestGetTestCasesForTestPlanTool_DefaultLimitApplied(t *testing.T) {
+	ctx := context.Background()
+
+	var capturedQuery url.Values
+	var capturedPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedQuery = r.URL.Query()
+		capturedPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"content":[],"page":{"totalElements":0}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolGetTestCasesForTestPlan()
+
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, GetTestCasesForTestPlanArgs{
+		ProjectKey: "test-project",
+		TestPlanID: 7,
+	})
+
+	require.NoError(t, callErr)
+	require.NotNil(t, capturedQuery, "HTTP request should reach the server")
+	require.Contains(t, capturedPath, "/tms/test-plan/7/test-case")
+	require.Equal(t, "50", capturedQuery.Get("limit"), "default limit should be 50")
+	require.Equal(t, "0", capturedQuery.Get("offset"), "default offset should be 0")
+}
+
+// TestGetTestCasesForTestPlanTool_PaginationReachesHTTP verifies that explicit limit and offset
+// are forwarded as HTTP query parameters.
+func TestGetTestCasesForTestPlanTool_PaginationReachesHTTP(t *testing.T) {
+	ctx := context.Background()
+
+	var capturedQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedQuery = r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"content":[],"page":{"totalElements":0}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolGetTestCasesForTestPlan()
+
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, GetTestCasesForTestPlanArgs{
+		ProjectKey: "test-project",
+		TestPlanID: 7,
+		Limit:      10,
+		Offset:     20,
+	})
+
+	require.NoError(t, callErr)
+	require.NotNil(t, capturedQuery, "HTTP request should reach the server")
+	require.Equal(t, "10", capturedQuery.Get("limit"))
+	require.Equal(t, "20", capturedQuery.Get("offset"))
+}
+
+// TestGetTestCasesByFilterTool_DefaultLimitApplied verifies that when no limit is provided,
+// the default of 50 is sent to the API.
+func TestGetTestCasesByFilterTool_DefaultLimitApplied(t *testing.T) {
+	ctx := context.Background()
+
+	var capturedQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedQuery = r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"content":[],"page":{"totalElements":0}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolGetTestCasesByFilter()
+
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, GetTestCasesByFilterArgs{
+		ProjectKey: "test-project",
+	})
+
+	require.NoError(t, callErr)
+	require.NotNil(t, capturedQuery, "HTTP request should reach the server")
+	require.Equal(t, "50", capturedQuery.Get("limit"), "default limit should be 50")
+	require.Equal(t, "0", capturedQuery.Get("offset"), "default offset should be 0")
+}
+
+// TestGetTestCasesByFilterTool_PaginationReachesHTTP verifies that explicit limit and offset
+// are forwarded as HTTP query parameters.
+func TestGetTestCasesByFilterTool_PaginationReachesHTTP(t *testing.T) {
+	ctx := context.Background()
+
+	var capturedQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedQuery = r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"content":[],"page":{"totalElements":0}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolGetTestCasesByFilter()
+
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, GetTestCasesByFilterArgs{
+		ProjectKey: "test-project",
+		Limit:      15,
+		Offset:     30,
+	})
+
+	require.NoError(t, callErr)
+	require.NotNil(t, capturedQuery, "HTTP request should reach the server")
+	require.Equal(t, "15", capturedQuery.Get("limit"))
+	require.Equal(t, "30", capturedQuery.Get("offset"))
+}
+
+// TestGetTestFoldersByFilterTool_DefaultLimitApplied verifies that when no limit is provided,
+// the default of 50 is sent to the API.
+func TestGetTestFoldersByFilterTool_DefaultLimitApplied(t *testing.T) {
+	ctx := context.Background()
+
+	var capturedQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedQuery = r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"content":[],"page":{"totalElements":0}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolGetTestFoldersByFilter()
+
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, GetTestFoldersByFilterArgs{
+		ProjectKey: "test-project",
+	})
+
+	require.NoError(t, callErr)
+	require.NotNil(t, capturedQuery, "HTTP request should reach the server")
+	require.Equal(t, "50", capturedQuery.Get("limit"), "default limit should be 50")
+	require.Equal(t, "0", capturedQuery.Get("offset"), "default offset should be 0")
+}
+
+// TestGetTestFoldersByFilterTool_PaginationReachesHTTP verifies that explicit limit and offset
+// are forwarded as HTTP query parameters.
+func TestGetTestFoldersByFilterTool_PaginationReachesHTTP(t *testing.T) {
+	ctx := context.Background()
+
+	var capturedQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedQuery = r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"content":[],"page":{"totalElements":0}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolGetTestFoldersByFilter()
+
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, GetTestFoldersByFilterArgs{
+		ProjectKey: "test-project",
+		Limit:      20,
+		Offset:     40,
+	})
+
+	require.NoError(t, callErr)
+	require.NotNil(t, capturedQuery, "HTTP request should reach the server")
+	require.Equal(t, "20", capturedQuery.Get("limit"))
+	require.Equal(t, "40", capturedQuery.Get("offset"))
+}
+
+// ---------------------------------------------------------------------------
+// add_test_cases_to_manual_launch tests
+// ---------------------------------------------------------------------------
+
+// TestAddTestCasesToManualLaunchTool_ArraySchema mirrors TestAddTestCasesToTestPlanTool_ArraySchema
+// and guards against the VS Code / GitHub Copilot regression where array parameters without an
+// "items" sub-schema are silently mishandled.
+func TestAddTestCasesToManualLaunchTool_ArraySchema(t *testing.T) {
+	tool, _ := newTMSResources(t).toolAddTestCasesToManualLaunch()
+
+	schema, ok := tool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok, "InputSchema should be a *jsonschema.Schema")
+
+	prop, ok := schema.Properties["test-case-ids"]
+	require.True(t, ok, "test-case-ids property should exist")
+	require.Equal(t, "array", prop.Type, "test-case-ids should be an array type")
+	require.NotNil(
+		t,
+		prop.MinItems,
+		"test-case-ids must have minItems constraint to reject empty arrays",
+	)
+	require.Equal(t, 1, *prop.MinItems, "test-case-ids minItems should be 1")
+	require.NotNil(t, prop.Items, "test-case-ids must have items property (VS Code compatibility)")
+	require.Equal(t, "integer", prop.Items.Type, "items should be of type integer")
+	require.NotNil(t, prop.Items.Minimum, "items should have a minimum constraint")
+	require.Equal(t, float64(1), *prop.Items.Minimum, "items minimum should be 1")
+}
+
+// TestAddTestCasesToManualLaunchTool_RequiredFields verifies that launchId and
+// test-case-ids are listed as required in the schema.
+func TestAddTestCasesToManualLaunchTool_RequiredFields(t *testing.T) {
+	tool, _ := newTMSResources(t).toolAddTestCasesToManualLaunch()
+
+	schema, ok := tool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok, "InputSchema should be a *jsonschema.Schema")
+	require.ElementsMatch(t, []string{"launchId", "test-case-ids"}, schema.Required)
+}
+
+// TestAddTestCasesToManualLaunchTool_ZeroLaunchIDRejected verifies that a launchId
+// of 0 is rejected before any HTTP call is made.
+func TestAddTestCasesToManualLaunchTool_ZeroLaunchIDRejected(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolAddTestCasesToManualLaunch()
+
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, AddTestCasesToManualLaunchArgs{
+		ProjectKey:  "test-project",
+		LaunchID:    0,
+		TestCaseIDs: []int64{1},
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "launchId must be a positive integer")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestAddTestCasesToManualLaunchTool_EmptyTestCaseIDsRejected verifies that an empty
+// test-case-ids slice is rejected before any HTTP call is made.
+func TestAddTestCasesToManualLaunchTool_EmptyTestCaseIDsRejected(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolAddTestCasesToManualLaunch()
+
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, AddTestCasesToManualLaunchArgs{
+		ProjectKey:  "test-project",
+		LaunchID:    42,
+		TestCaseIDs: []int64{},
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "test-case-ids must not be empty")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestAddTestCasesToManualLaunchTool_RequestReachesHTTP verifies that a valid call
+// sends a POST to the correct path with the testCaseIds encoded in the JSON body.
+func TestAddTestCasesToManualLaunchTool_RequestReachesHTTP(t *testing.T) {
+	ctx := context.Background()
+
+	var capturedPath string
+	var capturedMethod string
+	var capturedBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedPath = r.URL.Path
+		capturedMethod = r.Method
+		capturedBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolAddTestCasesToManualLaunch()
+
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, AddTestCasesToManualLaunchArgs{
+		ProjectKey:  "my-project",
+		LaunchID:    99,
+		TestCaseIDs: []int64{10, 20, 30},
+	})
+
+	require.NoError(t, callErr)
+	require.Contains(t, capturedPath, "/launch/manual/99/test-case/batch")
+	require.Equal(t, http.MethodPost, capturedMethod)
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(capturedBody, &body))
+	ids, ok := body["testCaseIds"].([]any)
+	require.True(t, ok, "testCaseIds should be an array in the request body")
+	require.Len(t, ids, 3, "all three test case IDs should be included")
+}
+
+// TestAddTestCasesToManualLaunchTool_HTTPErrorPropagated verifies that a non-2xx
+// response from the API is surfaced as an error containing the status code.
+func TestAddTestCasesToManualLaunchTool_HTTPErrorPropagated(t *testing.T) {
+	ctx := context.Background()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"message":"launch not found"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolAddTestCasesToManualLaunch()
+
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, AddTestCasesToManualLaunchArgs{
+		ProjectKey:  "my-project",
+		LaunchID:    1,
+		TestCaseIDs: []int64{5},
+	})
+
+	require.Error(t, callErr)
+	require.Contains(t, callErr.Error(), "404")
+}
+
+// TestCreateManualLaunchTool_Schema verifies that all expected properties are
+// present and that the four required fields are declared.
+func TestCreateManualLaunchTool_Schema(t *testing.T) {
+	tool, _ := newTMSResources(t).toolCreateManualLaunch()
+
+	schema, ok := tool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok, "InputSchema should be a *jsonschema.Schema")
+
+	for _, prop := range []string{
+		"projectKey", "name", "startTime", "test-plan-id", "test-case-ids",
+		"description", "attributes",
+	} {
+		_, exists := schema.Properties[prop]
+		require.True(t, exists, "property %q should exist in schema", prop)
+	}
+	require.ElementsMatch(t,
+		[]string{"name", "startTime", "test-plan-id", "test-case-ids"},
+		schema.Required,
+	)
+}
+
+// TestCreateManualLaunchTool_TestCaseIDsArraySchema guards against the VS Code /
+// GitHub Copilot regression where array parameters without an "items" sub-schema
+// are silently mishandled.
+func TestCreateManualLaunchTool_TestCaseIDsArraySchema(t *testing.T) {
+	tool, _ := newTMSResources(t).toolCreateManualLaunch()
+
+	schema, ok := tool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok)
+
+	prop, ok := schema.Properties["test-case-ids"]
+	require.True(t, ok, "test-case-ids property should exist")
+	require.Equal(t, "array", prop.Type)
+	require.NotNil(t, prop.MinItems, "test-case-ids must have minItems constraint")
+	require.Equal(t, 1, *prop.MinItems)
+	require.NotNil(t, prop.Items, "test-case-ids must have items sub-schema")
+	require.Equal(t, "integer", prop.Items.Type)
+	require.NotNil(t, prop.Items.Minimum)
+	require.Equal(t, float64(1), *prop.Items.Minimum)
+}
+
+// TestCreateManualLaunchTool_EmptyNameRejected verifies that a blank name is
+// rejected before any HTTP call is made.
+func TestCreateManualLaunchTool_EmptyNameRejected(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolCreateManualLaunch()
+
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, CreateManualLaunchArgs{
+		ProjectKey:  "test-project",
+		Name:        "   ",
+		StartTime:   "2026-07-29T11:59:04Z",
+		TestPlanID:  1,
+		TestCaseIDs: []int64{1},
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "name must not be empty")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestCreateManualLaunchTool_InvalidStartTimeRejected verifies that an
+// unparseable startTime is rejected before any HTTP call is made.
+func TestCreateManualLaunchTool_InvalidStartTimeRejected(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolCreateManualLaunch()
+
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, CreateManualLaunchArgs{
+		ProjectKey:  "test-project",
+		Name:        "my launch",
+		StartTime:   "not-a-date",
+		TestPlanID:  1,
+		TestCaseIDs: []int64{1},
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid startTime format")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestCreateManualLaunchTool_ZeroTestPlanIDRejected verifies that a test-plan-id
+// of 0 is rejected before any HTTP call is made.
+func TestCreateManualLaunchTool_ZeroTestPlanIDRejected(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolCreateManualLaunch()
+
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, CreateManualLaunchArgs{
+		ProjectKey:  "test-project",
+		Name:        "my launch",
+		StartTime:   "2026-07-29T11:59:04Z",
+		TestPlanID:  0,
+		TestCaseIDs: []int64{1},
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "test-plan-id must be a positive integer")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestCreateManualLaunchTool_EmptyTestCaseIDsRejected verifies that an empty
+// test-case-ids slice is rejected before any HTTP call is made.
+func TestCreateManualLaunchTool_EmptyTestCaseIDsRejected(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolCreateManualLaunch()
+
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, CreateManualLaunchArgs{
+		ProjectKey:  "test-project",
+		Name:        "my launch",
+		StartTime:   "2026-07-29T11:59:04Z",
+		TestPlanID:  1,
+		TestCaseIDs: []int64{},
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "test-case-ids must not be empty")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestCreateManualLaunchTool_NonPositiveTestCaseIDRejected verifies that a
+// non-positive test case ID is rejected before any HTTP call is made.
+func TestCreateManualLaunchTool_NonPositiveTestCaseIDRejected(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolCreateManualLaunch()
+
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, CreateManualLaunchArgs{
+		ProjectKey:  "test-project",
+		Name:        "my launch",
+		StartTime:   "2026-07-29T11:59:04Z",
+		TestPlanID:  1,
+		TestCaseIDs: []int64{5, 0},
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "each test case ID must be a positive integer")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestCreateManualLaunchTool_RequestReachesHTTP verifies that a valid call sends
+// a POST to the correct path with all fields correctly encoded in the JSON body.
+func TestCreateManualLaunchTool_RequestReachesHTTP(t *testing.T) {
+	ctx := context.Background()
+
+	var capturedPath, capturedMethod string
+	var capturedBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedPath = r.URL.Path
+		capturedMethod = r.Method
+		capturedBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":7}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolCreateManualLaunch()
+
+	desc := "smoke run"
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, CreateManualLaunchArgs{
+		ProjectKey:  "my-project",
+		Name:        "Smoke Launch",
+		StartTime:   "2026-07-29T11:59:04.221Z",
+		TestPlanID:  3,
+		TestCaseIDs: []int64{10, 20},
+		Description: &desc,
+		Attributes:  []manualLaunchAttributeArg{{Key: "env", Value: "staging"}},
+	})
+
+	require.NoError(t, callErr)
+	require.Equal(t, "/api/v1/project/my-project/launch/manual", capturedPath)
+	require.Equal(t, http.MethodPost, capturedMethod)
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(capturedBody, &body))
+	require.Equal(t, "Smoke Launch", body["name"])
+	require.Equal(t, "smoke run", body["description"])
+
+	testPlan, ok := body["testPlan"].(map[string]any)
+	require.True(t, ok, "testPlan should be an object")
+	require.Equal(t, float64(3), testPlan["id"])
+
+	ids, ok := body["testCaseIds"].([]any)
+	require.True(t, ok, "testCaseIds should be an array")
+	require.Len(t, ids, 2)
+
+	attrs, ok := body["attributes"].([]any)
+	require.True(t, ok, "attributes should be an array")
+	require.Len(t, attrs, 1)
+	attr := attrs[0].(map[string]any)
+	require.Equal(t, "env", attr["key"])
+	require.Equal(t, "staging", attr["value"])
+}
+
+// TestCreateManualLaunchTool_StartTimeNormalized verifies that the startTime is
+// always sent in millisecond-precision UTC ISO-8601 format regardless of input format.
+func TestCreateManualLaunchTool_StartTimeNormalized(t *testing.T) {
+	ctx := context.Background()
+
+	var capturedBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedBody, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolCreateManualLaunch()
+
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, CreateManualLaunchArgs{
+		ProjectKey:  "my-project",
+		Name:        "launch",
+		StartTime:   "2026-07-29T11:59:04Z",
+		TestPlanID:  1,
+		TestCaseIDs: []int64{1},
+	})
+
+	require.NoError(t, callErr)
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(capturedBody, &body))
+	st, ok := body["startTime"].(string)
+	require.True(t, ok, "startTime should be a string in the request body")
+	require.Equal(t, "2026-07-29T11:59:04.000Z", st)
+}
+
+// TestCreateManualLaunchTool_HTTPErrorPropagated verifies that a non-2xx response
+// is surfaced as an error containing the status code.
+func TestCreateManualLaunchTool_HTTPErrorPropagated(t *testing.T) {
+	ctx := context.Background()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"message":"test plan not found"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolCreateManualLaunch()
+
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, CreateManualLaunchArgs{
+		ProjectKey:  "my-project",
+		Name:        "launch",
+		StartTime:   "2026-07-29T11:59:04Z",
+		TestPlanID:  1,
+		TestCaseIDs: []int64{5},
+	})
+
+	require.Error(t, callErr)
+	require.Contains(t, callErr.Error(), "400")
+}
+
+// TestUpdateManualLaunchExecutionTool_AttachmentsSchema verifies that the
+// attachments array's item schema exposes both the "reference existing
+// attachment" (id/fileName/fileType/fileSize) and "upload new attachment"
+// (fileName/content) fields, with only fileName mandatory at the schema level.
+func TestUpdateManualLaunchExecutionTool_AttachmentsSchema(t *testing.T) {
+	tool, _ := newTMSResources(t).toolUpdateManualLaunchExecution()
+
+	schema, ok := tool.InputSchema.(*jsonschema.Schema)
+	require.True(t, ok, "InputSchema should be a *jsonschema.Schema")
+
+	commentProp, ok := schema.Properties["executionComment"]
+	require.True(t, ok, "executionComment property should exist")
+
+	attachmentsProp, ok := commentProp.Properties["attachments"]
+	require.True(t, ok, "attachments property should exist")
+	require.Equal(t, "array", attachmentsProp.Type)
+	require.NotNil(t, attachmentsProp.Items)
+
+	items := attachmentsProp.Items
+	require.Contains(t, items.Properties, "id")
+	require.Contains(t, items.Properties, "fileName")
+	require.Contains(t, items.Properties, "fileType")
+	require.Contains(t, items.Properties, "fileSize")
+	require.Contains(t, items.Properties, "content")
+	require.Equal(t, []string{"fileName"}, items.Required)
+}
+
+// TestUpdateManualLaunchExecutionTool_ContentUploadsThenLinksAttachment verifies
+// that an attachment supplied via base64 "content" is uploaded via POST
+// /project/{projectKey}/tms/attachment/upload first, and that the id returned
+// by the upload is what gets linked to the execution in the PATCH body.
+func TestUpdateManualLaunchExecutionTool_ContentUploadsThenLinksAttachment(t *testing.T) {
+	ctx := context.Background()
+
+	var uploadCalled bool
+	var uploadedFileName string
+	var uploadedFileBytes []byte
+	var patchBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/tms/attachment/upload"):
+			uploadCalled = true
+			r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
+			parseErr := r.ParseMultipartForm(10 << 20) //nolint:gosec // capped by MaxBytesReader
+			require.NoError(t, parseErr)
+			file, header, err := r.FormFile("file")
+			require.NoError(t, err)
+			defer file.Close() //nolint:errcheck
+			uploadedFileName = header.Filename
+			uploadedFileBytes, err = io.ReadAll(file)
+			require.NoError(t, err)
+
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(
+				[]byte(
+					`{"id":777,"fileName":"screenshot.png","fileType":"image/png","fileSize":4}`,
+				),
+			)
+		case r.Method == http.MethodPatch:
+			patchBody, _ = io.ReadAll(r.Body)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{}`))
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolUpdateManualLaunchExecution()
+
+	content := base64.StdEncoding.EncodeToString([]byte("data"))
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, UpdateManualLaunchExecutionArgs{
+		ProjectKey:          "my-project",
+		LaunchID:            1,
+		TestCaseExecutionID: 2,
+		Status:              "PASSED",
+		ExecutionComment: &executionCommentArg{
+			Comment: "done",
+			Attachments: []utils.ExecutionAttachmentArg{
+				{FileName: "screenshot.png", FileType: "image/png", Content: content},
+			},
+		},
+	})
+
+	require.NoError(t, callErr)
+	require.True(t, uploadCalled, "attachment upload endpoint should have been called")
+	require.Equal(t, "screenshot.png", uploadedFileName)
+	require.Equal(t, []byte("data"), uploadedFileBytes)
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(patchBody, &body))
+	comment, ok := body["executionComment"].(map[string]any)
+	require.True(t, ok, "executionComment should be present in PATCH body")
+	attachments, ok := comment["attachments"].([]any)
+	require.True(t, ok, "attachments should be present in PATCH body")
+	require.Len(t, attachments, 1)
+	att := attachments[0].(map[string]any)
+	require.InEpsilon(t, float64(777), att["id"], 0)
+	require.NotContains(
+		t,
+		att,
+		"content",
+		"raw content must not be sent to the update-execution endpoint",
+	)
+}
+
+// TestUpdateManualLaunchExecutionTool_IDAndContentBothRejected verifies that
+// providing both id and content for the same attachment is rejected before any
+// HTTP call is made.
+func TestUpdateManualLaunchExecutionTool_IDAndContentBothRejected(t *testing.T) {
+	res, counter := newTMSResourcesWithCounter(t)
+	_, handler := res.toolUpdateManualLaunchExecution()
+
+	_, _, err := handler(
+		context.Background(),
+		&mcp.CallToolRequest{},
+		UpdateManualLaunchExecutionArgs{
+			ProjectKey:          "my-project",
+			LaunchID:            1,
+			TestCaseExecutionID: 2,
+			Status:              "PASSED",
+			ExecutionComment: &executionCommentArg{
+				Attachments: []utils.ExecutionAttachmentArg{
+					{ID: 1, FileName: "a.png", Content: "abc"},
+				},
+			},
+		},
+	)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "either id")
+	require.Zero(t, counter.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestUpdateManualLaunchExecutionTool_NeitherIDNorContentRejected verifies that
+// an attachment without id or content is rejected.
+func TestUpdateManualLaunchExecutionTool_NeitherIDNorContentRejected(t *testing.T) {
+	res, counter := newTMSResourcesWithCounter(t)
+	_, handler := res.toolUpdateManualLaunchExecution()
+
+	_, _, err := handler(
+		context.Background(),
+		&mcp.CallToolRequest{},
+		UpdateManualLaunchExecutionArgs{
+			ProjectKey:          "my-project",
+			LaunchID:            1,
+			TestCaseExecutionID: 2,
+			Status:              "PASSED",
+			ExecutionComment: &executionCommentArg{
+				Attachments: []utils.ExecutionAttachmentArg{
+					{FileName: "a.png"},
+				},
+			},
+		},
+	)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "must be provided")
+	require.Zero(t, counter.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestUpdateManualLaunchExecutionTool_ExistingAttachmentMissingMetadataRejected
+// verifies that referencing an existing attachment by id without fileType/fileSize
+// is rejected.
+func TestUpdateManualLaunchExecutionTool_ExistingAttachmentMissingMetadataRejected(t *testing.T) {
+	res, counter := newTMSResourcesWithCounter(t)
+	_, handler := res.toolUpdateManualLaunchExecution()
+
+	_, _, err := handler(
+		context.Background(),
+		&mcp.CallToolRequest{},
+		UpdateManualLaunchExecutionArgs{
+			ProjectKey:          "my-project",
+			LaunchID:            1,
+			TestCaseExecutionID: 2,
+			Status:              "PASSED",
+			ExecutionComment: &executionCommentArg{
+				Attachments: []utils.ExecutionAttachmentArg{
+					{ID: 5, FileName: "a.png"},
+				},
+			},
+		},
+	)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "fileType and fileSize are required")
+	require.Zero(t, counter.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestUpdateManualLaunchExecutionTool_AttachmentUploadHTTPErrorPropagated verifies
+// that a failure from the attachment upload endpoint is surfaced to the caller
+// and that the update-execution PATCH is never attempted.
+func TestUpdateManualLaunchExecutionTool_AttachmentUploadHTTPErrorPropagated(t *testing.T) {
+	ctx := context.Background()
+
+	var patchCalled bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/tms/attachment/upload") {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"message":"file too large"}`))
+			return
+		}
+		patchCalled = true
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolUpdateManualLaunchExecution()
+
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, UpdateManualLaunchExecutionArgs{
+		ProjectKey:          "my-project",
+		LaunchID:            1,
+		TestCaseExecutionID: 2,
+		Status:              "PASSED",
+		ExecutionComment: &executionCommentArg{
+			Attachments: []utils.ExecutionAttachmentArg{
+				{FileName: "a.png", Content: base64.StdEncoding.EncodeToString([]byte("x"))},
+			},
+		},
+	})
+
+	require.Error(t, callErr)
+	require.Contains(t, callErr.Error(), "400")
+	require.False(
+		t,
+		patchCalled,
+		"update-execution should not be called when attachment upload fails",
+	)
+}
+
+// TestCreateTestCaseTool_TextAttachmentsReachHTTP verifies that scenario-level
+// attachments referencing an already-uploaded attachment (by id) are sent as the
+// "text" manual scenario's attachments array.
+func TestCreateTestCaseTool_TextAttachmentsReachHTTP(t *testing.T) {
+	ctx := context.Background()
+	reqCh := make(chan string, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rawBody, _ := io.ReadAll(r.Body)
+		reqCh <- string(rawBody)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":1,"name":"TC"}`))
+	}))
+	t.Cleanup(srv.Close)
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolCreateTestCase()
+
+	result, _, callErr := handler(ctx, &mcp.CallToolRequest{}, CreateTestCaseArgs{
+		ProjectKey:   "test-project",
+		Name:         "TC",
+		TestFolderID: 1,
+		Attachments: &[]utils.ExecutionAttachmentArg{
+			{ID: 42, FileName: "a.png", FileType: "image/png", FileSize: 10},
+		},
+	})
+
+	require.NoError(t, callErr)
+	require.NotNil(t, result)
+	require.False(t, result.IsError)
+
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal([]byte(<-reqCh), &payload))
+	manual, ok := payload["manualScenario"].(map[string]any)
+	require.True(t, ok, "manualScenario should be present in POST payload")
+	attachments, ok := manual["attachments"].([]any)
+	require.True(t, ok, "attachments should be present in manual scenario")
+	require.Len(t, attachments, 1)
+	att, ok := attachments[0].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "42", att["id"])
+}
+
+// TestCreateTestCaseTool_AttachmentsRejectedForStepsType verifies that the
+// scenario-level "attachments" field is rejected when test-case-type is "steps";
+// attachments must be provided per-step instead.
+func TestCreateTestCaseTool_AttachmentsRejectedForStepsType(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolCreateTestCase()
+
+	tcType := "steps"
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, CreateTestCaseArgs{
+		ProjectKey:   "test-project",
+		Name:         "TC",
+		TestFolderID: 1,
+		TestCaseType: &tcType,
+		Steps:        &[]utils.StepArg{{Instructions: "do thing"}},
+		Attachments: &[]utils.ExecutionAttachmentArg{
+			{ID: 1, FileName: "a.png", FileType: "image/png", FileSize: 1},
+		},
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), `attachments is only valid when test-case-type is "text"`)
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestCreateTestCaseTool_StepAttachmentsReachHTTP verifies that per-step
+// attachments are sent inside each step's own attachments array.
+func TestCreateTestCaseTool_StepAttachmentsReachHTTP(t *testing.T) {
+	ctx := context.Background()
+	reqCh := make(chan string, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rawBody, _ := io.ReadAll(r.Body)
+		reqCh <- string(rawBody)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":1,"name":"TC"}`))
+	}))
+	t.Cleanup(srv.Close)
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolCreateTestCase()
+
+	tcType := "steps"
+	result, _, callErr := handler(ctx, &mcp.CallToolRequest{}, CreateTestCaseArgs{
+		ProjectKey:   "test-project",
+		Name:         "TC",
+		TestFolderID: 1,
+		TestCaseType: &tcType,
+		Steps: &[]utils.StepArg{
+			{
+				Instructions: "open the page",
+				Attachments: []utils.ExecutionAttachmentArg{
+					{ID: 7, FileName: "screenshot.png", FileType: "image/png", FileSize: 5},
+				},
+			},
+		},
+	})
+
+	require.NoError(t, callErr)
+	require.NotNil(t, result)
+	require.False(t, result.IsError)
+
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal([]byte(<-reqCh), &payload))
+	manual, ok := payload["manualScenario"].(map[string]any)
+	require.True(t, ok, "manualScenario should be present in POST payload")
+	steps, ok := manual["steps"].([]any)
+	require.True(t, ok, "steps should be present in manual scenario")
+	require.Len(t, steps, 1)
+	step, ok := steps[0].(map[string]any)
+	require.True(t, ok)
+	attachments, ok := step["attachments"].([]any)
+	require.True(t, ok, "step attachments should be present")
+	require.Len(t, attachments, 1)
+	att, ok := attachments[0].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "7", att["id"])
+}
+
+// TestCreateTestCaseTool_PreconditionsAttachmentsReachHTTP verifies that
+// preconditions-attachments are only valid for "steps" and end up nested under
+// manualScenario.preconditions.attachments.
+func TestCreateTestCaseTool_PreconditionsAttachmentsReachHTTP(t *testing.T) {
+	ctx := context.Background()
+	reqCh := make(chan string, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rawBody, _ := io.ReadAll(r.Body)
+		reqCh <- string(rawBody)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":1,"name":"TC"}`))
+	}))
+	t.Cleanup(srv.Close)
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolCreateTestCase()
+
+	tcType := "steps"
+	preconditions := "log in first"
+	result, _, callErr := handler(ctx, &mcp.CallToolRequest{}, CreateTestCaseArgs{
+		ProjectKey:    "test-project",
+		Name:          "TC",
+		TestFolderID:  1,
+		TestCaseType:  &tcType,
+		Preconditions: &preconditions,
+		PreconditionsAttachments: &[]utils.ExecutionAttachmentArg{
+			{ID: 9, FileName: "setup.png", FileType: "image/png", FileSize: 3},
+		},
+		Steps: &[]utils.StepArg{{Instructions: "do thing"}},
+	})
+
+	require.NoError(t, callErr)
+	require.NotNil(t, result)
+	require.False(t, result.IsError)
+
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal([]byte(<-reqCh), &payload))
+	manual, ok := payload["manualScenario"].(map[string]any)
+	require.True(t, ok, "manualScenario should be present in POST payload")
+	pre, ok := manual["preconditions"].(map[string]any)
+	require.True(t, ok, "preconditions should be present in manual scenario")
+	attachments, ok := pre["attachments"].([]any)
+	require.True(t, ok, "preconditions attachments should be present")
+	require.Len(t, attachments, 1)
+}
+
+// TestCreateTestCaseTool_PreconditionsAttachmentsRejectedForTextType verifies
+// that preconditions-attachments is rejected for the "text" type, matching the
+// UI behavior where only "steps" scenarios support precondition attachments.
+func TestCreateTestCaseTool_PreconditionsAttachmentsRejectedForTextType(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolCreateTestCase()
+
+	preconditions := "log in first"
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, CreateTestCaseArgs{
+		ProjectKey:    "test-project",
+		Name:          "TC",
+		TestFolderID:  1,
+		Preconditions: &preconditions,
+		PreconditionsAttachments: &[]utils.ExecutionAttachmentArg{
+			{ID: 1, FileName: "a.png", FileType: "image/png", FileSize: 1},
+		},
+	})
+
+	require.Error(t, err)
+	require.Contains(
+		t,
+		err.Error(),
+		`preconditions-attachments is only valid when test-case-type is "steps"`,
+	)
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestCreateTestCaseTool_PreconditionsAttachmentsRequirePreconditions verifies
+// that preconditions-attachments without preconditions is rejected.
+func TestCreateTestCaseTool_PreconditionsAttachmentsRequirePreconditions(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolCreateTestCase()
+
+	tcType := "steps"
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, CreateTestCaseArgs{
+		ProjectKey:   "test-project",
+		Name:         "TC",
+		TestFolderID: 1,
+		TestCaseType: &tcType,
+		Steps:        &[]utils.StepArg{{Instructions: "do thing"}},
+		PreconditionsAttachments: &[]utils.ExecutionAttachmentArg{
+			{ID: 1, FileName: "a.png", FileType: "image/png", FileSize: 1},
+		},
+	})
+
+	require.Error(t, err)
+	require.Contains(
+		t,
+		err.Error(),
+		"preconditions-attachments requires preconditions to be provided",
+	)
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
+
+// TestCreateTestCaseTool_AttachmentContentUploadsThenLinks verifies that an
+// attachment supplied via base64 "content" is uploaded via
+// POST /project/{projectKey}/tms/attachment/upload first, and the id returned by
+// the upload is what gets linked to the test case's manual scenario.
+func TestCreateTestCaseTool_AttachmentContentUploadsThenLinks(t *testing.T) {
+	ctx := context.Background()
+	var uploadCalled bool
+	var createBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/tms/attachment/upload"):
+			uploadCalled = true
+			r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
+			parseErr := r.ParseMultipartForm(10 << 20) //nolint:gosec // capped by MaxBytesReader
+			require.NoError(t, parseErr)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(
+				[]byte(`{"id":555,"fileName":"a.png","fileType":"image/png","fileSize":4}`),
+			)
+		case r.Method == http.MethodPost:
+			createBody, _ = io.ReadAll(r.Body)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"id":1,"name":"TC"}`))
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolCreateTestCase()
+
+	content := base64.StdEncoding.EncodeToString([]byte("data"))
+	_, _, callErr := handler(ctx, &mcp.CallToolRequest{}, CreateTestCaseArgs{
+		ProjectKey:   "test-project",
+		Name:         "TC",
+		TestFolderID: 1,
+		Attachments: &[]utils.ExecutionAttachmentArg{
+			{FileName: "a.png", Content: content},
+		},
+	})
+
+	require.NoError(t, callErr)
+	require.True(t, uploadCalled, "attachment upload endpoint should have been called")
+
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(createBody, &payload))
+	manual, ok := payload["manualScenario"].(map[string]any)
+	require.True(t, ok, "manualScenario should be present in POST payload")
+	attachments, ok := manual["attachments"].([]any)
+	require.True(t, ok, "attachments should be present in manual scenario")
+	require.Len(t, attachments, 1)
+	att, ok := attachments[0].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "555", att["id"])
+}
+
+// TestUpdateTestCaseTool_EmptyPreconditionsAttachmentsClears verifies that an
+// explicit empty "preconditions-attachments" array is sent as "attachments": []
+// on the preconditions object (clearing any existing attachments), rather than
+// being silently dropped like an omitted field.
+func TestUpdateTestCaseTool_EmptyPreconditionsAttachmentsClears(t *testing.T) {
+	ctx := context.Background()
+	reqCh := make(chan string, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rawBody, _ := io.ReadAll(r.Body)
+		reqCh <- string(rawBody)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":1,"name":"TC"}`))
+	}))
+	t.Cleanup(srv.Close)
+	serverURL, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+	res := NewTMSResources(
+		gorp.NewClient(serverURL, gorp.WithApiKeyAuth(context.Background(), "")),
+		nil,
+		"",
+	)
+	_, handler := res.toolUpdateTestCase()
+
+	tcType := "steps"
+	preconditions := "log in first"
+	result, _, callErr := handler(ctx, &mcp.CallToolRequest{}, UpdateTestCaseArgs{
+		ProjectKey:               "test-project",
+		TestCaseID:               1,
+		TestCaseType:             &tcType,
+		Preconditions:            &preconditions,
+		PreconditionsAttachments: &[]utils.ExecutionAttachmentArg{},
+		Steps:                    &[]utils.StepArg{{Instructions: "do thing"}},
+	})
+
+	require.NoError(t, callErr)
+	require.NotNil(t, result)
+	require.False(t, result.IsError)
+
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal([]byte(<-reqCh), &payload))
+	manual, ok := payload["manualScenario"].(map[string]any)
+	require.True(t, ok, "manualScenario should be present in PATCH payload")
+	pre, ok := manual["preconditions"].(map[string]any)
+	require.True(t, ok, "preconditions should be present in manual scenario")
+	attachments, ok := pre["attachments"].([]any)
+	require.True(t, ok, "an explicit empty preconditions-attachments must still be sent to clear")
+	require.Empty(t, attachments)
+}
+
+// TestCreateTestCaseTool_AggregateAttachmentContentLimitEnforced verifies that
+// the combined decoded size of inline attachments across multiple steps is
+// checked against the shared 50 MiB budget, closing the bypass where each
+// step/precondition would otherwise reset its own per-call limit.
+func TestCreateTestCaseTool_AggregateAttachmentContentLimitEnforced(t *testing.T) {
+	ctx := context.Background()
+	res, requestCount := newTMSResourcesWithCounter(t)
+	_, handler := res.toolCreateTestCase()
+
+	// Two ~40 MiB attachments individually pass the per-attachment 50 MiB cap,
+	// but together exceed it.
+	chunk := make([]byte, 40*1024*1024)
+	content := base64.StdEncoding.EncodeToString(chunk)
+
+	tcType := "steps"
+	_, _, err := handler(ctx, &mcp.CallToolRequest{}, CreateTestCaseArgs{
+		ProjectKey:   "test-project",
+		Name:         "TC",
+		TestFolderID: 1,
+		TestCaseType: &tcType,
+		Steps: &[]utils.StepArg{
+			{
+				Instructions: "step one",
+				Attachments: []utils.ExecutionAttachmentArg{
+					{FileName: "a.bin", Content: content},
+				},
+			},
+			{
+				Instructions: "step two",
+				Attachments: []utils.ExecutionAttachmentArg{
+					{FileName: "b.bin", Content: content},
+				},
+			},
+		},
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "combined decoded size of inline attachments")
+	require.Zero(t, requestCount.Load(), "no HTTP request should be made when validation fails")
+}
